@@ -1,0 +1,15 @@
+FROM golang:1.23-alpine AS build
+WORKDIR /src
+COPY relay/go.mod relay/go.sum* ./
+RUN go mod download
+COPY relay/ ./
+RUN CGO_ENABLED=0 go build -o /oyabaun-relay ./cmd/oyabaun-relay
+
+FROM alpine:3.20
+RUN adduser -D -H app
+USER app
+WORKDIR /app
+COPY --from=build /oyabaun-relay /app/oyabaun-relay
+EXPOSE 8765
+ENV OYABAUN_RELAY_ADDR=:8765
+ENTRYPOINT ["/app/oyabaun-relay"]

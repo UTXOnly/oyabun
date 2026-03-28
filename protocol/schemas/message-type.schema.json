@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "oyabaun://message-type",
+  "title": "Oyabaun wire messages (legacy + reference)",
+  "description": "Primary transport uses NIP-01 WebSocket arrays: AUTH, EVENT, OK. Legacy typed JSON objects may appear only in logs or older docs.",
+  "oneOf": [
+    {
+      "type": "array",
+      "prefixItems": [
+        { "const": "AUTH" },
+        { "type": "string", "description": "Challenge nonce" }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    {
+      "type": "array",
+      "prefixItems": [
+        { "const": "EVENT" },
+        { "type": "object", "description": "NIP-01 signed event (client publish)" }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    {
+      "type": "array",
+      "prefixItems": [
+        { "const": "EVENT" },
+        { "type": "string", "description": "Subscription id" },
+        { "type": "object", "description": "NIP-01 signed event (relay push)" }
+      ],
+      "minItems": 3,
+      "maxItems": 3
+    },
+    {
+      "type": "array",
+      "prefixItems": [
+        { "const": "OK" },
+        { "type": "string", "description": "Event id hex" },
+        { "type": "boolean" },
+        { "type": "string" }
+      ],
+      "minItems": 4,
+      "maxItems": 4
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Legacy discriminator (deprecated on wire)"
+        },
+        "proto": { "type": "integer", "minimum": 1, "maximum": 1 }
+      }
+    }
+  ]
+}

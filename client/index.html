@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Oyabaun</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #050308; color: #c4b4a4; font-family: system-ui, sans-serif; }
+      #wrap {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        position: relative;
+        padding-bottom: 56px;
+        box-sizing: border-box;
+      }
+      header {
+        padding: 0.35rem 0.65rem;
+        border-bottom: 1px solid #3a1a28;
+        font-size: 0.68rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        background: linear-gradient(180deg, #140810 0%, #0a050c 100%);
+        z-index: 2;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      #hud { color: #e8c8b8; font-weight: 500; letter-spacing: 0.04em; }
+      #portrait {
+        width: 44px;
+        height: 44px;
+        flex-shrink: 0;
+        border-radius: 4px;
+        border: 1px solid #5a2840;
+        box-shadow: 0 0 12px rgba(180, 40, 80, 0.25);
+        background: #120810 center / cover no-repeat;
+        background-image: url("./reference.png");
+      }
+      #game-canvas {
+        flex: 1;
+        width: 100%;
+        display: block;
+        outline: none;
+        cursor: crosshair;
+        touch-action: none;
+      }
+      #game-canvas.request-pointer { cursor: pointer; }
+      #crosshair {
+        pointer-events: none;
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 14px;
+        height: 14px;
+        margin: -7px 0 0 -7px;
+        z-index: 3;
+        opacity: 0.88;
+      }
+      #crosshair::before, #crosshair::after {
+        content: "";
+        position: absolute;
+        background: rgba(220, 80, 70, 0.95);
+        box-shadow: 0 0 8px rgba(255, 40, 60, 0.4);
+      }
+      #crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
+      #crosshair::after { left: 0; top: 6px; width: 14px; height: 2px; }
+      #hint {
+        position: fixed;
+        bottom: 4rem;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.65rem;
+        color: #5a4860;
+        z-index: 2;
+        text-align: center;
+        max-width: 92vw;
+      }
+      body.locked #hint { opacity: 0.4; }
+      #doom-bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 4;
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        height: 56px;
+        background: linear-gradient(180deg, #2a1810 0%, #120a08 40%, #0a0605 100%);
+        border-top: 3px solid #5c3020;
+        box-shadow: 0 -4px 24px rgba(0,0,0,0.65);
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        font-size: 0.72rem;
+        color: #c8a888;
+        text-shadow: 1px 1px 0 #1a0a06;
+      }
+      #doom-bar #doom-face {
+        width: 52px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: repeating-linear-gradient(90deg, #3a2218 0 2px, #2a1810 2px 4px);
+        border-right: 2px solid #4a2820;
+        font-size: 1.35rem;
+        color: #8a6048;
+      }
+      #doom-bar #doom-stats {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 0 0.65rem;
+        min-width: 72px;
+        border-right: 2px solid #3a2218;
+      }
+      #doom-bar #doom-stats span.num { color: #e89868; font-weight: 700; }
+      #doom-slots {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        padding: 0 0.5rem;
+        flex-wrap: wrap;
+      }
+      #doom-slots .slot {
+        min-width: 2.6rem;
+        padding: 0.25rem 0.4rem;
+        background: #1a100c;
+        border: 2px solid #4a3028;
+        color: #8a7060;
+        cursor: default;
+        font: inherit;
+        letter-spacing: 0.06em;
+      }
+      #doom-slots .slot.active {
+        border-color: #c85838;
+        color: #f0c8a0;
+        background: #2a1814;
+        box-shadow: 0 0 10px rgba(200, 80, 50, 0.35);
+      }
+      #doom-ammo-wrap {
+        min-width: 120px;
+        padding: 0 0.75rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        border-left: 2px solid #3a2218;
+        background: #140c0a;
+      }
+      #doom-ammo-wrap .label { font-size: 0.58rem; color: #6a5048; letter-spacing: 0.12em; }
+      #doom-ammo-wrap #doom-ammo { color: #f0b070; font-weight: 700; font-size: 0.85rem; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <header>
+        <span style="display:flex;align-items:center;gap:0.5rem;">
+          <span id="portrait" title="Reference art"></span>
+          <span>Oyabaun — Nostr session · relay gameplay</span>
+        </span>
+        <span id="hud">…</span>
+      </header>
+      <canvas id="game-canvas" width="1280" height="720" tabindex="0" class="request-pointer"></canvas>
+    </div>
+    <div id="crosshair" hidden></div>
+    <div id="hint">Relay <code>ws://HOST:8765/ws</code> · <code>1–4</code> weapons · <code>Q</code>/<code>E</code> cycle · <code>R</code> reload</div>
+    <div id="doom-bar" aria-label="status">
+      <div id="doom-face">◉</div>
+      <div id="doom-stats">
+        <div><span class="num" id="doom-hp">100</span> HP</div>
+        <div><span class="num" id="doom-arm">0</span> ARM</div>
+      </div>
+      <div id="doom-slots">
+        <span class="slot" id="wslot-0">1 —</span>
+        <span class="slot" id="wslot-1">2 —</span>
+        <span class="slot" id="wslot-2">3 —</span>
+        <span class="slot" id="wslot-3">4 —</span>
+      </div>
+      <div id="doom-ammo-wrap">
+        <span class="label">AMMO</span>
+        <span id="doom-ammo">0 / 0</span>
+      </div>
+    </div>
+    <script type="module">
+      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js";
+
+      function relayWsUrl() {
+        const p = location.protocol === "https:" ? "wss" : "ws";
+        return `${p}://${location.hostname}:8765/ws`;
+      }
+
+      async function signRelayAuth(nonce) {
+        const ev = {
+          kind: 24550,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [["challenge", nonce]],
+          content: "",
+        };
+        return await window.nostr.signEvent(ev);
+      }
+
+      async function signRoomJoin(roomId) {
+        return await window.nostr.signEvent({
+          kind: 24551,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [["room", roomId]],
+          content: "{}",
+        });
+      }
+
+      async function loadSprite(app) {
+        const img = document.createElement("img");
+        img.crossOrigin = "anonymous";
+        img.src = "./reference.png";
+        await new Promise((res, rej) => {
+          img.onload = res;
+          img.onerror = rej;
+        });
+        app.upload_reference_sprite(img);
+      }
+
+      async function loadWeaponSprites(app) {
+        const files = ["pistol.png", "shotgun.png", "smg.png", "plasma.png"];
+        for (let i = 0; i < files.length; i++) {
+          try {
+            const img = document.createElement("img");
+            img.crossOrigin = "anonymous";
+            img.src = "./fpsweapons/" + files[i];
+            await new Promise((res, rej) => {
+              img.onload = res;
+              img.onerror = rej;
+            });
+            app.uploadWeaponSprite(i, img);
+          } catch (e) {
+            console.warn("fpsweapons/" + files[i], e);
+          }
+        }
+      }
+
+      async function loadArmsSprite(app) {
+        try {
+          const img = document.createElement("img");
+          img.crossOrigin = "anonymous";
+          img.src = "./fpsweapons/arms.png";
+          await new Promise((res, rej) => {
+            img.onload = res;
+            img.onerror = rej;
+          });
+          app.uploadArmsSprite(img);
+        } catch (e) {
+          console.warn("fpsweapons/arms.png", e);
+        }
+      }
+
+      async function loadBossSprite(app) {
+        try {
+          const img = document.createElement("img");
+          img.crossOrigin = "anonymous";
+          img.src = "./boss.png";
+          await new Promise((res, rej) => {
+            img.onload = res;
+            img.onerror = rej;
+          });
+          app.uploadBossSprite(img);
+        } catch (e) {
+          console.warn("boss.png", e);
+        }
+      }
+
+      function drainNet(ws, app) {
+        for (;;) {
+          const m = app.take_net_outbound();
+          if (!m) break;
+          let parsed;
+          try {
+            parsed = JSON.parse(m);
+          } catch {
+            if (ws.readyState === 1) ws.send(m);
+            continue;
+          }
+          if (parsed.unsigned_nostr_event && window.nostr) {
+            void (async () => {
+              try {
+                const s = await window.nostr.signEvent(parsed.unsigned_nostr_event);
+                if (ws.readyState === 1) ws.send(JSON.stringify(["EVENT", s]));
+              } catch (e) {
+                console.warn("signEvent input", e);
+              }
+            })();
+          } else if (ws.readyState === 1) {
+            ws.send(m);
+          }
+        }
+      }
+
+      async function main() {
+        await init();
+        const canvas = document.getElementById("game-canvas");
+        const hud = document.getElementById("hud");
+        const cross = document.getElementById("crosshair");
+        const app = await createOyabaunApp(canvas);
+
+        try {
+          await loadSprite(app);
+        } catch (e) {
+          console.warn("reference.png missing or blocked", e);
+        }
+        try {
+          await loadWeaponSprites(app);
+        } catch (e) {
+          console.warn("weapon sprites", e);
+        }
+        await loadArmsSprite(app);
+        await loadBossSprite(app);
+
+        const ws = new WebSocket(relayWsUrl());
+        let nostrAuthed = false;
+        ws.onopen = () => {
+          hud.textContent = "relay connected — sign challenge…";
+        };
+        ws.onerror = () => {
+          hud.textContent = "relay unreachable · run: python3 tools/oyabaunctl.py launch";
+        };
+        ws.onmessage = async (ev) => {
+          let m;
+          try {
+            m = JSON.parse(ev.data);
+          } catch {
+            return;
+          }
+          if (Array.isArray(m) && m[0] === "AUTH") {
+            if (!window.nostr) {
+              hud.textContent = "install Nostr extension (NIP-07) to play";
+              return;
+            }
+            try {
+              const signed = await signRelayAuth(m[1]);
+              ws.send(JSON.stringify(["EVENT", signed]));
+            } catch (e) {
+              hud.textContent = "sign failed · " + (e && e.message ? e.message : e);
+            }
+            return;
+          }
+          if (Array.isArray(m) && m[0] === "OK") {
+            if (m[2] === true && !nostrAuthed) {
+              nostrAuthed = true;
+              try {
+                const j = await signRoomJoin("default");
+                ws.send(JSON.stringify(["EVENT", j]));
+              } catch (e) {
+                hud.textContent = "join sign failed · " + (e && e.message ? e.message : e);
+              }
+            }
+            app.ingest_server_json(ev.data);
+            return;
+          }
+          app.ingest_server_json(ev.data);
+        };
+
+        const ro = new ResizeObserver(() => {
+          const r = canvas.getBoundingClientRect();
+          const w = Math.max(1, Math.floor(r.width * devicePixelRatio));
+          const h = Math.max(1, Math.floor(r.height * devicePixelRatio));
+          canvas.width = w;
+          canvas.height = h;
+          app.resize(w, h);
+        });
+        ro.observe(canvas);
+
+        canvas.addEventListener("click", () => {
+          if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+        });
+        document.addEventListener("pointerlockchange", () => {
+          const locked = document.pointerLockElement === canvas;
+          document.body.classList.toggle("locked", locked);
+          cross.hidden = !locked;
+          canvas.classList.toggle("request-pointer", !locked);
+        });
+        document.addEventListener("mousemove", (e) => {
+          if (document.pointerLockElement === canvas) app.mouse_accum(e.movementX, e.movementY);
+        });
+        canvas.addEventListener("mousedown", (e) => {
+          if (e.button === 0 && document.pointerLockElement === canvas) app.shoot_press();
+        });
+        window.addEventListener("keydown", (e) => {
+          if (e.repeat) return;
+          if (e.code === "Space" || e.code.startsWith("Arrow")) e.preventDefault();
+          app.key_set(e.code, true);
+        });
+        window.addEventListener("keyup", (e) => {
+          app.key_set(e.code, false);
+        });
+
+        function updateDoomBar(app) {
+          try {
+            const st = JSON.parse(app.hudBarJson());
+            document.getElementById("doom-hp").textContent = String(st.health);
+            document.getElementById("doom-arm").textContent = String(st.armor);
+            let cur = null;
+            for (let i = 0; i < st.weapons.length; i++) {
+              const w = st.weapons[i];
+              const el = document.getElementById("wslot-" + i);
+              if (el) {
+                el.textContent = (i + 1) + " " + w.name.slice(0, 4);
+                el.classList.toggle("active", w.active);
+              }
+              if (w.active) cur = w;
+            }
+            if (cur) {
+              document.getElementById("doom-ammo").textContent =
+                cur.clip + " / " + cur.reserve;
+            }
+            const face = document.getElementById("doom-face");
+            if (face) {
+              const h = st.health | 0;
+              if (h > 60) face.textContent = "◉";
+              else if (h > 30) face.textContent = "◎";
+              else if (h > 0) face.textContent = "◍";
+              else face.textContent = "☠";
+            }
+          } catch (_) {}
+        }
+
+        const loop = (t) => {
+          drainNet(ws, app);
+          app.tick(t);
+          app.render_frame();
+          hud.textContent = app.hud_text();
+          updateDoomBar(app);
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+      }
+      main().catch((e) => console.error(e));
+    </script>
+  </body>
+</html>

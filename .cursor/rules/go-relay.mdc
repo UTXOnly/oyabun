@@ -1,0 +1,15 @@
+---
+description: Oyabaun Go game relay — WebSocket hub, rooms, validation
+globs: relay/**/*.go
+alwaysApply: false
+---
+
+# Go relay (`relay/`)
+
+- **Transport**: WebSocket only; JSON messages matching `docs/PROTOCOL.md` (upgrade to binary later if needed).
+- **Structure**: `cmd/oyabaun-relay` (main), `internal/` for hub, room, session, auth verification, rate limits.
+- **Flow**: Verify Nostr auth event → issue session token → client sends `join` → room fanout. Validate movement/shooting server-side (speed caps, ray tests, cooldowns).
+- **Deps**: Stay on stdlib + `gorilla/websocket` (or equivalent single WebSocket dep). No full Nostr relay stack.
+- **Observability**: Log structured lines; leave hooks for metrics (counts, latency) without pulling heavy frameworks. **Gameplay log** (`OYABAUN_GAME_LOG`): persist lifecycle events plus **periodic `room_state`** snapshots (authoritative positions, yaw, health, score per player) for audit/replay—do not rely on clients as source of truth for history.
+
+Reject unknown message types. Rate-limit per connection and per pubkey.

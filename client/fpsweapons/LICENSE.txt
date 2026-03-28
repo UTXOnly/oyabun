@@ -1,0 +1,6 @@
+FPSWeapons.blend and related assets: Creative Commons Attribution-ShareAlike 3.0
+(CC BY-SA 3.0). See original license in your copy of the asset pack.
+
+Place exported first-person weapon PNGs here as:
+  pistol.png, shotgun.png, smg.png, plasma.png
+(Replace the bundled placeholders when you render from the .blend file.)

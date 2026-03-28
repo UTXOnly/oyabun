@@ -1,0 +1,7 @@
+/target
+**/target
+client/pkg
+relay/oyabaun-relay
+*.wasm
+.DS_Store
+.oyabaun/

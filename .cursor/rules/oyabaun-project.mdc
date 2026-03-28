@@ -1,0 +1,16 @@
+---
+description: Oyabaun monorepo — Nostr-native FPS stack, authority model, and scope
+alwaysApply: true
+---
+
+# Oyabaun project
+
+- **Stack**: Rust/WASM client (`client/`), specialized Go WebSocket relay (`relay/`), shared message contracts (`protocol/`). Docker Compose in `infra/`.
+- **Tone**: Dark neo-Tokyo / yakuza FPS; retro presentation, modern netcode split (authoritative server for hits/health/spawn; client prediction for local movement feel).
+- **Nostr**: Pubkey is long-term identity. Only **auth** uses signed Nostr events (or NIP-07 in browser). After verify, relay issues a **short-lived session token**. Gameplay messages carry token + room id, not per-frame signatures.
+- **Relay is the gameplay bus**: All realtime **client ↔ gameplay** communication goes through the **Oyabaun WebSocket relay** (join, snaps, input, events). Do **not** add alternate gameplay transports (P2P WebRTC, direct client sockets, or “side channels”) for match state unless explicitly scoped as a separate experiment. Nostr remains identity/auth and optional out-of-band signaling—not the authoritative tick stream.
+- **Do not** bolt on a generic Nostr relay; keep the Go server minimal and game-specific.
+- **Persistence**: Prefer in-memory relay state for MVP; add Postgres only if a feature truly needs it.
+- **Changes**: Minimal diffs, match existing style, no drive-by refactors or unsolicited markdown files.
+
+When changing wire format, update `docs/PROTOCOL.md` and keep client/relay parsers in sync.
