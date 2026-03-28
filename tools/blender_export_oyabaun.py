@@ -1,4 +1,9 @@
 """
+Legacy vertex-color JSON for Oyabaun (fallback when no `tokyo_alley.glb`).
+
+**Preferred art path:** export **glTF Binary (.glb)** from Blender to
+`client/levels/tokyo_alley.glb` (embedded textures, Y-up). See `docs/BLENDER_GLTF.md`.
+
 Run inside Blender: Text Editor > Run Script, or:
   blender your_scene.blend --background --python tools/blender_export_oyabaun.py
 

@@ -115,6 +115,47 @@ fn fs_main(i: Vout) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Textured world: albedo × tint, **posterized** in fragment; sampler is nearest (non-filterable).
+const SHADER_WORLD_TEX: &str = r#"
+struct Globals {
+  view_proj: mat4x4<f32>,
+  cam_pos: vec4<f32>,
+  fog_color: vec4<f32>,
+  fog_params: vec4<f32>,
+  _pad: vec4<f32>,
+  _pad2: vec4<f32>,
+}
+@group(0) @binding(0) var<uniform> g: Globals;
+struct MatU { tint: vec4<f32>, }
+@group(1) @binding(0) var albedo: texture_2d<f32>;
+@group(1) @binding(1) var albedo_samp: sampler;
+@group(1) @binding(2) var<uniform> mu: MatU;
+
+struct Vin { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, };
+struct Vout {
+  @builtin(position) clip: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+  @location(1) world_pos: vec3<f32>,
+};
+@vertex
+fn vs_tex(v: Vin) -> Vout {
+    var o: Vout;
+    o.world_pos = v.pos;
+    o.clip = g.view_proj * vec4<f32>(v.pos, 1.0);
+    o.uv = v.uv;
+    return o;
+}
+@fragment
+fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
+    let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
+    let q = floor(t.rgb * 15.0) / 15.0;
+    let dist = length(i.world_pos - g.cam_pos.xyz);
+    let fog_amt = 1.0 - exp(-dist * g.fog_params.x);
+    let fc = g.fog_color.rgb;
+    return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), t.a);
+}
+"#;
+
 const SHADER_BILL: &str = r#"
 struct Globals {
   view_proj: mat4x4<f32>,
@@ -275,6 +316,41 @@ fn fs_hud_arms(i: HOut) -> @location(0) vec4<f32> {
 
 const WEAPON_BG_LABELS: [&str; 4] = ["weapon-0", "weapon-1", "weapon-2", "weapon-3"];
 
+struct WorldBatchGpu {
+    first_index: u32,
+    index_count: u32,
+    bind_group: wgpu::BindGroup,
+}
+
+enum WorldRaster {
+    Flat {
+        pipeline: wgpu::RenderPipeline,
+        vb: wgpu::Buffer,
+        ib: wgpu::Buffer,
+        index_count: u32,
+    },
+    Textured {
+        pipeline: wgpu::RenderPipeline,
+        #[allow(dead_code)]
+        material_layout: wgpu::BindGroupLayout,
+        #[allow(dead_code)]
+        nearest_sampler: wgpu::Sampler,
+        vb: wgpu::Buffer,
+        ib: wgpu::Buffer,
+        batches: Vec<WorldBatchGpu>,
+        #[allow(dead_code)]
+        textures: Vec<wgpu::Texture>,
+        #[allow(dead_code)]
+        tint_buffers: Vec<wgpu::Buffer>,
+    },
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct MatTintUniform {
+    tint: [f32; 4],
+}
+
 pub struct WeaponHudParams {
     pub weapon_id: u32,
     pub bob: f32,
@@ -288,10 +364,7 @@ pub struct Gpu {
     pub config: wgpu::SurfaceConfiguration,
     depth: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    world_pipeline: wgpu::RenderPipeline,
-    vb: wgpu::Buffer,
-    ib: wgpu::Buffer,
-    index_count: u32,
+    world: WorldRaster,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     bill_pipeline: wgpu::RenderPipeline,
@@ -328,7 +401,12 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    pub async fn new(canvas: HtmlCanvasElement, vertices: &[Vertex], indices: &[u32]) -> Result<Self, wasm_bindgen::JsValue> {
+    pub async fn new(
+        canvas: HtmlCanvasElement,
+        flat_vertices: &[Vertex],
+        flat_indices: &[u32],
+        gltf_level: Option<crate::gltf_level::GltfLevelCpu>,
+    ) -> Result<Self, wasm_bindgen::JsValue> {
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
 
@@ -409,62 +487,14 @@ impl Gpu {
             }],
         });
 
-        let shader_world = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("world"),
-            source: wgpu::ShaderSource::Wgsl(SHADER_WORLD.into()),
-        });
-
-        let world_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pl-world"),
-            bind_group_layouts: &[&bind_layout],
-            push_constant_ranges: &[],
-        });
-
-        let world_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("world"),
-            layout: Some(&world_layout),
-            vertex: wgpu::VertexState {
-                module: &shader_world,
-                entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader_world,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
-
-        let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vb"),
-            contents: bytemuck::cast_slice(vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ib"),
-            contents: bytemuck::cast_slice(indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let world = if let Some(cpu) = gltf_level {
+            if cpu.vertices.is_empty() {
+                return Err(wasm_bindgen::JsValue::from_str("glTF level has no vertices"));
+            }
+            Self::raster_from_gltf(&device, &queue, format, &bind_layout, cpu)?
+        } else {
+            Self::raster_flat(&device, format, &bind_layout, flat_vertices, flat_indices)?
+        };
 
         let (bill_tex, bill_view) = make_placeholder_sprite(&device, &queue, 4, 4);
         let bill_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -833,10 +863,7 @@ impl Gpu {
             config,
             depth,
             depth_view,
-            world_pipeline,
-            vb,
-            ib,
-            index_count: indices.len() as u32,
+            world,
             uniform,
             bind_group,
             bill_pipeline,
@@ -870,6 +897,318 @@ impl Gpu {
             rival_ready: false,
             rival_vb,
             rival_ib,
+        })
+    }
+
+    fn raster_flat(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        globals_layout: &wgpu::BindGroupLayout,
+        vertices: &[Vertex],
+        indices: &[u32],
+    ) -> Result<WorldRaster, wasm_bindgen::JsValue> {
+        let shader_world = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("world-flat"),
+            source: wgpu::ShaderSource::Wgsl(SHADER_WORLD.into()),
+        });
+        let world_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-world-flat"),
+            bind_group_layouts: &[globals_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("world-flat"),
+            layout: Some(&world_layout),
+            vertex: wgpu::VertexState {
+                module: &shader_world,
+                entry_point: Some("vs_main"),
+                buffers: &[Vertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader_world,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vb-flat"),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ib-flat"),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        Ok(WorldRaster::Flat {
+            pipeline,
+            vb,
+            ib,
+            index_count: indices.len() as u32,
+        })
+    }
+
+    fn raster_from_gltf(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        globals_layout: &wgpu::BindGroupLayout,
+        cpu: crate::gltf_level::GltfLevelCpu,
+    ) -> Result<WorldRaster, wasm_bindgen::JsValue> {
+        use crate::gltf_level::WorldVertex;
+
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("world-nearest"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("world-mat"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: std::num::NonZeroU64::new(16),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let world_tex_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-world-tex"),
+            bind_group_layouts: &[globals_layout, &material_layout],
+            push_constant_ranges: &[],
+        });
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("world-tex"),
+            source: wgpu::ShaderSource::Wgsl(SHADER_WORLD_TEX.into()),
+        });
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("world-tex"),
+            layout: Some(&world_tex_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_tex"),
+                buffers: &[WorldVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_tex"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vb-gltf"),
+            contents: bytemuck::cast_slice(&cpu.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ib-gltf"),
+            contents: bytemuck::cast_slice(&cpu.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let mut textures: Vec<wgpu::Texture> = Vec::new();
+        let mut views: Vec<wgpu::TextureView> = Vec::new();
+        for (wi, (w, h, rgba)) in cpu.images_rgba8.iter().enumerate() {
+            let width = (*w).max(1);
+            let height = (*h).max(1);
+            if width > 4096 || height > 4096 {
+                return Err(wasm_bindgen::JsValue::from_str(&format!(
+                    "glTF image {} exceeds 4096 (got {}×{})",
+                    wi, width, height
+                )));
+            }
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!("gltf-img-{wi}")),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                rgba.as_slice(),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * width),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            views.push(tex.create_view(&wgpu::TextureViewDescriptor::default()));
+            textures.push(tex);
+        }
+
+        let white_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("gltf-white"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &white_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255, 255, 255],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let white_view = white_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        textures.push(white_tex);
+
+        let mut batches = Vec::with_capacity(cpu.batches.len());
+        let mut tint_buffers = Vec::with_capacity(cpu.batches.len());
+        for b in &cpu.batches {
+            let view_ref: &wgpu::TextureView = if b.image_index < views.len() {
+                &views[b.image_index]
+            } else {
+                &white_view
+            };
+            let tint = MatTintUniform { tint: b.tint };
+            let tint_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gltf-tint"),
+                contents: bytemuck::bytes_of(&tint),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("gltf-mat-bg"),
+                layout: &material_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view_ref),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&nearest_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: tint_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            tint_buffers.push(tint_buf);
+            batches.push(WorldBatchGpu {
+                first_index: b.first_index,
+                index_count: b.index_count,
+                bind_group,
+            });
+        }
+
+        Ok(WorldRaster::Textured {
+            pipeline,
+            material_layout,
+            nearest_sampler,
+            vb,
+            ib,
+            batches,
+            textures,
+            tint_buffers,
         })
     }
 
@@ -1420,11 +1759,37 @@ impl Gpu {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(&self.world_pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vb.slice(..));
-            pass.set_index_buffer(self.ib.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..self.index_count, 0, 0..1);
+            match &self.world {
+                WorldRaster::Flat {
+                    pipeline,
+                    vb,
+                    ib,
+                    index_count,
+                } => {
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_vertex_buffer(0, vb.slice(..));
+                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..*index_count, 0, 0..1);
+                }
+                WorldRaster::Textured {
+                    pipeline,
+                    vb,
+                    ib,
+                    batches,
+                    ..
+                } => {
+                    pass.set_pipeline(pipeline);
+                    pass.set_vertex_buffer(0, vb.slice(..));
+                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                    for b in batches {
+                        pass.set_bind_group(0, &self.bind_group, &[]);
+                        pass.set_bind_group(1, &b.bind_group, &[]);
+                        let end = b.first_index.saturating_add(b.index_count);
+                        pass.draw_indexed(b.first_index..end, 0, 0..1);
+                    }
+                }
+            }
 
             if self.sprite_ready && !bill_cpu.is_empty() {
                 let vcount = bill_cpu.len() as u32;

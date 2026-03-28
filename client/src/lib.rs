@@ -6,6 +6,7 @@ use web_sys::HtmlCanvasElement;
 
 mod boss;
 mod game;
+mod gltf_level;
 mod input;
 mod loadout;
 mod mesh;
@@ -38,25 +39,78 @@ async fn fetch_level_json(url: &str) -> Option<String> {
     text_v.as_string()
 }
 
-async fn initial_arena_and_spawn() -> LevelBoot {
+#[cfg(target_arch = "wasm32")]
+async fn fetch_bytes(url: &str) -> Option<Vec<u8>> {
+    let window = web_sys::window()?;
+    let v = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+        .await
+        .ok()?;
+    let resp: web_sys::Response = v.dyn_into().ok()?;
+    if !resp.ok() {
+        return None;
+    }
+    let buf = wasm_bindgen_futures::JsFuture::from(resp.array_buffer().ok()?).await.ok()?;
+    let arr = js_sys::Uint8Array::new(&buf);
+    let mut out = vec![0u8; arr.length() as usize];
+    arr.copy_to(&mut out);
+    Some(out)
+}
+
+struct GameInit {
+    boot: LevelBoot,
+    gltf: Option<gltf_level::GltfLevelCpu>,
+}
+
+async fn load_game_init() -> GameInit {
     #[cfg(target_arch = "wasm32")]
-    if let Some(json) = fetch_level_json("./levels/tokyo_street.json").await {
-        if let Ok(boot) = arena_from_level_json(&json) {
-            return boot;
+    {
+        if let Some(bytes) = fetch_bytes("./levels/tokyo_alley.glb").await {
+            if let Ok(cpu) = gltf_level::parse_glb(&bytes) {
+                let bounds = cpu.bounds();
+                let spawn = cpu.spawn;
+                let yaw = cpu.spawn_yaw;
+                let (boss, rival) = mesh::npc_placements(spawn, yaw);
+                let mural_z = mesh::mural_z_plane(&bounds, spawn);
+                let mut arena = mesh::empty_arena();
+                arena.solids = cpu.solids.clone();
+                return GameInit {
+                    boot: LevelBoot {
+                        arena,
+                        spawn,
+                        boss_foot: boss,
+                        rival_foot: rival,
+                        spawn_yaw: yaw,
+                        level_bounds: bounds,
+                        mural_z,
+                    },
+                    gltf: Some(cpu),
+                };
+            }
+        }
+        if let Some(json) = fetch_level_json("./levels/tokyo_street.json").await {
+            if let Ok(boot) = arena_from_level_json(&json) {
+                return GameInit {
+                    boot,
+                    gltf: None,
+                };
+            }
         }
     }
     let arena = build_arena();
     let level_bounds = vertex_bounds(&arena);
     let spawn = Vec3::new(0.0, 0.0, 9.0);
     let mural_z = mural_z_plane(&level_bounds, spawn);
-    LevelBoot {
-        spawn,
-        boss_foot: BossState::new().foot(),
-        rival_foot: RivalState::new().foot(),
-        spawn_yaw: 0.0,
-        level_bounds,
-        mural_z,
-        arena,
+    GameInit {
+        boot: LevelBoot {
+            spawn,
+            boss_foot: BossState::new().foot(),
+            rival_foot: RivalState::new().foot(),
+            spawn_yaw: 0.0,
+            level_bounds,
+            mural_z,
+            arena,
+        },
+        gltf: None,
     }
 }
 
@@ -284,9 +338,16 @@ impl OyabaunApp {
 #[wasm_bindgen(js_name = createOyabaunApp)]
 pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp, JsValue> {
     console_error_panic_hook::set_once();
-    let boot = initial_arena_and_spawn().await;
+    let gi = load_game_init().await;
+    let boot = gi.boot;
     let solids = boot.arena.solids.clone();
-    let gpu = Gpu::new(canvas, &boot.arena.vertices, &boot.arena.indices).await?;
+    let gpu = Gpu::new(
+        canvas,
+        &boot.arena.vertices,
+        &boot.arena.indices,
+        gi.gltf,
+    )
+    .await?;
     let game = GameState::new(boot.spawn, solids, boot.spawn_yaw);
     let mut net = NetController::new();
     net.status = String::from("open page — WebSocket + Nostr extension");

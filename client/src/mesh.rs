@@ -79,7 +79,7 @@ pub fn mural_z_plane(bounds: &Aabb, spawn: Vec3) -> f32 {
     }
 }
 
-fn npc_placements(spawn: Vec3, yaw: f32) -> (Vec3, Vec3) {
+pub fn npc_placements(spawn: Vec3, yaw: f32) -> (Vec3, Vec3) {
     let sx = yaw.sin();
     let sz = yaw.cos();
     let fwd = Vec3::new(sx, 0.0, -sz);
@@ -146,6 +146,14 @@ pub struct Arena {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub solids: Vec<Aabb>,
+}
+
+pub fn empty_arena() -> Arena {
+    Arena {
+        vertices: Vec::new(),
+        indices: Vec::new(),
+        solids: Vec::new(),
+    }
 }
 
 fn push_quad(
