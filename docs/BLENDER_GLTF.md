@@ -30,6 +30,10 @@ Writes **`client/levels/tokyo_alley.glb`** (and by default also **`tokyo_street.
 | **`OyabaunCollider` / `Collider`** in node name | Mesh used only for **axis-aligned collision** bounds (per primitive). |
 | Visual meshes | Any other names; rendered with textures. |
 
+### NPCs (PixelLab / sprites, not GLB bodies)
+
+Boss, rival, and other players are **camera-facing billboards** in the Rust client (`upload_boss_sprite`, `upload_rival_sprite`, `upload_reference_sprite`), not characters modeled in the `.glb`. The glTF export script **removes** nodes named **`Boss_*`**, **`Rival_*`**, and **`ACBody*`** (legacy blocky placeholders) before writing `tokyo_alley.glb`, then saves the `.blend` so the scene stays in sync. To keep those meshes for blocking in Blender, set **`OYABAUN_KEEP_PLACEHOLDER_NPCS=1`** when running export.
+
 If no collider nodes exist, collision falls back to a single AABB around the whole visible mesh (coarse).
 
 ## JSON export (legacy)
