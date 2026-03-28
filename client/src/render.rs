@@ -148,7 +148,12 @@ fn vs_tex(v: Vin) -> Vout {
 @fragment
 fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
     let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
-    let q = floor(t.rgb * 15.0) / 15.0;
+    // Fake ambient: height-gradient fill simulates sky + bounced light
+    // in an unlit shader where Blender materials are tuned for Eevee
+    let h_norm = clamp((i.world_pos.y + 1.0) / 14.0, 0.0, 1.0);
+    let ambient = vec3<f32>(0.06, 0.05, 0.08) + h_norm * vec3<f32>(0.04, 0.03, 0.02);
+    let lit = t.rgb + ambient;
+    let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 15.0) / 15.0;
     let dist = length(i.world_pos - g.cam_pos.xyz);
     let fog_amt = 1.0 - exp(-dist * g.fog_params.x);
     let fc = g.fog_color.rgb;

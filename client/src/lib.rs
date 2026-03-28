@@ -68,6 +68,8 @@ struct GameInit {
     boot: LevelBoot,
     gltf: Option<gltf_level::GltfLevelCpu>,
     level_label: String,
+    vert_count: usize,
+    batch_count: usize,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -121,6 +123,8 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
         bounds.min.y,
         bounds.max.y
     ));
+    let vert_count = cpu.vertices.len();
+    let batch_count = cpu.batches.len();
     GameInit {
         boot: LevelBoot {
             arena,
@@ -133,6 +137,8 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
         },
         gltf: Some(cpu),
         level_label: String::from("glTF tokyo_alley"),
+        vert_count,
+        batch_count,
     }
 }
 
@@ -179,10 +185,13 @@ async fn load_game_init() -> GameInit {
 
         if let Some(json) = fetch_level_json("./levels/tokyo_street.json").await {
             if let Ok(boot) = arena_from_level_json(&json) {
+                let vc = boot.arena.vertices.len();
                 return GameInit {
                     boot,
                     gltf: None,
                     level_label: String::from("vertex JSON"),
+                    vert_count: vc,
+                    batch_count: 1,
                 };
             }
         }
@@ -207,6 +216,8 @@ async fn load_game_init() -> GameInit {
         },
         gltf: None,
         level_label: String::from("procedural demo"),
+        vert_count: 0,
+        batch_count: 0,
     }
 }
 
@@ -224,6 +235,8 @@ pub struct OyabaunApp {
     level_bounds: mesh::Aabb,
     mural_z: f32,
     level_label: String,
+    vert_count: usize,
+    batch_count: usize,
 }
 
 #[wasm_bindgen]
@@ -247,6 +260,20 @@ impl OyabaunApp {
 
     pub fn take_net_outbound(&mut self) -> Option<String> {
         self.net.take_outbound()
+    }
+
+    #[wasm_bindgen(js_name = bootDebugJson)]
+    pub fn boot_debug_json(&self) -> String {
+        json!({
+            "level_label": self.level_label,
+            "vert_count": self.vert_count,
+            "batch_count": self.batch_count,
+            "bounds_min": [self.level_bounds.min.x, self.level_bounds.min.y, self.level_bounds.min.z],
+            "bounds_max": [self.level_bounds.max.x, self.level_bounds.max.y, self.level_bounds.max.z],
+            "spawn": [self.game.pos.x, self.game.pos.y, self.game.pos.z],
+            "mural_z": self.mural_z,
+        })
+        .to_string()
     }
 
     pub fn hud_text(&self) -> String {
@@ -468,5 +495,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         level_bounds: boot.level_bounds,
         mural_z: boot.mural_z,
         level_label: gi.level_label,
+        vert_count: gi.vert_count,
+        batch_count: gi.batch_count,
     })
 }

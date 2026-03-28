@@ -320,6 +320,11 @@
         const app = await createOyabaunApp(canvas);
 
         try {
+          const dbg = JSON.parse(app.bootDebugJson());
+          console.info("oyabaun boot:", dbg);
+        } catch (_) {}
+
+        try {
           await loadSprite(app);
         } catch (e) {
           console.warn("reference.png missing or blocked", e);

@@ -161,8 +161,15 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
     });
     let spawn_yaw = default_spawn_yaw(&bounds, spawn_pt);
 
+    // When no explicit collision meshes exist, create a walkable floor
+    // slab instead of the full bounds AABB.  Using the full bounds would
+    // make the entire level interior a collision solid and the movement
+    // code would push the player outside the map.
     let solids = if collision_boxes.is_empty() {
-        vec![bounds]
+        vec![Aabb {
+            min: Vec3::new(bounds.min.x - 2.0, bounds.min.y - 0.25, bounds.min.z - 2.0),
+            max: Vec3::new(bounds.max.x + 2.0, bounds.min.y + 0.12, bounds.max.z + 2.0),
+        }]
     } else {
         collision_boxes
     };
@@ -243,11 +250,34 @@ fn visit_node(
         for prim in mesh.primitives() {
             let mat = prim.material();
             let pbr = mat.pbr_metallic_roughness();
-            let tint: [f32; 4] = pbr.base_color_factor();
+            let raw_tint: [f32; 4] = pbr.base_color_factor();
+            let emissive = mat.emissive_factor();
             let (image_index, uv_set) = pbr
                 .base_color_texture()
                 .map(|info| (info.texture().source().index(), info.tex_coord()))
                 .unwrap_or((usize::MAX, 0u32));
+            // For factor-only materials (no texture):
+            //  - Use emissive color when baseColor is black (Blender sign
+            //    materials use emission only).
+            //  - Otherwise boost dark base colors: unlit shader has no
+            //    lighting so Eevee-tuned values look nearly invisible.
+            let tint = if image_index == usize::MAX {
+                let base_lum = raw_tint[0] + raw_tint[1] + raw_tint[2];
+                let emit_lum = emissive[0] + emissive[1] + emissive[2];
+                if base_lum < 0.01 && emit_lum > 0.01 {
+                    // Emissive-only material (signs, neon lettering)
+                    [emissive[0], emissive[1], emissive[2], raw_tint[3]]
+                } else {
+                    // Boost dim base colors for unlit rendering
+                    let boost = 2.8_f32;
+                    let r = (raw_tint[0] * boost + emissive[0]).min(1.0);
+                    let g = (raw_tint[1] * boost + emissive[1]).min(1.0);
+                    let b = (raw_tint[2] * boost + emissive[2]).min(1.0);
+                    [r, g, b, raw_tint[3]]
+                }
+            } else {
+                raw_tint
+            };
 
             let r_pos = prim.reader(|b| Some(&buffers[b.index()]));
             let Some(iter_pos) = r_pos.read_positions() else {
