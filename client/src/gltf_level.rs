@@ -256,23 +256,18 @@ fn visit_node(
                 .base_color_texture()
                 .map(|info| (info.texture().source().index(), info.tex_coord()))
                 .unwrap_or((usize::MAX, 0u32));
-            // For factor-only materials (no texture):
-            //  - Use emissive color when baseColor is black (Blender sign
-            //    materials use emission only).
-            //  - Otherwise boost dark base colors: unlit shader has no
-            //    lighting so Eevee-tuned values look nearly invisible.
+            // For factor-only materials (no texture): use emissive color
+            // when baseColor is near-black (Blender emission-only materials).
+            // Also add emissive contribution to base color.
             let tint = if image_index == usize::MAX {
                 let base_lum = raw_tint[0] + raw_tint[1] + raw_tint[2];
                 let emit_lum = emissive[0] + emissive[1] + emissive[2];
                 if base_lum < 0.01 && emit_lum > 0.01 {
-                    // Emissive-only material (signs, neon lettering)
                     [emissive[0], emissive[1], emissive[2], raw_tint[3]]
                 } else {
-                    // Boost dim base colors for unlit rendering
-                    let boost = 2.8_f32;
-                    let r = (raw_tint[0] * boost + emissive[0]).min(1.0);
-                    let g = (raw_tint[1] * boost + emissive[1]).min(1.0);
-                    let b = (raw_tint[2] * boost + emissive[2]).min(1.0);
+                    let r = (raw_tint[0] + emissive[0]).min(1.0);
+                    let g = (raw_tint[1] + emissive[1]).min(1.0);
+                    let b = (raw_tint[2] + emissive[2]).min(1.0);
                     [r, g, b, raw_tint[3]]
                 }
             } else {
