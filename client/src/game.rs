@@ -56,6 +56,11 @@ impl GameState {
         top + 0.05
     }
 
+    /// Walkable height under `(x, z)` from collision solids (for NPC / remote player feet).
+    pub fn ground_y_at(&self, x: f32, z: f32) -> f32 {
+        self.feet_y_on_solids(x, z)
+    }
+
     pub fn set_online(&mut self, v: bool) {
         self.online = v;
     }

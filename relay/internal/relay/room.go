@@ -68,7 +68,7 @@ func (r *Room) AddPlayer(s *session) int {
 		ID:     id,
 		Pubkey: s.pubkey,
 		X:      sp[0],
-		Y:      0,
+		Y:      1.0, // glTF alley feet ~ +1 Y; client still snaps to floor under XZ for draw
 		Z:      sp[1],
 		Yaw:    0,
 		Health: 100,
@@ -86,7 +86,7 @@ func (r *Room) RemovePlayer(id int) {
 
 func (r *Room) respawn(p *Player) {
 	sp := spawnXZ[(p.ID-1)%len(spawnXZ)]
-	p.X, p.Y, p.Z = sp[0], 0, sp[1]
+	p.X, p.Y, p.Z = sp[0], 1.0, sp[1]
 	p.Health = 100
 	p.Yaw = 0
 }

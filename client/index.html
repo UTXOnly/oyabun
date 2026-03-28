@@ -319,8 +319,9 @@
         const cross = document.getElementById("crosshair");
         const app = await createOyabaunApp(canvas);
 
+        let dbg = {};
         try {
-          const dbg = JSON.parse(app.bootDebugJson());
+          dbg = JSON.parse(app.bootDebugJson());
           console.info("oyabaun boot:", dbg);
         } catch (_) {}
 
@@ -329,16 +330,19 @@
         } catch (e) {
           console.warn("reference.png missing or blocked", e);
         }
-        // Procedural weapon rendering — no sprite loading needed
-        // try {
-        //   await loadWeaponSprites(app);
-        // } catch (e) {
-        //   console.warn("weapon sprites", e);
-        // }
-        // await loadArmsSprite(app);
-        // 3D character models are in the GLB now — billboard posters removed
-        // await loadBossSprite(app);
-        // await loadRivalSprite(app);
+        try {
+          await loadWeaponSprites(app);
+        } catch (e) {
+          console.warn("weapon sprites", e);
+        }
+        if (!dbg.characters_3d_loaded) {
+          try {
+            await loadBossSprite(app);
+            await loadRivalSprite(app);
+          } catch (e) {
+            console.warn("boss/rival billboard fallback", e);
+          }
+        }
 
         const ws = new WebSocket(relayWsUrl());
         let nostrAuthed = false;

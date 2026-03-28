@@ -274,6 +274,8 @@ impl OyabaunApp {
 
     #[wasm_bindgen(js_name = bootDebugJson)]
     pub fn boot_debug_json(&self) -> String {
+        let bf = self.boss.foot();
+        let rf = self.rival.foot();
         json!({
             "level_label": self.level_label,
             "vert_count": self.vert_count,
@@ -282,6 +284,11 @@ impl OyabaunApp {
             "bounds_max": [self.level_bounds.max.x, self.level_bounds.max.y, self.level_bounds.max.z],
             "spawn": [self.game.pos.x, self.game.pos.y, self.game.pos.z],
             "mural_z": self.mural_z,
+            "characters_3d_loaded": self.gpu.characters_loaded(),
+            "boss_foot": [bf.x, bf.y, bf.z],
+            "rival_foot": [rf.x, rf.y, rf.z],
+            "boss_alive": self.boss.alive(),
+            "rival_alive": self.rival.alive(),
         })
         .to_string()
     }
@@ -419,23 +426,26 @@ impl OyabaunApp {
         let mut bills: Vec<(Vec3, f32)> = Vec::new();
         let mut character_models: Vec<Mat4> = Vec::new();
         let you = self.net.entity_id;
-        let gy = self.level_bounds.min.y + 0.02;
         let use_mesh_chars = self.gpu.characters_loaded();
         if use_mesh_chars {
             if self.boss.alive() {
                 let f = self.boss.foot();
+                let gy = self.game.ground_y_at(f.x, f.z);
+                let foot_y = f.y.max(gy);
                 let y = yaw_face_cam_xz(Vec3::new(f.x, 0.0, f.z), Vec3::new(cam.x, 0.0, cam.z));
                 character_models.push(character_model(
-                    Vec3::new(f.x, f.y.max(gy), f.z),
+                    Vec3::new(f.x, foot_y, f.z),
                     y,
                     0.72 * self.boss.scale(),
                 ));
             }
             if self.rival.alive() {
                 let f = self.rival.foot();
+                let gy = self.game.ground_y_at(f.x, f.z);
+                let foot_y = f.y.max(gy);
                 let y = yaw_face_cam_xz(Vec3::new(f.x, 0.0, f.z), Vec3::new(cam.x, 0.0, cam.z));
                 character_models.push(character_model(
-                    Vec3::new(f.x, f.y.max(gy), f.z),
+                    Vec3::new(f.x, foot_y, f.z),
                     y,
                     0.68 * self.rival.scale(),
                 ));
@@ -448,21 +458,34 @@ impl OyabaunApp {
                     if Some(p.id) == you {
                         continue;
                     }
+                    let gy = self.game.ground_y_at(p.x, p.z);
+                    let foot_y = (p.y as f32).max(gy);
                     let sc = 0.66 + (p.id % 3) as f32 * 0.04;
                     character_models.push(character_model(
-                        Vec3::new(p.x, p.y.max(gy), p.z),
+                        Vec3::new(p.x, foot_y, p.z),
                         p.yaw,
                         sc,
                     ));
                 }
             } else {
                 let t = self.last_ms as f32 * 0.0007;
-                for &(x, z, ph) in &[
-                    (5.5f32, -5.0f32, 0.0f32),
-                    (-6.0f32, 3.5f32, 1.2f32),
-                    (-2.0f32, -8.0f32, 2.4f32),
-                ] {
-                    character_models.push(character_model(Vec3::new(x, gy, z), t + ph, 0.88));
+                let base = self.game.pos;
+                let yaw = self.game.yaw;
+                let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
+                let right = Vec3::new(-yaw.cos(), 0.0, -yaw.sin());
+                let spots = [
+                    base + fwd * 5.0 + right * 2.0,
+                    base + fwd * 8.0,
+                    base + fwd * 4.5 - right * 2.5,
+                ];
+                for (i, pos) in spots.iter().enumerate() {
+                    let gy = self.game.ground_y_at(pos.x, pos.z);
+                    let ph = i as f32 * 1.2;
+                    character_models.push(character_model(
+                        Vec3::new(pos.x, gy, pos.z),
+                        t + ph,
+                        0.88,
+                    ));
                 }
             }
         } else if self.net.joined {
@@ -471,7 +494,8 @@ impl OyabaunApp {
                 let cy = self.game.yaw.cos();
                 let bx = self.game.pos.x - sy * 1.05;
                 let bz = self.game.pos.z + cy * 1.05;
-                bills.push((Vec3::new(bx, 0.0, bz), 0.62));
+                let by = self.game.ground_y_at(bx, bz);
+                bills.push((Vec3::new(bx, by, bz), 0.62));
             }
             for p in &self.net.players {
                 if p.health <= 0 {
@@ -480,13 +504,27 @@ impl OyabaunApp {
                 if Some(p.id) == you {
                     continue;
                 }
+                let gy = self.game.ground_y_at(p.x, p.z);
+                let foot_y = (p.y as f32).max(gy);
                 let s = 0.9 + (p.id % 3) as f32 * 0.06;
-                bills.push((Vec3::new(p.x, 0.0, p.z), s));
+                bills.push((Vec3::new(p.x, foot_y, p.z), s));
             }
         } else {
-            bills.push((Vec3::new(5.5, 0.0, -5.0), 1.0));
-            bills.push((Vec3::new(-6.0, 0.0, 3.5), 0.88));
-            bills.push((Vec3::new(-2.0, 0.0, -8.0), 0.92));
+            let t = self.last_ms as f32 * 0.0007;
+            let base = self.game.pos;
+            let yaw = self.game.yaw;
+            let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
+            let right = Vec3::new(-yaw.cos(), 0.0, -yaw.sin());
+            let spots = [
+                base + fwd * 5.0 + right * 2.0,
+                base + fwd * 8.0,
+                base + fwd * 4.5 - right * 2.5,
+            ];
+            for (i, pos) in spots.iter().enumerate() {
+                let gy = self.game.ground_y_at(pos.x, pos.z);
+                let ph = i as f32 * 0.4;
+                bills.push((Vec3::new(pos.x, gy, pos.z), 0.85 + ph));
+            }
         }
         let weapon_hud = WeaponHudParams {
             weapon_id: self.loadout.current_idx() as u32,

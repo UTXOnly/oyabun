@@ -7,6 +7,11 @@ use wgpu::util::DeviceExt;
 #[cfg(target_arch = "wasm32")]
 use wgpu::{ExternalImageSource, ImageCopyExternalImage, Origin2d};
 
+#[cfg(target_arch = "wasm32")]
+fn warn_str(s: &str) {
+    web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(s));
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
@@ -954,9 +959,34 @@ impl Gpu {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let character = character_level
-            .filter(|c| !c.vertices.is_empty() && !c.indices.is_empty() && !c.batches.is_empty())
-            .and_then(|cpu| Self::raster_character_gltf(&device, &queue, format, cpu).ok());
+        let character = match character_level {
+            Some(cpu)
+                if !cpu.vertices.is_empty()
+                    && !cpu.indices.is_empty()
+                    && !cpu.batches.is_empty() =>
+            {
+                match Self::raster_character_gltf(&device, &queue, format, cpu) {
+                    Ok(cd) => Some(cd),
+                    Err(e) => {
+                        #[cfg(target_arch = "wasm32")]
+                        warn_str(&format!(
+                            "oyabaun: 3D character mesh GPU init failed ({e:?}) — enable boss.png/sprite1.png loads in index.html for NPC billboards"
+                        ));
+                        None
+                    }
+                }
+            }
+            Some(_) => {
+                #[cfg(target_arch = "wasm32")]
+                warn_str("oyabaun: oyabaun_player.glb has no drawable geometry");
+                None
+            }
+            None => {
+                #[cfg(target_arch = "wasm32")]
+                warn_str("oyabaun: no oyabaun_player.glb parsed — NPCs need billboard textures (boss.png, sprite1.png) until GLB loads");
+                None
+            }
+        };
 
         let (depth, depth_view) = create_depth(&device, width, height);
 
