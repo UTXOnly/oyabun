@@ -12,5 +12,6 @@ alwaysApply: true
 - **Do not** bolt on a generic Nostr relay; keep the Go server minimal and game-specific.
 - **Persistence**: Prefer in-memory relay state for MVP; add Postgres only if a feature truly needs it.
 - **Changes**: Minimal diffs, match existing style, no drive-by refactors or unsolicited markdown files.
+- **Git**: After finishing a coherent set of code or config changes, commit on the current branch with a short, imperative message (present tense, one line when possible) so history stays traceable. Prefer small logical commits over one huge dump.
 
 When changing wire format, update `docs/PROTOCOL.md` and keep client/relay parsers in sync.
