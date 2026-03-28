@@ -229,7 +229,7 @@
           try {
             const img = document.createElement("img");
             img.crossOrigin = "anonymous";
-            img.src = "./fpsweapons/" + files[i];
+            img.src = "./fpsweapons/" + files[i] + "?v=" + Date.now();
             await new Promise((res, rej) => {
               img.onload = res;
               img.onerror = rej;
@@ -245,7 +245,7 @@
         try {
           const img = document.createElement("img");
           img.crossOrigin = "anonymous";
-          img.src = "./fpsweapons/arms.png";
+          img.src = "./fpsweapons/arms.png?v=" + Date.now();
           await new Promise((res, rej) => {
             img.onload = res;
             img.onerror = rej;
@@ -335,8 +335,9 @@
           console.warn("weapon sprites", e);
         }
         await loadArmsSprite(app);
-        await loadBossSprite(app);
-        await loadRivalSprite(app);
+        // 3D character models are in the GLB now — billboard posters removed
+        // await loadBossSprite(app);
+        // await loadRivalSprite(app);
 
         const ws = new WebSocket(relayWsUrl());
         let nostrAuthed = false;
