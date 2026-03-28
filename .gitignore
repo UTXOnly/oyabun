@@ -6,3 +6,5 @@ relay/oyabaun-relay
 .DS_Store
 .oyabaun/
 client/levels/tokyo_street.json
+# Local MCP config may contain API keys — copy from mcp.example.json
+.cursor/mcp.json
