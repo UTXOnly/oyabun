@@ -12,6 +12,8 @@ struct LevelJson {
     boss_foot: Option<[f32; 3]>,
     #[serde(default)]
     rival_foot: Option<[f32; 3]>,
+    #[serde(default)]
+    spawn_yaw: Option<f32>,
 }
 
 #[derive(serde::Deserialize)]
@@ -25,6 +27,66 @@ pub struct LevelBoot {
     pub spawn: Vec3,
     pub boss_foot: Vec3,
     pub rival_foot: Vec3,
+    pub spawn_yaw: f32,
+    pub level_bounds: Aabb,
+    /// World Z of reference mural quad (far end of alley).
+    pub mural_z: f32,
+}
+
+pub fn vertex_bounds(arena: &Arena) -> Aabb {
+    let mut min = Vec3::splat(f32::MAX);
+    let mut max = Vec3::splat(f32::MIN);
+    for v in &arena.vertices {
+        let p = Vec3::from_array(v.pos);
+        min = min.min(p);
+        max = max.max(p);
+    }
+    if min.x > max.x {
+        return Aabb {
+            min: Vec3::new(-18.0, 0.0, -18.0),
+            max: Vec3::new(18.0, 8.0, 18.0),
+        };
+    }
+    Aabb { min, max }
+}
+
+fn default_spawn_yaw(bounds: &Aabb, spawn: Vec3) -> f32 {
+    let cx = (bounds.min.x + bounds.max.x) * 0.5;
+    let span_z = (bounds.max.z - bounds.min.z).max(0.5);
+    let toward_min = spawn.z - bounds.min.z;
+    let toward_max = bounds.max.z - spawn.z;
+    let tz = if toward_min > toward_max {
+        bounds.min.z + span_z * 0.18
+    } else {
+        bounds.max.z - span_z * 0.18
+    };
+    let dx = cx - spawn.x;
+    let dz = tz - spawn.z;
+    let len_sq = dx * dx + dz * dz;
+    if len_sq < 1e-4 {
+        return 0.0;
+    }
+    dx.atan2(-dz)
+}
+
+pub fn mural_z_plane(bounds: &Aabb, spawn: Vec3) -> f32 {
+    let toward_min = spawn.z - bounds.min.z;
+    let toward_max = bounds.max.z - spawn.z;
+    if toward_min > toward_max {
+        bounds.min.z - 1.15
+    } else {
+        bounds.max.z + 1.15
+    }
+}
+
+fn npc_placements(spawn: Vec3, yaw: f32) -> (Vec3, Vec3) {
+    let sx = yaw.sin();
+    let sz = yaw.cos();
+    let fwd = Vec3::new(sx, 0.0, -sz);
+    let right = Vec3::new(-sz, 0.0, -sx);
+    let boss = spawn + fwd * 11.0 + right * 1.8;
+    let rival = spawn + fwd * 17.0 - right * 2.4;
+    (boss, rival)
 }
 
 /// Blender export: `tools/blender_export_oyabaun.py` → `client/levels/tokyo_street.json` (Y-up game space).
@@ -54,19 +116,22 @@ pub fn arena_from_level_json(s: &str) -> Result<LevelBoot, String> {
         indices: j.indices,
         solids,
     };
-    let boss_foot = j
-        .boss_foot
-        .map(Vec3::from_array)
-        .unwrap_or(spawn + Vec3::new(7.0, 0.0, -12.0));
-    let rival_foot = j
-        .rival_foot
-        .map(Vec3::from_array)
-        .unwrap_or(spawn + Vec3::new(-6.0, 0.0, -10.0));
+    let level_bounds = vertex_bounds(&arena);
+    let spawn_yaw = j
+        .spawn_yaw
+        .unwrap_or_else(|| default_spawn_yaw(&level_bounds, spawn));
+    let (auto_boss, auto_rival) = npc_placements(spawn, spawn_yaw);
+    let boss_foot = j.boss_foot.map(Vec3::from_array).unwrap_or(auto_boss);
+    let rival_foot = j.rival_foot.map(Vec3::from_array).unwrap_or(auto_rival);
+    let mural_z = mural_z_plane(&level_bounds, spawn);
     Ok(LevelBoot {
         arena,
         spawn,
         boss_foot,
         rival_foot,
+        spawn_yaw,
+        level_bounds,
+        mural_z,
     })
 }
 

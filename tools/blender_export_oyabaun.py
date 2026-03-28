@@ -16,6 +16,7 @@ from __future__ import annotations
 import bpy
 import bmesh
 import json
+import math
 import os
 from mathutils import Vector
 
@@ -87,6 +88,39 @@ def spawn_from_ground(mesh_objs: list) -> tuple[float, float, float]:
     cz = (min(zs) + max(zs)) * 0.5
     cy_top = max(ys) + 0.04
     return (cx, cy_top, cz)
+
+
+def bounds_from_verts(verts_out: list[float]) -> tuple[float, float, float, float, float, float]:
+    if not verts_out:
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    xs = verts_out[0::6]
+    ys = verts_out[1::6]
+    zs = verts_out[2::6]
+    return (min(xs), max(xs), min(ys), max(ys), min(zs), max(zs))
+
+
+def game_spawn_yaw(cx: float, minz: float, maxz: float, spawn: tuple) -> float:
+    span_z = max(maxz - minz, 0.5)
+    toward_min = spawn[2] - minz
+    toward_max = maxz - spawn[2]
+    if toward_min > toward_max:
+        tz = minz + span_z * 0.18
+    else:
+        tz = maxz - span_z * 0.18
+    dx = cx - spawn[0]
+    dz = tz - spawn[2]
+    if dx * dx + dz * dz < 1e-4:
+        return 0.0
+    return math.atan2(dx, -dz)
+
+
+def game_npc_feet(spawn: tuple, yaw: float) -> tuple[list[float], list[float]]:
+    sx, sz = math.sin(yaw), math.cos(yaw)
+    fx, fz = sx, -sz
+    rx, rz = -sz, -sx
+    boss = [spawn[0] + fx * 11.0 + rx * 1.8, spawn[1], spawn[2] + fz * 11.0 + rz * 1.8]
+    rival = [spawn[0] + fx * 17.0 - rx * 2.4, spawn[1], spawn[2] + fz * 17.0 - rz * 2.4]
+    return boss, rival
 
 
 def triangulate_object_mesh(obj) -> bpy.types.Mesh:
@@ -200,24 +234,23 @@ def export() -> str:
     if SPAWN_GAME is not None:
         spawn = tuple(SPAWN_GAME)  # type: ignore[assignment]
 
+    minx, maxx, miny, maxy, minz, maxz = bounds_from_verts(verts_out)
+    cx = (minx + maxx) * 0.5
+    spawn_yaw = game_spawn_yaw(cx, minz, maxz, spawn)
+
     bf = empty_game_location("OyabaunBoss")
-    if bf is None:
-        bf = (
-            spawn[0] + 7.0,
-            spawn[1],
-            spawn[2] - 12.0,
-        )
     rf = empty_game_location("OyabaunRival")
-    if rf is None:
-        rf = (
-            spawn[0] - 6.0,
-            spawn[1],
-            spawn[2] - 10.0,
-        )
+    if bf is None or rf is None:
+        auto_boss, auto_rival = game_npc_feet(spawn, spawn_yaw)
+        if bf is None:
+            bf = tuple(auto_boss)
+        if rf is None:
+            rf = tuple(auto_rival)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     payload = {
         "spawn": list(spawn),
+        "spawn_yaw": spawn_yaw,
         "boss_foot": list(bf),
         "rival_foot": list(rf),
         "vertices": verts_out,

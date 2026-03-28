@@ -16,7 +16,7 @@ use boss::{BossState, RivalState};
 use game::GameState;
 use input::InputState;
 use loadout::{Loadout, WEAPONS};
-use mesh::{arena_from_level_json, build_arena, LevelBoot};
+use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
 use net::NetController;
 use render::WeaponHudParams;
 pub use render::{Gpu, Vertex};
@@ -46,10 +46,16 @@ async fn initial_arena_and_spawn() -> LevelBoot {
         }
     }
     let arena = build_arena();
+    let level_bounds = vertex_bounds(&arena);
+    let spawn = Vec3::new(0.0, 0.0, 9.0);
+    let mural_z = mural_z_plane(&level_bounds, spawn);
     LevelBoot {
-        spawn: Vec3::new(0.0, 0.0, 9.0),
+        spawn,
         boss_foot: BossState::new().foot(),
         rival_foot: RivalState::new().foot(),
+        spawn_yaw: 0.0,
+        level_bounds,
+        mural_z,
         arena,
     }
 }
@@ -65,6 +71,8 @@ pub struct OyabaunApp {
     rival: RivalState,
     last_ms: f64,
     clear: Vec3,
+    level_bounds: mesh::Aabb,
+    mural_z: f32,
 }
 
 #[wasm_bindgen]
@@ -258,8 +266,17 @@ impl OyabaunApp {
         } else {
             None
         };
-        self.gpu
-            .draw_world(vp, self.clear, cam, &bills, weapon_hud, boss_draw, rival_draw);
+        self.gpu.draw_world(
+            vp,
+            self.clear,
+            cam,
+            &bills,
+            weapon_hud,
+            boss_draw,
+            rival_draw,
+            &self.level_bounds,
+            self.mural_z,
+        );
         Ok(())
     }
 }
@@ -270,7 +287,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
     let boot = initial_arena_and_spawn().await;
     let solids = boot.arena.solids.clone();
     let gpu = Gpu::new(canvas, &boot.arena.vertices, &boot.arena.indices).await?;
-    let game = GameState::new(boot.spawn, solids);
+    let game = GameState::new(boot.spawn, solids, boot.spawn_yaw);
     let mut net = NetController::new();
     net.status = String::from("open page — WebSocket + Nostr extension");
     Ok(OyabaunApp {
@@ -283,5 +300,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         rival: RivalState::with_foot(boot.rival_foot),
         last_ms: 0.0,
         clear: Vec3::new(0.045, 0.038, 0.072),
+        level_bounds: boot.level_bounds,
+        mural_z: boot.mural_z,
     })
 }

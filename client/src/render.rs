@@ -1,5 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
+
+use crate::mesh::Aabb;
 use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
 #[cfg(target_arch = "wasm32")]
@@ -293,6 +295,7 @@ pub struct Gpu {
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     bill_pipeline: wgpu::RenderPipeline,
+    bill_npc_pipeline: wgpu::RenderPipeline,
     bill_tex: wgpu::Texture,
     bill_view: wgpu::TextureView,
     bill_sampler: wgpu::Sampler,
@@ -648,6 +651,42 @@ impl Gpu {
             cache: None,
         });
 
+        let bill_npc_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("bill-npc"),
+            layout: Some(&bill_pl),
+            vertex: wgpu::VertexState {
+                module: &shader_bill,
+                entry_point: Some("vs_bill"),
+                buffers: &[BillVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader_bill,
+                entry_point: Some("fs_bill"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         let bill_vb = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bill-vb"),
             size: (std::mem::size_of::<BillVertex>() * BILL_VERTS) as u64,
@@ -801,6 +840,7 @@ impl Gpu {
             uniform,
             bind_group,
             bill_pipeline,
+            bill_npc_pipeline,
             bill_tex,
             bill_view,
             bill_sampler,
@@ -1251,7 +1291,7 @@ impl Gpu {
         cam_pos: Vec3,
         npc: Option<(Vec3, f32)>,
         ready: bool,
-        bill_pipeline: &wgpu::RenderPipeline,
+        npc_pipeline: &wgpu::RenderPipeline,
         globals_bg: &wgpu::BindGroup,
         bind_group: &wgpu::BindGroup,
         vb: &wgpu::Buffer,
@@ -1264,7 +1304,7 @@ impl Gpu {
             if let Some(q) = Self::make_bill_quad(cam_pos, bc, sc) {
                 queue.write_buffer(vb, 0, bytemuck::cast_slice(&q));
                 let vb_bytes = 4 * std::mem::size_of::<BillVertex>() as u64;
-                pass.set_pipeline(bill_pipeline);
+                pass.set_pipeline(npc_pipeline);
                 pass.set_bind_group(0, globals_bg, &[]);
                 pass.set_bind_group(1, bind_group, &[]);
                 pass.set_vertex_buffer(0, vb.slice(0..vb_bytes));
@@ -1283,6 +1323,8 @@ impl Gpu {
         weapon_hud: WeaponHudParams,
         boss: Option<(Vec3, f32)>,
         rival: Option<(Vec3, f32)>,
+        level_bounds: &Aabb,
+        mural_z: f32,
     ) {
         let frame = match self.surface.get_current_texture() {
             Ok(f) => f,
@@ -1303,19 +1345,28 @@ impl Gpu {
             .write_buffer(&self.uniform, 0, bytemuck::bytes_of(&g));
 
         let mut bill_cpu: Vec<BillVertex> = Vec::new();
-        const BACKDROP_Z: f32 = -13.52;
         let backdrop_quads: usize = if self.sprite_ready { 1 } else { 0 };
         let max_player_quads = MAX_BILL_QUADS.saturating_sub(backdrop_quads);
         if self.sprite_ready {
-            let bl = Vec3::new(-17.0, 0.0, BACKDROP_Z);
-            let br = Vec3::new(17.0, 0.0, BACKDROP_Z);
-            let tr = Vec3::new(17.0, 9.6, BACKDROP_Z);
-            let tl = Vec3::new(-17.0, 9.6, BACKDROP_Z);
+            let b = level_bounds;
+            let span_x = (b.max.x - b.min.x).max(8.0);
+            let pad_x = span_x * 0.14 + 3.0;
+            let h = ((b.max.y - b.min.y).max(4.0) + 4.0).max(9.0);
+            let z_plane = mural_z;
+            let cx = (b.min.x + b.max.x) * 0.5;
+            let x0 = cx - span_x * 0.5 - pad_x;
+            let x1 = cx + span_x * 0.5 + pad_x;
+            let y0 = b.min.y;
+            let y1 = y0 + h;
+            let bl = Vec3::new(x0, y0, z_plane);
+            let br = Vec3::new(x1, y0, z_plane);
+            let tr = Vec3::new(x1, y1, z_plane);
+            let tl = Vec3::new(x0, y1, z_plane);
             let uvs = [
-                [0.0_f32, 0.0],
-                [1.0, 0.0],
+                [0.0_f32, 1.0],
                 [1.0, 1.0],
-                [0.0, 1.0],
+                [1.0, 0.0],
+                [0.0, 0.0],
             ];
             let corners = [bl, br, tr, tl];
             for i in 0..4 {
@@ -1393,7 +1444,7 @@ impl Gpu {
                 cam_pos,
                 boss,
                 self.boss_ready,
-                &self.bill_pipeline,
+                &self.bill_npc_pipeline,
                 &self.bind_group,
                 &self.boss_bind_group,
                 &self.boss_vb,
@@ -1405,7 +1456,7 @@ impl Gpu {
                 cam_pos,
                 rival,
                 self.rival_ready,
-                &self.bill_pipeline,
+                &self.bill_npc_pipeline,
                 &self.bind_group,
                 &self.rival_bind_group,
                 &self.rival_vb,

@@ -21,10 +21,10 @@ pub struct GameState {
 }
 
 impl GameState {
-    pub fn new(spawn: Vec3, solids: Vec<Aabb>) -> Self {
+    pub fn new(spawn: Vec3, solids: Vec<Aabb>, spawn_yaw: f32) -> Self {
         Self {
             pos: spawn,
-            yaw: 0.0,
+            yaw: spawn_yaw,
             pitch: 0.0,
             vel_y: 0.0,
             online: false,
