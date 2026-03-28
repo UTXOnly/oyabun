@@ -8,9 +8,17 @@ Oyabaun is a browser-first multiplayer FPS. The **client** (Rust → WebAssembly
 
 | Module area | Responsibility |
 |-------------|----------------|
-| `render` | wgpu pipelines, retro-styled clear pass and meshes (expand to full map later). |
+| `render` | wgpu pipelines: textured glTF **level**, **3D character** meshes (per-entity `model` matrix), HUD, optional backdrop sprite. |
 | `game` | Local tick: movement intent, weapon cooldown, predicted pose. |
 | `net` + page script | Ingest `EVENT`/`OK` arrays; apply relay-signed snaps; WASM queues **20420** unsigned drafts; NIP-07 `signEvent` for **24550**, **24551**, **20420**. |
+
+### Playable characters (PixelLab → Blender → Rust → relay)
+
+- **Art**: PixelLab (or hand-painted) textures are assigned in Blender to a **rigid body** mesh named for export (see `tools/blender_make_oyabaun_character.py` and `docs/BLENDER_GLTF.md`).
+- **Asset**: `client/characters/oyabaun_player.glb` — loaded at boot (`include_bytes!` + optional fetch of `./characters/oyabaun_player.glb`). Parsed with `gltf_level::parse_character_glb`.
+- **Net**: Relay snapshots already carry **`x`, `y`, `z`, `yaw`** per player (`PROTOCOL.md` kind **20421**). The client builds a `Mat4` per remote entity (scale × rotation about Y × translation at feet) and draws the shared character mesh once per instance.
+- **Local PvE**: Boss / rival use the same mesh at `boss_foot` / `rival_foot`, rotated to face the camera on XZ.
+- **Future**: glTF **skins** and **animation clips** (walk cycles from Blender) are not in the client yet; add joint palette + sampled animation before expecting bone-animated PixelLab rigs.
 
 **Render loop**: poll input → advance predicted simulation → draw → send aggregated input at a fixed cadence (e.g. 20–30 Hz), not per animation frame.
 

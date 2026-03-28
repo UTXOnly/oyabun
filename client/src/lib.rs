@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{Mat4, Quat, Vec3};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -23,6 +23,16 @@ use render::WeaponHudParams;
 pub use render::{Gpu, Vertex};
 
 use serde_json::json;
+
+fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
+    Mat4::from_scale_rotation_translation(Vec3::splat(scale), Quat::from_rotation_y(yaw), foot)
+}
+
+fn yaw_face_cam_xz(foot: Vec3, cam: Vec3) -> f32 {
+    let dx = cam.x - foot.x;
+    let dz = cam.z - foot.z;
+    dx.atan2(-dz)
+}
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_level_json(url: &str) -> Option<String> {
@@ -407,8 +417,55 @@ impl OyabaunApp {
         let vp = self.game.view_proj(aspect);
         let cam = self.game.pos + Vec3::new(0.0, 1.65, 0.0);
         let mut bills: Vec<(Vec3, f32)> = Vec::new();
+        let mut character_models: Vec<Mat4> = Vec::new();
         let you = self.net.entity_id;
-        if self.net.joined {
+        let gy = self.level_bounds.min.y + 0.02;
+        let use_mesh_chars = self.gpu.characters_loaded();
+        if use_mesh_chars {
+            if self.boss.alive() {
+                let f = self.boss.foot();
+                let y = yaw_face_cam_xz(Vec3::new(f.x, 0.0, f.z), Vec3::new(cam.x, 0.0, cam.z));
+                character_models.push(character_model(
+                    Vec3::new(f.x, f.y.max(gy), f.z),
+                    y,
+                    0.72 * self.boss.scale(),
+                ));
+            }
+            if self.rival.alive() {
+                let f = self.rival.foot();
+                let y = yaw_face_cam_xz(Vec3::new(f.x, 0.0, f.z), Vec3::new(cam.x, 0.0, cam.z));
+                character_models.push(character_model(
+                    Vec3::new(f.x, f.y.max(gy), f.z),
+                    y,
+                    0.68 * self.rival.scale(),
+                ));
+            }
+            if self.net.joined {
+                for p in &self.net.players {
+                    if p.health <= 0 {
+                        continue;
+                    }
+                    if Some(p.id) == you {
+                        continue;
+                    }
+                    let sc = 0.66 + (p.id % 3) as f32 * 0.04;
+                    character_models.push(character_model(
+                        Vec3::new(p.x, p.y.max(gy), p.z),
+                        p.yaw,
+                        sc,
+                    ));
+                }
+            } else {
+                let t = self.last_ms as f32 * 0.0007;
+                for &(x, z, ph) in &[
+                    (5.5f32, -5.0f32, 0.0f32),
+                    (-6.0f32, 3.5f32, 1.2f32),
+                    (-2.0f32, -8.0f32, 2.4f32),
+                ] {
+                    character_models.push(character_model(Vec3::new(x, gy, z), t + ph, 0.88));
+                }
+            }
+        } else if self.net.joined {
             if self.net.self_health > 0 {
                 let sy = self.game.yaw.sin();
                 let cy = self.game.yaw.cos();
@@ -451,6 +508,7 @@ impl OyabaunApp {
             self.clear,
             cam,
             &bills,
+            &character_models,
             weapon_hud,
             boss_draw,
             rival_draw,
@@ -467,11 +525,28 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
     let gi = load_game_init().await;
     let boot = gi.boot;
     let solids = boot.arena.solids.clone();
+    #[cfg(target_arch = "wasm32")]
+    let character_cpu = {
+        const EMB_CHAR: &[u8] = include_bytes!("../characters/oyabaun_player.glb");
+        let mut c = gltf_level::parse_character_glb(EMB_CHAR).ok();
+        if let Some(bytes) = fetch_bytes("./characters/oyabaun_player.glb").await {
+            if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
+                c = Some(x);
+            }
+        }
+        c
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let character_cpu = {
+        const EMB_CHAR: &[u8] = include_bytes!("../characters/oyabaun_player.glb");
+        gltf_level::parse_character_glb(EMB_CHAR).ok()
+    };
     let gpu = Gpu::new(
         canvas,
         &boot.arena.vertices,
         &boot.arena.indices,
         gi.gltf,
+        character_cpu,
     )
     .await?;
     let game = GameState::new(

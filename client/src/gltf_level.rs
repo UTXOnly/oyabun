@@ -190,6 +190,148 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
     })
 }
 
+/// Minimal glTF (single mesh or small prop) for **playable / NPC 3D bodies**.
+/// Vertices are baked in file space; the renderer applies per-entity `model` from relay pose.
+pub fn parse_character_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
+    let (document, buffers, images) =
+        gltf::import_slice(bytes).map_err(|e| format!("character gltf import: {e}"))?;
+
+    let scene = document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+        .ok_or_else(|| "character glTF has no scenes".to_string())?;
+
+    let mut vertices: Vec<WorldVertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut batches: Vec<GltfBatchCpu> = Vec::new();
+
+    let mut images_rgba8: Vec<(u32, u32, Vec<u8>)> = Vec::with_capacity(images.len());
+    for img in &images {
+        let rgba = image_data_to_rgba(img)?;
+        images_rgba8.push((img.width, img.height, rgba));
+    }
+
+    for root in scene.nodes() {
+        visit_character_node(
+            root,
+            Mat4::IDENTITY,
+            &buffers,
+            &mut vertices,
+            &mut indices,
+            &mut batches,
+        );
+    }
+
+    if vertices.is_empty() {
+        return Err("character glTF has no mesh geometry".into());
+    }
+
+    Ok(GltfLevelCpu {
+        vertices,
+        indices,
+        batches,
+        images_rgba8,
+        spawn: Vec3::ZERO,
+        spawn_yaw: 0.0,
+        solids: Vec::new(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn visit_character_node(
+    node: gltf::Node<'_>,
+    parent: Mat4,
+    buffers: &[gltf::buffer::Data],
+    vertices: &mut Vec<WorldVertex>,
+    indices: &mut Vec<u32>,
+    batches: &mut Vec<GltfBatchCpu>,
+) {
+    let world = parent * mat_from_transform(node.transform());
+
+    if let Some(mesh) = node.mesh() {
+        for prim in mesh.primitives() {
+            let mat = prim.material();
+            let pbr = mat.pbr_metallic_roughness();
+            let raw_tint: [f32; 4] = pbr.base_color_factor();
+            let emissive = mat.emissive_factor();
+            let (image_index, uv_set) = pbr
+                .base_color_texture()
+                .map(|info| (info.texture().source().index(), info.tex_coord()))
+                .unwrap_or((usize::MAX, 0u32));
+            let tint = if image_index == usize::MAX {
+                let base_lum = raw_tint[0] + raw_tint[1] + raw_tint[2];
+                let emit_lum = emissive[0] + emissive[1] + emissive[2];
+                if base_lum < 0.01 && emit_lum > 0.01 {
+                    [emissive[0], emissive[1], emissive[2], raw_tint[3]]
+                } else {
+                    let r = (raw_tint[0] + emissive[0]).min(1.0);
+                    let g = (raw_tint[1] + emissive[1]).min(1.0);
+                    let b = (raw_tint[2] + emissive[2]).min(1.0);
+                    [r, g, b, raw_tint[3]]
+                }
+            } else {
+                raw_tint
+            };
+
+            let r_pos = prim.reader(|b| Some(&buffers[b.index()]));
+            let Some(iter_pos) = r_pos.read_positions() else {
+                continue;
+            };
+            let positions: Vec<Vec3> = iter_pos.map(Vec3::from_array).collect();
+            if positions.is_empty() {
+                continue;
+            }
+
+            let r_uv = prim.reader(|b| Some(&buffers[b.index()]));
+            let uv0: Vec<[f32; 2]> = r_uv
+                .read_tex_coords(uv_set)
+                .map(|tc| tc.into_f32().collect())
+                .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+
+            let r_idx = prim.reader(|b| Some(&buffers[b.index()]));
+            let prim_indices: Vec<u32> = if let Some(idr) = r_idx.read_indices() {
+                idr.into_u32().collect()
+            } else {
+                (0..positions.len() as u32).collect()
+            };
+
+            let base = vertices.len() as u32;
+            for (i, p) in positions.iter().enumerate() {
+                let wp = world.transform_point3(*p);
+                let uv = uv0.get(i).copied().unwrap_or([0.0, 0.0]);
+                vertices.push(WorldVertex {
+                    pos: wp.to_array(),
+                    uv,
+                });
+            }
+
+            let first_index = indices.len() as u32;
+            for idx in &prim_indices {
+                indices.push(base + idx);
+            }
+            let index_count = prim_indices.len() as u32;
+
+            batches.push(GltfBatchCpu {
+                first_index,
+                index_count,
+                image_index,
+                tint,
+            });
+        }
+    }
+
+    for child in node.children() {
+        visit_character_node(
+            child,
+            world,
+            buffers,
+            vertices,
+            indices,
+            batches,
+        );
+    }
+}
+
 fn image_data_to_rgba(img: &gltf::image::Data) -> Result<Vec<u8>, String> {
     use gltf::image::Format;
     let w = img.width as usize;

@@ -194,6 +194,77 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Textured character body: same fragment as world; vertex applies **per-entity model** (relay pose).
+const SHADER_CHAR_TEX: &str = r#"
+struct CharU {
+  view_proj: mat4x4<f32>,
+  model: mat4x4<f32>,
+  cam_pos: vec4<f32>,
+  fog_color: vec4<f32>,
+  fog_params: vec4<f32>,
+  _pad0: vec4<f32>,
+  _pad1: vec4<f32>,
+  _pad2: vec4<f32>,
+  _pad3: vec4<f32>,
+  _pad4: vec4<f32>,
+}
+@group(0) @binding(0) var<uniform> cu: CharU;
+struct MatU { tint: vec4<f32>, }
+@group(1) @binding(0) var albedo: texture_2d<f32>;
+@group(1) @binding(1) var albedo_samp: sampler;
+@group(1) @binding(2) var<uniform> mu: MatU;
+
+struct Vin { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, }
+struct Vout {
+  @builtin(position) clip: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+  @location(1) world_pos: vec3<f32>,
+};
+@vertex
+fn vs_char(v: Vin) -> Vout {
+  let world_pos = (cu.model * vec4<f32>(v.pos, 1.0)).xyz;
+  var o: Vout;
+  o.world_pos = world_pos;
+  o.clip = cu.view_proj * vec4<f32>(world_pos, 1.0);
+  o.uv = v.uv;
+  return o;
+}
+fn oya_hash(p: vec2<f32>) -> f32 {
+    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    p3 = p3 + dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+@fragment
+fn fs_char(i: Vout) -> @location(0) vec4<f32> {
+    let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
+    let wp = i.world_pos;
+    let lum = t.r * 0.3 + t.g * 0.5 + t.b * 0.2;
+    var detail = 1.0;
+    if (lum < 0.45) {
+        let wall_uv = vec2<f32>(wp.x + wp.z, wp.y);
+        let bp = wall_uv * vec2<f32>(1.5, 3.0);
+        let row = floor(bp.y);
+        var bx = bp.x;
+        if (fract(row * 0.5) > 0.25) { bx = bx + 0.5; }
+        let cell = fract(vec2<f32>(bx, bp.y));
+        let mortar = 0.06;
+        let brick = step(mortar, cell.x) * step(mortar, 1.0 - cell.x)
+                   * step(mortar, cell.y) * step(mortar, 1.0 - cell.y);
+        let grime = oya_hash(floor(wall_uv * 4.0)) * 0.15;
+        let streak = oya_hash(vec2<f32>(floor(wall_uv.x * 8.0), 0.5))
+                   * step(fract(wall_uv.y * 2.0), 0.3) * 0.12;
+        detail = mix(0.75, 1.0, brick) * (1.0 - grime) * (1.0 - streak);
+    }
+    let ambient = vec3<f32>(0.03, 0.02, 0.04);
+    let lit = t.rgb * detail + ambient;
+    let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 15.0) / 15.0;
+    let dist = length(wp - cu.cam_pos.xyz);
+    let fog_amt = 1.0 - exp(-dist * cu.fog_params.x);
+    let fc = cu.fog_color.rgb;
+    return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), t.a);
+}
+"#;
+
 const SHADER_BILL: &str = r#"
 struct Globals {
   view_proj: mat4x4<f32>,
@@ -288,311 +359,13 @@ fn vs_hud(v: HIn) -> HOut {
   return o;
 }
 
-fn sdf_box(p: vec2<f32>, c: vec2<f32>, half: vec2<f32>) -> f32 {
-  let d = abs(p - c) - half;
-  return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
-}
-fn sdf_round_box(p: vec2<f32>, c: vec2<f32>, half: vec2<f32>, r: f32) -> f32 {
-  let d = abs(p - c) - half + vec2<f32>(r);
-  return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - r;
-}
-fn fill(d: f32) -> f32 { return smoothstep(0.003, 0.0, d); }
-fn shade_metal(base: vec3<f32>, uv: vec2<f32>, highlight_y: f32) -> vec3<f32> {
-  let spec = smoothstep(0.06, 0.0, abs(uv.y - highlight_y)) * 0.15;
-  let edge = smoothstep(0.0, 0.01, abs(uv.x - 0.5)) * 0.1;
-  return base * (1.0 + spec - edge);
-}
-
-fn draw_hand(uv: vec2<f32>, cx: f32, cy: f32, side: f32) -> vec4<f32> {
-  let skin = vec3<f32>(0.62, 0.44, 0.33);
-  let skin_dark = vec3<f32>(0.48, 0.32, 0.24);
-  let knuckle = vec3<f32>(0.55, 0.38, 0.28);
-  var a = 0.0;
-  var col = skin;
-
-  // Palm
-  let palm = sdf_round_box(uv, vec2<f32>(cx, cy), vec2<f32>(0.06, 0.06), 0.02);
-  let pa = fill(palm);
-  a = max(a, pa);
-  col = mix(col, skin, pa);
-
-  // Four fingers curling around grip
-  for (var fi = 0; fi < 4; fi = fi + 1) {
-    let fy = cy + 0.04 - f32(fi) * 0.025;
-    let fx = cx + side * 0.07;
-    let seg1 = sdf_round_box(uv, vec2<f32>(fx, fy), vec2<f32>(0.025, 0.008), 0.005);
-    let s1 = fill(seg1);
-    // Fingertip curling inward
-    let fx2 = fx + side * 0.02;
-    let seg2 = sdf_round_box(uv, vec2<f32>(fx2, fy - 0.01), vec2<f32>(0.012, 0.007), 0.004);
-    let s2 = fill(seg2);
-    let fc = mix(skin, knuckle, 0.3 + f32(fi) * 0.1);
-    a = max(a, max(s1, s2));
-    col = mix(col, fc, max(s1, s2));
-  }
-
-  // Thumb on opposite side
-  let tx = cx - side * 0.05;
-  let ty = cy + 0.05;
-  let thumb = sdf_round_box(uv, vec2<f32>(tx, ty), vec2<f32>(0.015, 0.025), 0.008);
-  let ta = fill(thumb);
-  a = max(a, ta);
-  col = mix(col, skin_dark, ta * 0.5);
-
-  // Wrist
-  let wrist = sdf_round_box(uv, vec2<f32>(cx - side * 0.02, cy - 0.12), vec2<f32>(0.05, 0.06), 0.02);
-  let wa = fill(wrist);
-  a = max(a, wa);
-  col = mix(col, skin, wa);
-
-  // Sleeve cuff
-  let sleeve = sdf_round_box(uv, vec2<f32>(cx - side * 0.02, cy - 0.20), vec2<f32>(0.055, 0.05), 0.01);
-  let sa = fill(sleeve);
-  a = max(a, sa);
-  col = mix(col, vec3<f32>(0.10, 0.10, 0.12), sa);
-
-  return vec4<f32>(col, a * 0.95);
-}
-
 @fragment
 fn fs_hud(i: HOut) -> @location(0) vec4<f32> {
   let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
   let t = textureSample(wtex, wsamp, uv_tex);
   var rgba = vec4<f32>(0.0);
-  if (t.a > 0.18) {
+  if (t.a > 0.10) {
     rgba = vec4<f32>(t.rgb * (1.02 + 0.08 * hu.flash), t.a);
-  } else {
-  let uv = i.uv;
-
-  let metal_light = vec3<f32>(0.28, 0.27, 0.30);
-  let metal_mid   = vec3<f32>(0.18, 0.17, 0.20);
-  let metal_dark  = vec3<f32>(0.10, 0.09, 0.11);
-  let grip_color  = vec3<f32>(0.14, 0.12, 0.10);
-  let wood_color  = vec3<f32>(0.35, 0.22, 0.12);
-
-  // ===== RIGHT HAND (holding weapon) =====
-  let rhand = draw_hand(uv, 0.55, 0.48, 1.0);
-  rgba = mix(rgba, vec4<f32>(rhand.rgb, 0.95), rhand.a);
-
-  // ===== LEFT HAND (support or idle) =====
-  var lhand: vec4<f32>;
-  if hu.weapon == 1u {
-    // Shotgun: left hand forward on pump
-    lhand = draw_hand(uv, 0.42, 0.62, -1.0);
-  } else if hu.weapon == 2u {
-    // SMG: left hand on foregrip
-    lhand = draw_hand(uv, 0.40, 0.56, -1.0);
-  } else {
-    // Pistol/plasma: left hand lower, idle
-    lhand = draw_hand(uv, 0.22, 0.30, -1.0);
-  }
-  rgba = mix(rgba, vec4<f32>(lhand.rgb, 0.95), lhand.a);
-
-  // ===== WEAPONS =====
-  if hu.weapon == 0u {
-    // --- M9 PISTOL ---
-    // Grip (angled back)
-    let gp = vec2<f32>(uv.x - (uv.y - 0.45) * 0.08, uv.y);
-    let grip = sdf_round_box(gp, vec2<f32>(0.52, 0.42), vec2<f32>(0.04, 0.08), 0.008);
-    let ga = fill(grip);
-    // Grip texture (horizontal lines)
-    let grip_tex = grip_color * (0.9 + 0.1 * step(0.5, fract(uv.y * 60.0)));
-    rgba = mix(rgba, vec4<f32>(grip_tex, 0.97), ga);
-
-    // Slide (main body)
-    let slide = sdf_round_box(uv, vec2<f32>(0.51, 0.60), vec2<f32>(0.035, 0.12), 0.005);
-    let sa = fill(slide);
-    let sc = shade_metal(metal_mid, uv, 0.65);
-    rgba = mix(rgba, vec4<f32>(sc, 0.98), sa);
-
-    // Barrel
-    let barrel = sdf_round_box(uv, vec2<f32>(0.51, 0.76), vec2<f32>(0.02, 0.04), 0.003);
-    let ba = fill(barrel);
-    rgba = mix(rgba, vec4<f32>(metal_dark, 0.99), ba);
-
-    // Muzzle hole
-    let muz = length(uv - vec2<f32>(0.51, 0.80)) - 0.008;
-    rgba = mix(rgba, vec4<f32>(0.02, 0.02, 0.02, 1.0), fill(muz));
-
-    // Trigger guard
-    let tg = sdf_round_box(uv, vec2<f32>(0.51, 0.49), vec2<f32>(0.025, 0.008), 0.003);
-    let tga = fill(tg);
-    rgba = mix(rgba, vec4<f32>(metal_dark, 0.96), tga);
-
-    // Trigger
-    let tr = sdf_round_box(uv, vec2<f32>(0.52, 0.50), vec2<f32>(0.005, 0.012), 0.002);
-    rgba = mix(rgba, vec4<f32>(metal_light, 0.98), fill(tr));
-
-    // Front sight
-    let fs_d = sdf_box(uv, vec2<f32>(0.51, 0.725), vec2<f32>(0.004, 0.006));
-    rgba = mix(rgba, vec4<f32>(metal_dark, 0.98), fill(fs_d));
-
-    // Rear sight
-    let rs1 = sdf_box(uv, vec2<f32>(0.495, 0.55), vec2<f32>(0.003, 0.005));
-    let rs2 = sdf_box(uv, vec2<f32>(0.525, 0.55), vec2<f32>(0.003, 0.005));
-    rgba = mix(rgba, vec4<f32>(metal_dark, 0.98), max(fill(rs1), fill(rs2)));
-
-    // Slide serrations (vertical lines on rear)
-    let ser_area = step(0.475, uv.x) * step(uv.x, 0.545) * step(0.52, uv.y) * step(uv.y, 0.56);
-    let ser_lines = step(0.6, fract(uv.y * 80.0));
-    rgba = mix(rgba, vec4<f32>(metal_dark * 0.8, 0.95), ser_area * ser_lines * 0.5);
-
-    // Ejection port
-    let ej = sdf_box(uv, vec2<f32>(0.535, 0.60), vec2<f32>(0.003, 0.015));
-    rgba = mix(rgba, vec4<f32>(metal_dark * 0.7, 0.96), fill(ej) * 0.6);
-
-    // Hammer
-    let hm = sdf_round_box(uv, vec2<f32>(0.51, 0.505), vec2<f32>(0.008, 0.008), 0.003);
-    rgba = mix(rgba, vec4<f32>(metal_light, 0.97), fill(hm));
-
-  } else if hu.weapon == 1u {
-    // --- SHOTGUN ---
-    // Stock (wood)
-    let stock = sdf_round_box(uv, vec2<f32>(0.48, 0.35), vec2<f32>(0.04, 0.10), 0.01);
-    let stk_a = fill(stock);
-    let wood_tex = wood_color * (0.85 + 0.15 * step(0.4, fract(uv.y * 25.0 + uv.x * 8.0)));
-    rgba = mix(rgba, vec4<f32>(wood_tex, 0.96), stk_a);
-
-    // Receiver body
-    let recv = sdf_round_box(uv, vec2<f32>(0.50, 0.52), vec2<f32>(0.04, 0.08), 0.008);
-    let ra = fill(recv);
-    rgba = mix(rgba, vec4<f32>(shade_metal(metal_mid, uv, 0.55), 0.97), ra);
-
-    // Upper barrel
-    let bar1 = sdf_round_box(uv, vec2<f32>(0.50, 0.72), vec2<f32>(0.02, 0.14), 0.008);
-    let b1a = fill(bar1);
-    rgba = mix(rgba, vec4<f32>(shade_metal(metal_light, uv, 0.78), 0.98), b1a);
-
-    // Lower barrel
-    let bar2 = sdf_round_box(uv, vec2<f32>(0.50, 0.72), vec2<f32>(0.015, 0.13), 0.006);
-    let b2a = fill(bar2);
-    rgba = mix(rgba, vec4<f32>(metal_mid * 0.9, 0.97), b2a * 0.4);
-
-    // Pump/forend (wood)
-    let pump = sdf_round_box(uv, vec2<f32>(0.50, 0.62), vec2<f32>(0.03, 0.04), 0.008);
-    let pa = fill(pump);
-    rgba = mix(rgba, vec4<f32>(wood_color * 1.1, 0.97), pa);
-
-    // Muzzle
-    let muz = length(uv - vec2<f32>(0.50, 0.86)) - 0.012;
-    rgba = mix(rgba, vec4<f32>(0.03, 0.03, 0.03, 1.0), fill(muz));
-
-    // Trigger guard + trigger
-    let tg = sdf_round_box(uv, vec2<f32>(0.50, 0.46), vec2<f32>(0.022, 0.006), 0.003);
-    rgba = mix(rgba, vec4<f32>(metal_dark, 0.96), fill(tg));
-    let tr = sdf_round_box(uv, vec2<f32>(0.505, 0.47), vec2<f32>(0.004, 0.01), 0.002);
-    rgba = mix(rgba, vec4<f32>(metal_light, 0.97), fill(tr));
-
-    // Front bead sight
-    let bead = length(uv - vec2<f32>(0.50, 0.84)) - 0.005;
-    rgba = mix(rgba, vec4<f32>(0.9, 0.1, 0.05, 1.0), fill(bead));
-
-  } else if hu.weapon == 2u {
-    // --- SMG (MP5-style) ---
-    // Grip
-    let gp2 = vec2<f32>(uv.x - (uv.y - 0.40) * 0.06, uv.y);
-    let grip2 = sdf_round_box(gp2, vec2<f32>(0.52, 0.38), vec2<f32>(0.03, 0.07), 0.006);
-    let g2a = fill(grip2);
-    let grip2_tex = grip_color * (0.9 + 0.1 * step(0.5, fract(uv.y * 55.0)));
-    rgba = mix(rgba, vec4<f32>(grip2_tex, 0.97), g2a);
-
-    // Lower receiver
-    let lrcv = sdf_round_box(uv, vec2<f32>(0.50, 0.50), vec2<f32>(0.04, 0.06), 0.006);
-    rgba = mix(rgba, vec4<f32>(shade_metal(metal_dark, uv, 0.52), 0.97), fill(lrcv));
-
-    // Upper receiver
-    let urcv = sdf_round_box(uv, vec2<f32>(0.50, 0.58), vec2<f32>(0.035, 0.05), 0.005);
-    rgba = mix(rgba, vec4<f32>(shade_metal(metal_mid, uv, 0.60), 0.98), fill(urcv));
-
-    // Barrel + shroud
-    let bshr = sdf_round_box(uv, vec2<f32>(0.50, 0.72), vec2<f32>(0.022, 0.10), 0.006);
-    rgba = mix(rgba, vec4<f32>(shade_metal(metal_light, uv, 0.76), 0.98), fill(bshr));
-
-    // Barrel vent holes
-    let vent_area = step(0.48, uv.x) * step(uv.x, 0.52) * step(0.66, uv.y) * step(uv.y, 0.78);
-    let vents = step(0.7, fract(uv.y * 40.0));
-    rgba = mix(rgba, vec4<f32>(metal_dark * 0.6, 0.96), vent_area * vents * 0.4);
-
-    // Magazine (curved)
-    let mag = sdf_round_box(uv, vec2<f32>(0.50, 0.42), vec2<f32>(0.018, 0.06), 0.004);
-    rgba = mix(rgba, vec4<f32>(metal_dark * 0.85, 0.97), fill(mag));
-
-    // Folding stock
-    let stk1 = sdf_box(uv, vec2<f32>(0.48, 0.42), vec2<f32>(0.003, 0.05));
-    let stk2 = sdf_box(uv, vec2<f32>(0.46, 0.38), vec2<f32>(0.02, 0.003));
-    rgba = mix(rgba, vec4<f32>(metal_mid, 0.95), max(fill(stk1), fill(stk2)));
-
-    // Muzzle
-    let muz = length(uv - vec2<f32>(0.50, 0.82)) - 0.010;
-    rgba = mix(rgba, vec4<f32>(0.02, 0.02, 0.02, 1.0), fill(muz));
-
-    // Iron sights
-    let fs_d = sdf_box(uv, vec2<f32>(0.50, 0.80), vec2<f32>(0.003, 0.005));
-    rgba = mix(rgba, vec4<f32>(metal_dark, 0.98), fill(fs_d));
-
-    // Trigger
-    let tg2 = sdf_round_box(uv, vec2<f32>(0.50, 0.455), vec2<f32>(0.02, 0.005), 0.002);
-    rgba = mix(rgba, vec4<f32>(metal_dark, 0.96), fill(tg2));
-    let tr2 = sdf_round_box(uv, vec2<f32>(0.505, 0.46), vec2<f32>(0.004, 0.008), 0.002);
-    rgba = mix(rgba, vec4<f32>(metal_light, 0.97), fill(tr2));
-
-    // Charging handle
-    let ch = sdf_box(uv, vec2<f32>(0.535, 0.56), vec2<f32>(0.008, 0.004));
-    rgba = mix(rgba, vec4<f32>(metal_light, 0.96), fill(ch));
-
-  } else {
-    // --- PLASMA GUN (sci-fi) ---
-    let glow = vec3<f32>(0.20, 0.65, 0.88);
-    let glow_hot = vec3<f32>(0.40, 0.90, 1.0);
-    let hull = vec3<f32>(0.12, 0.14, 0.18);
-
-    // Grip
-    let gp3 = vec2<f32>(uv.x - (uv.y - 0.42) * 0.05, uv.y);
-    let grip3 = sdf_round_box(gp3, vec2<f32>(0.52, 0.40), vec2<f32>(0.03, 0.07), 0.006);
-    rgba = mix(rgba, vec4<f32>(hull * 1.2, 0.97), fill(grip3));
-
-    // Main body
-    let body = sdf_round_box(uv, vec2<f32>(0.50, 0.56), vec2<f32>(0.045, 0.08), 0.01);
-    rgba = mix(rgba, vec4<f32>(hull, 0.97), fill(body));
-
-    // Energy chamber (glowing)
-    let chamber = sdf_round_box(uv, vec2<f32>(0.50, 0.56), vec2<f32>(0.025, 0.04), 0.008);
-    let ch_a = fill(chamber);
-    let pulse = 0.7 + 0.3 * sin(hu.bob * 3.0);
-    rgba = mix(rgba, vec4<f32>(glow * pulse, 0.95), ch_a * 0.7);
-
-    // Barrel housing
-    let bh = sdf_round_box(uv, vec2<f32>(0.50, 0.72), vec2<f32>(0.03, 0.10), 0.008);
-    rgba = mix(rgba, vec4<f32>(hull * 1.1, 0.98), fill(bh));
-
-    // Energy coils (3 rings)
-    for (var ci = 0; ci < 3; ci = ci + 1) {
-      let cy = 0.66 + f32(ci) * 0.05;
-      let coil = sdf_round_box(uv, vec2<f32>(0.50, cy), vec2<f32>(0.032, 0.006), 0.003);
-      rgba = mix(rgba, vec4<f32>(glow * (0.8 + 0.2 * pulse), 0.96), fill(coil));
-    }
-
-    // Muzzle emitter (bright glow)
-    let emitter = length(uv - vec2<f32>(0.50, 0.82)) - 0.015;
-    let em_a = fill(emitter);
-    rgba = mix(rgba, vec4<f32>(glow_hot * pulse, 0.98), em_a);
-
-    // Side vents
-    let v_area = step(0.53, uv.x) * step(uv.x, 0.545) * step(0.50, uv.y) * step(uv.y, 0.62);
-    let v_lines = step(0.6, fract(uv.y * 30.0));
-    rgba = mix(rgba, vec4<f32>(glow * 0.5, 0.90), v_area * v_lines);
-
-    // Trigger
-    let tg3 = sdf_round_box(uv, vec2<f32>(0.50, 0.455), vec2<f32>(0.02, 0.005), 0.002);
-    rgba = mix(rgba, vec4<f32>(hull * 0.8, 0.96), fill(tg3));
-    let tr3 = sdf_round_box(uv, vec2<f32>(0.505, 0.46), vec2<f32>(0.004, 0.008), 0.002);
-    rgba = mix(rgba, vec4<f32>(glow * 0.6, 0.97), fill(tr3));
-
-    // Top rail
-    let rail = sdf_box(uv, vec2<f32>(0.50, 0.64), vec2<f32>(0.005, 0.08));
-    rgba = mix(rgba, vec4<f32>(hull * 1.3, 0.96), fill(rail) * 0.5);
-  }
-
   }
   if hu.flash > 0.01 {
     let mf = length(i.uv - vec2<f32>(0.505, 0.82));
@@ -648,6 +421,34 @@ struct MatTintUniform {
     tint: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct CharUniforms {
+    view_proj: [[f32; 4]; 4],
+    model: [[f32; 4]; 4],
+    cam_pos: [f32; 4],
+    fog_color: [f32; 4],
+    fog_params: [f32; 4],
+    _p0: [f32; 4],
+    _p1: [f32; 4],
+    _p2: [f32; 4],
+    _p3: [f32; 4],
+    _p4: [f32; 4],
+}
+
+struct CharacterDraw {
+    pipeline: wgpu::RenderPipeline,
+    vb: wgpu::Buffer,
+    ib: wgpu::Buffer,
+    batches: Vec<WorldBatchGpu>,
+    char_uniform: wgpu::Buffer,
+    char_globals_bg: wgpu::BindGroup,
+    #[allow(dead_code)]
+    _textures: Vec<wgpu::Texture>,
+    #[allow(dead_code)]
+    _tint_buffers: Vec<wgpu::Buffer>,
+}
+
 pub struct WeaponHudParams {
     pub weapon_id: u32,
     pub bob: f32,
@@ -695,6 +496,7 @@ pub struct Gpu {
     pub rival_ready: bool,
     rival_vb: wgpu::Buffer,
     rival_ib: wgpu::Buffer,
+    character: Option<CharacterDraw>,
 }
 
 impl Gpu {
@@ -703,6 +505,7 @@ impl Gpu {
         flat_vertices: &[Vertex],
         flat_indices: &[u32],
         gltf_level: Option<crate::gltf_level::GltfLevelCpu>,
+        character_level: Option<crate::gltf_level::GltfLevelCpu>,
     ) -> Result<Self, wasm_bindgen::JsValue> {
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
@@ -1151,6 +954,10 @@ impl Gpu {
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        let character = character_level
+            .filter(|c| !c.vertices.is_empty() && !c.indices.is_empty() && !c.batches.is_empty())
+            .and_then(|cpu| Self::raster_character_gltf(&device, &queue, format, cpu).ok());
+
         let (depth, depth_view) = create_depth(&device, width, height);
 
         Ok(Gpu {
@@ -1194,6 +1001,283 @@ impl Gpu {
             rival_ready: false,
             rival_vb,
             rival_ib,
+            character,
+        })
+    }
+
+    fn raster_character_gltf(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        cpu: crate::gltf_level::GltfLevelCpu,
+    ) -> Result<CharacterDraw, wasm_bindgen::JsValue> {
+        use crate::gltf_level::WorldVertex;
+
+        let char_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("char-globals"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: std::num::NonZeroU64::new(
+                        std::mem::size_of::<CharUniforms>() as u64
+                    ),
+                },
+                count: None,
+            }],
+        });
+
+        let char_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("char-u"),
+            size: std::mem::size_of::<CharUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let char_globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("char-globals-bg"),
+            layout: &char_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: char_uniform.as_entire_binding(),
+            }],
+        });
+
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("char-nearest"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("char-mat"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: std::num::NonZeroU64::new(16),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let char_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-char-tex"),
+            bind_group_layouts: &[&char_layout, &material_layout],
+            push_constant_ranges: &[],
+        });
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("char-tex"),
+            source: wgpu::ShaderSource::Wgsl(SHADER_CHAR_TEX.into()),
+        });
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("char-tex"),
+            layout: Some(&char_pl),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_char"),
+                buffers: &[WorldVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_char"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vb-char"),
+            contents: bytemuck::cast_slice(&cpu.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ib-char"),
+            contents: bytemuck::cast_slice(&cpu.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let mut textures: Vec<wgpu::Texture> = Vec::new();
+        let mut views: Vec<wgpu::TextureView> = Vec::new();
+        for (wi, (w, h, rgba)) in cpu.images_rgba8.iter().enumerate() {
+            let width = (*w).max(1);
+            let height = (*h).max(1);
+            if width > 4096 || height > 4096 {
+                return Err(wasm_bindgen::JsValue::from_str(&format!(
+                    "character glTF image {} exceeds 4096 (got {}×{})",
+                    wi, width, height
+                )));
+            }
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!("char-img-{wi}")),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                rgba.as_slice(),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * width),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            views.push(tex.create_view(&wgpu::TextureViewDescriptor::default()));
+            textures.push(tex);
+        }
+
+        let white_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("char-white"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &white_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255, 255, 255],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let white_view = white_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        textures.push(white_tex);
+
+        let mut batches = Vec::with_capacity(cpu.batches.len());
+        let mut tint_buffers = Vec::with_capacity(cpu.batches.len());
+        for b in &cpu.batches {
+            let view_ref: &wgpu::TextureView = if b.image_index < views.len() {
+                &views[b.image_index]
+            } else {
+                &white_view
+            };
+            let tint = MatTintUniform { tint: b.tint };
+            let tint_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("char-tint"),
+                contents: bytemuck::bytes_of(&tint),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("char-mat-bg"),
+                layout: &material_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view_ref),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&nearest_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: tint_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            tint_buffers.push(tint_buf);
+            batches.push(WorldBatchGpu {
+                first_index: b.first_index,
+                index_count: b.index_count,
+                bind_group,
+            });
+        }
+
+        Ok(CharacterDraw {
+            pipeline,
+            vb,
+            ib,
+            batches,
+            char_uniform,
+            char_globals_bg,
+            _textures: textures,
+            _tint_buffers: tint_buffers,
         })
     }
 
@@ -1950,12 +2034,17 @@ impl Gpu {
         }
     }
 
+    pub fn characters_loaded(&self) -> bool {
+        self.character.is_some()
+    }
+
     pub fn draw_world(
         &mut self,
         view_proj: Mat4,
         clear_rgb: Vec3,
         cam_pos: Vec3,
         billboards: &[(Vec3, f32)],
+        character_models: &[Mat4],
         weapon_hud: WeaponHudParams,
         boss: Option<(Vec3, f32)>,
         rival: Option<(Vec3, f32)>,
@@ -2088,6 +2177,34 @@ impl Gpu {
                 }
             }
 
+            if let Some(ref cd) = self.character {
+                pass.set_pipeline(&cd.pipeline);
+                pass.set_vertex_buffer(0, cd.vb.slice(..));
+                pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
+                for &model in character_models {
+                    let u = CharUniforms {
+                        view_proj: view_proj.to_cols_array_2d(),
+                        model: model.to_cols_array_2d(),
+                        cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
+                        fog_color: [0.12, 0.09, 0.18, 1.0],
+                        fog_params: [0.022, 0.0, 0.0, 0.0],
+                        _p0: [0.0; 4],
+                        _p1: [0.0; 4],
+                        _p2: [0.0; 4],
+                        _p3: [0.0; 4],
+                        _p4: [0.0; 4],
+                    };
+                    self.queue
+                        .write_buffer(&cd.char_uniform, 0, bytemuck::bytes_of(&u));
+                    pass.set_bind_group(0, &cd.char_globals_bg, &[]);
+                    for b in &cd.batches {
+                        pass.set_bind_group(1, &b.bind_group, &[]);
+                        let end = b.first_index.saturating_add(b.index_count);
+                        pass.draw_indexed(b.first_index..end, 0, 0..1);
+                    }
+                }
+            }
+
             if self.sprite_ready && !bill_cpu.is_empty() {
                 let vcount = bill_cpu.len() as u32;
                 let icount = (vcount / 4) * 6;
@@ -2100,30 +2217,32 @@ impl Gpu {
                 pass.set_index_buffer(self.bill_ib.slice(0..ib_bytes), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..icount, 0, 0..1);
             }
-            Self::draw_npc_billboard(
-                &self.queue,
-                &mut pass,
-                cam_pos,
-                boss,
-                self.boss_ready,
-                &self.bill_npc_pipeline,
-                &self.bind_group,
-                &self.boss_bind_group,
-                &self.boss_vb,
-                &self.boss_ib,
-            );
-            Self::draw_npc_billboard(
-                &self.queue,
-                &mut pass,
-                cam_pos,
-                rival,
-                self.rival_ready,
-                &self.bill_npc_pipeline,
-                &self.bind_group,
-                &self.rival_bind_group,
-                &self.rival_vb,
-                &self.rival_ib,
-            );
+            if self.character.is_none() {
+                Self::draw_npc_billboard(
+                    &self.queue,
+                    &mut pass,
+                    cam_pos,
+                    boss,
+                    self.boss_ready,
+                    &self.bill_npc_pipeline,
+                    &self.bind_group,
+                    &self.boss_bind_group,
+                    &self.boss_vb,
+                    &self.boss_ib,
+                );
+                Self::draw_npc_billboard(
+                    &self.queue,
+                    &mut pass,
+                    cam_pos,
+                    rival,
+                    self.rival_ready,
+                    &self.bill_npc_pipeline,
+                    &self.bind_group,
+                    &self.rival_bind_group,
+                    &self.rival_vb,
+                    &self.rival_ib,
+                );
+            }
         }
 
         {

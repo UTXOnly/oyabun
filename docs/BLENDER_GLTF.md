@@ -30,9 +30,19 @@ Writes **`client/levels/tokyo_alley.glb`** (and by default also **`tokyo_street.
 | **`OyabaunCollider` / `Collider`** in node name | Mesh used only for **axis-aligned collision** bounds (per primitive). |
 | Visual meshes | Any other names; rendered with textures. |
 
-### NPCs (PixelLab / sprites, not GLB bodies)
+### Playable character body (`oyabaun_player.glb`)
 
-Boss, rival, and other players are **camera-facing billboards** in the Rust client (`upload_boss_sprite`, `upload_rival_sprite`, `upload_reference_sprite`), not characters modeled in the `.glb`. The glTF export script **removes** nodes named **`Boss_*`**, **`Rival_*`**, and **`ACBody*`** (legacy blocky placeholders) before writing `tokyo_alley.glb`, then saves the `.blend` so the scene stays in sync. To keep those meshes for blocking in Blender, set **`OYABAUN_KEEP_PLACEHOLDER_NPCS=1`** when running export.
+Multiplayer and local boss/rival use a **shared 3D character mesh** (`client/characters/oyabaun_player.glb`), not rigged dolls in the alley GLB. Texture it with PixelLab output in Blender, then export GLB. Regenerate the default placeholder with:
+
+```bash
+/Applications/Blender.app/Contents/MacOS/Blender --background --python tools/blender_make_oyabaun_character.py
+```
+
+(Adjust the path to `Blender` on your OS.) The page may fetch `./characters/oyabaun_player.glb` after load; the WASM bundle also **embeds** a copy via `include_bytes!`.
+
+The alley export still **removes** legacy **`Boss_*`**, **`Rival_*`**, and **`ACBody*`** blocky meshes so they are not confused with real characters. Set **`OYABAUN_KEEP_PLACEHOLDER_NPCS=1`** if you need those dummies back in Blender for layout only.
+
+**Backdrop**: `reference.png` remains an optional **environment billboard** (mural), separate from character bodies.
 
 If no collider nodes exist, collision falls back to a single AABB around the whole visible mesh (coarse).
 
