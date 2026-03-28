@@ -1,7 +1,10 @@
 """
-Build a simple Oyabaun player body mesh (feet at origin, +Y up) and export GLB.
+Export a **front-facing character card** (single quad + optional back face) for Oyabaun.
 
-PixelLab / hand-painted textures: assign in Blender to this mesh, then re-run export.
+The old two-cube rig + smart_project UVs stretched any texture into a noise blob.
+This mesh is a vertical plane in Blender space (**Z up** before glTF `export_yup`),
+with UVs 0–1 so `client/sprite1.png` maps as a full-body front view.
+
 Run from repo root:
   /path/to/Blender --background --python tools/blender_make_oyabaun_character.py
 
@@ -9,44 +12,58 @@ Writes client/characters/oyabaun_player.glb (overwrites).
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 
 import bpy
+import bmesh
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 OUT_DIR = os.path.join(ROOT, "client", "characters")
 OUT = os.path.join(OUT_DIR, "oyabaun_player.glb")
 SPRITE = os.path.join(ROOT, "client", "sprite1.png")
 
+# Authoring: Blender file uses Z-up (matches previous script). glTF export flips to Y-up.
+HEIGHT = 1.68
+HALF_W = 0.30
+# Slight X offset so the sheet sits between feet; faces +X (into the level forward −Z after export).
+X_PLANE = 0.02
+
 os.makedirs(OUT_DIR, exist_ok=True)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
-# Body: ~1.65m tall, origin between feet (Y-up Blender)
-bpy.ops.mesh.primitive_cube_add(location=(0, 0, 0.55))
-body = bpy.context.active_object
-body.name = "OyabaunCharacter"
-body.scale = (0.24, 0.2, 0.55)
-bpy.ops.object.transform_apply(scale=True)
+bm = bmesh.new()
+# Front face (+X normal): BL, BR, TR, TL — PNG feet at bottom (v=1 in wgpu sample space for bill was bottom; glTF UV v=0 is often image bottom — we match PNG bottom to mesh feet)
+uv_layer = bm.loops.layers.uv.new()
+v_bl = bm.verts.new((X_PLANE, -HALF_W, 0.0))
+v_br = bm.verts.new((X_PLANE, HALF_W, 0.0))
+v_tr = bm.verts.new((X_PLANE, HALF_W, HEIGHT))
+v_tl = bm.verts.new((X_PLANE, -HALF_W, HEIGHT))
+face = bm.faces.new((v_bl, v_br, v_tr, v_tl))
+# UV: image bottom (feet) at v=0, top at v=1 — standard OpenGL-style used by glTF
+uvs = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+for loop, uv in zip(face.loops, uvs):
+    loop[uv_layer].uv = uv
 
-bpy.ops.mesh.primitive_cube_add(location=(0, 0, 1.22))
-head = bpy.context.active_object
-head.name = "OyabaunCharacterHead"
-head.scale = (0.2, 0.18, 0.22)
-bpy.ops.object.transform_apply(scale=True)
+# Thin back face (same UVs) so the card is visible from behind at shallow angles
+eps = 0.04
+v2_bl = bm.verts.new((X_PLANE - eps, -HALF_W, 0.0))
+v2_br = bm.verts.new((X_PLANE - eps, HALF_W, 0.0))
+v2_tr = bm.verts.new((X_PLANE - eps, HALF_W, HEIGHT))
+v2_tl = bm.verts.new((X_PLANE - eps, -HALF_W, HEIGHT))
+face2 = bm.faces.new((v2_br, v2_bl, v2_tl, v2_tr))
+for loop, uv in zip(face2.loops, uvs):
+    loop[uv_layer].uv = uv
 
-bpy.ops.object.select_all(action="DESELECT")
-body.select_set(True)
-head.select_set(True)
-bpy.context.view_layer.objects.active = body
-bpy.ops.object.join()
-body.name = "OyabaunCharacter"
-
-bpy.ops.object.mode_set(mode="EDIT")
-bpy.ops.mesh.select_all(action="SELECT")
-bpy.ops.uv.smart_project(angle_limit=66.0)
-bpy.ops.object.mode_set(mode="OBJECT")
+mesh = bpy.data.meshes.new("OyabaunCharacter")
+bm.to_mesh(mesh)
+bm.free()
+obj = bpy.data.objects.new("OyabaunCharacter", mesh)
+bpy.context.collection.objects.link(obj)
+bpy.context.view_layer.objects.active = obj
+obj.select_set(True)
 
 mat = bpy.data.materials.new(name="OyabaunCharMat")
 mat.use_nodes = True
@@ -57,19 +74,20 @@ out = nodes.new("ShaderNodeOutputMaterial")
 prin = nodes.new("ShaderNodeBsdfPrincipled")
 tex = nodes.new("ShaderNodeTexImage")
 if os.path.isfile(SPRITE):
-    tex.image = bpy.data.images.load(SPRITE)
+    tex.image = bpy.data.images.load(SPRITE, check_existing=True)
 else:
     tex.image = None
 links.new(tex.outputs["Color"], prin.inputs["Base Color"])
+if tex.image:
+    links.new(tex.outputs["Alpha"], prin.inputs["Alpha"])
+prin.inputs["Roughness"].default_value = 0.85
+mat.blend_method = "BLEND" if tex.image else "OPAQUE"
 links.new(prin.outputs["BSDF"], out.inputs["Surface"])
-body.data.materials.append(mat)
-
-# Face -Y as forward (matches game forward / glTF -Z camera convention after export)
-body.rotation_euler = (0, 0, 0)
+mesh.materials.append(mat)
 
 bpy.ops.object.select_all(action="DESELECT")
-body.select_set(True)
-bpy.context.view_layer.objects.active = body
+obj.select_set(True)
+bpy.context.view_layer.objects.active = obj
 
 bpy.ops.export_scene.gltf(
     filepath=OUT,
