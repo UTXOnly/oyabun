@@ -145,14 +145,49 @@ fn vs_tex(v: Vin) -> Vout {
     o.uv = v.uv;
     return o;
 }
+// Hash for procedural detail
+fn oya_hash(p: vec2<f32>) -> f32 {
+    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    p3 = p3 + dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
 @fragment
 fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
     let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
-    // Subtle ambient lift so geometry is never fully black
+    let wp = i.world_pos;
+    let lum = t.r * 0.3 + t.g * 0.5 + t.b * 0.2;
+
+    // Procedural brick/block pattern on dark surfaces (walls, ground)
+    var detail = 1.0;
+    if (lum < 0.45) {
+        // Use XY as wall UV (works for most vertical surfaces)
+        let wall_uv = vec2<f32>(wp.x + wp.z, wp.y);
+
+        // Brick pattern: offset every other row
+        let bp = wall_uv * vec2<f32>(1.5, 3.0);
+        let row = floor(bp.y);
+        var bx = bp.x;
+        if (fract(row * 0.5) > 0.25) { bx = bx + 0.5; }
+        let cell = fract(vec2<f32>(bx, bp.y));
+        let mortar = 0.06;
+        let brick = step(mortar, cell.x) * step(mortar, 1.0 - cell.x)
+                   * step(mortar, cell.y) * step(mortar, 1.0 - cell.y);
+
+        // Noise grime
+        let grime = oya_hash(floor(wall_uv * 4.0)) * 0.15;
+
+        // Vertical water streak
+        let streak = oya_hash(vec2<f32>(floor(wall_uv.x * 8.0), 0.5))
+                   * step(fract(wall_uv.y * 2.0), 0.3) * 0.12;
+
+        detail = mix(0.75, 1.0, brick) * (1.0 - grime) * (1.0 - streak);
+    }
+
     let ambient = vec3<f32>(0.03, 0.02, 0.04);
-    let lit = t.rgb + ambient;
+    let lit = t.rgb * detail + ambient;
     let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 15.0) / 15.0;
-    let dist = length(i.world_pos - g.cam_pos.xyz);
+    let dist = length(wp - g.cam_pos.xyz);
     let fog_amt = 1.0 - exp(-dist * g.fog_params.x);
     let fc = g.fog_color.rgb;
     return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), t.a);

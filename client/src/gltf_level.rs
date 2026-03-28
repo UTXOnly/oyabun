@@ -128,7 +128,7 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
     let mut vertices: Vec<WorldVertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     let mut batches: Vec<GltfBatchCpu> = Vec::new();
-    let mut spawn: Option<Vec3> = None;
+    let mut spawn: Option<(Vec3, Mat4)> = None;
     let mut collision_boxes: Vec<Aabb> = Vec::new();
 
     let mut images_rgba8: Vec<(u32, u32, Vec<u8>)> = Vec::with_capacity(images.len());
@@ -152,14 +152,19 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
     }
 
     let bounds = vertex_bounds_from_verts(&vertices);
-    let spawn_pt = spawn.unwrap_or_else(|| {
+    let (spawn_pt, spawn_yaw) = if let Some((pos, world)) = spawn {
+        // Extract yaw from spawn node's world transform: forward is -Z in glTF,
+        // so the spawn's local -Z transformed gives the facing direction.
+        let fwd = world.transform_vector3(Vec3::new(0.0, 0.0, -1.0));
+        let yaw = fwd.x.atan2(-fwd.z);
+        (pos, yaw)
+    } else {
         let cx = (bounds.min.x + bounds.max.x) * 0.5;
         let span_z = (bounds.max.z - bounds.min.z).max(1.0);
-        // AABB center-Z is often empty in long alleys; Tokyo export clusters façades near min-Z.
         let z = bounds.min.z + span_z * 0.14;
-        Vec3::new(cx, bounds.min.y + 0.08, z)
-    });
-    let spawn_yaw = default_spawn_yaw(&bounds, spawn_pt);
+        let pt = Vec3::new(cx, bounds.min.y + 0.08, z);
+        (pt, default_spawn_yaw(&bounds, pt))
+    };
 
     // When no explicit collision meshes exist, create a walkable floor
     // slab instead of the full bounds AABB.  Using the full bounds would
@@ -234,7 +239,7 @@ fn visit_node(
     vertices: &mut Vec<WorldVertex>,
     indices: &mut Vec<u32>,
     batches: &mut Vec<GltfBatchCpu>,
-    spawn: &mut Option<Vec3>,
+    spawn: &mut Option<(Vec3, Mat4)>,
     collision_boxes: &mut Vec<Aabb>,
 ) {
     let world = parent * mat_from_transform(node.transform());
@@ -242,7 +247,7 @@ fn visit_node(
 
     if is_spawn_name(name) {
         let t = world.transform_point3(Vec3::ZERO);
-        *spawn = Some(Vec3::new(t.x, t.y + 0.04, t.z));
+        *spawn = Some((Vec3::new(t.x, t.y + 0.04, t.z), world));
     }
 
     if let Some(mesh) = node.mesh() {

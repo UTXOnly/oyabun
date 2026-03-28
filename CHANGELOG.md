@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-03-28 — Enhance Tokyo alley visual fidelity
+
+### Changes
+
+**`client/src/render.rs`**
+- Added procedural brick/block pattern shader to `SHADER_WORLD_TEX` fragment.
+  Dark surfaces (lum < 0.45) now show mortar-line brick patterns, hash-based
+  grime variation, and vertical water streak stains using world-space coords.
+  Bright surfaces (windows, neon signs) are left untouched.
+- Note: `dpdx`/`dpdy` WGSL builtins cause silent pipeline failure in this
+  wgpu/WebGPU setup; face orientation is derived from `wp.x + wp.z` instead.
+
+**`client/levels/tokyo_alley.glb`** (re-exported from Blender)
+- Added 18 horizontal ledges at floor lines (Z=3, 6, 9) on both walls.
+- Added 10 awnings at street level with slight tilt.
+- Added 8 AC unit boxes on building walls at various heights.
+- Added 4 new materials: OYA_Trim, OYA_Awning, OYA_Frame, OYA_ACUnit.
+- 331 draw batches (up from 295), 32948 verts with architectural detail.
+
+---
+
 ## 2026-03-28 — Fix glTF level rendering (player ejected from map)
 
 ### Root cause
