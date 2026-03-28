@@ -335,13 +335,11 @@
         } catch (e) {
           console.warn("weapon sprites", e);
         }
-        if (!dbg.characters_3d_loaded) {
-          try {
-            await loadBossSprite(app);
-            await loadRivalSprite(app);
-          } catch (e) {
-            console.warn("boss/rival billboard fallback", e);
-          }
+        try {
+          await loadBossSprite(app);
+          await loadRivalSprite(app);
+        } catch (e) {
+          console.warn("boss/rival sprites", e);
         }
 
         const ws = new WebSocket(relayWsUrl());

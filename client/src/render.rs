@@ -307,6 +307,8 @@ fn fs_bill(i: Bout) -> @location(0) vec4<f32> {
 const MAX_BILL_QUADS: usize = 48;
 const BILL_VERTS: usize = MAX_BILL_QUADS * 4;
 const BILL_IDX: usize = MAX_BILL_QUADS * 6;
+/// Upper bound for boss + rival + remotes (see draw_world batching).
+const MAX_CHARACTER_INSTANCES: usize = 32;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -448,6 +450,8 @@ struct CharacterDraw {
     batches: Vec<WorldBatchGpu>,
     char_uniform: wgpu::Buffer,
     char_globals_bg: wgpu::BindGroup,
+    /// Byte stride per instance; multiple of `min_uniform_buffer_offset_alignment`.
+    char_uniform_stride: u32,
     #[allow(dead_code)]
     _textures: Vec<wgpu::Texture>,
     #[allow(dead_code)]
@@ -1043,6 +1047,12 @@ impl Gpu {
     ) -> Result<CharacterDraw, wasm_bindgen::JsValue> {
         use crate::gltf_level::WorldVertex;
 
+        let char_struct_size = std::mem::size_of::<CharUniforms>();
+        let align = device.limits().min_uniform_buffer_offset_alignment as usize;
+        let char_uniform_stride =
+            ((char_struct_size + align - 1) / align * align) as u32;
+        debug_assert!(char_struct_size as u32 <= char_uniform_stride);
+
         let char_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("char-globals"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -1050,10 +1060,8 @@ impl Gpu {
                 visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: std::num::NonZeroU64::new(
-                        std::mem::size_of::<CharUniforms>() as u64
-                    ),
+                    has_dynamic_offset: true,
+                    min_binding_size: std::num::NonZeroU64::new(char_struct_size as u64),
                 },
                 count: None,
             }],
@@ -1061,7 +1069,7 @@ impl Gpu {
 
         let char_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("char-u"),
-            size: std::mem::size_of::<CharUniforms>() as u64,
+            size: u64::from(char_uniform_stride) * MAX_CHARACTER_INSTANCES as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1071,7 +1079,11 @@ impl Gpu {
             layout: &char_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: char_uniform.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &char_uniform,
+                    offset: 0,
+                    size: std::num::NonZeroU64::new(char_struct_size as u64),
+                }),
             }],
         });
 
@@ -1306,6 +1318,7 @@ impl Gpu {
             batches,
             char_uniform,
             char_globals_bg,
+            char_uniform_stride,
             _textures: textures,
             _tint_buffers: tint_buffers,
         })
@@ -2144,6 +2157,33 @@ impl Gpu {
                 .write_buffer(&self.bill_vb, 0, bytemuck::cast_slice(&bill_cpu));
         }
 
+        let char_n = character_models.len().min(MAX_CHARACTER_INSTANCES);
+        let mut char_uniform_bytes: Vec<u8> = Vec::new();
+        if let Some(cd) = &self.character {
+            if char_n > 0 {
+                let stride = cd.char_uniform_stride as usize;
+                char_uniform_bytes.resize(stride * char_n, 0);
+                for (i, &model) in character_models.iter().take(char_n).enumerate() {
+                    let u = CharUniforms {
+                        view_proj: view_proj.to_cols_array_2d(),
+                        model: model.to_cols_array_2d(),
+                        cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
+                        fog_color: [0.12, 0.09, 0.18, 1.0],
+                        fog_params: [0.022, 0.0, 0.0, 0.0],
+                        _p0: [0.0; 4],
+                        _p1: [0.0; 4],
+                        _p2: [0.0; 4],
+                        _p3: [0.0; 4],
+                        _p4: [0.0; 4],
+                    };
+                    let dst = &mut char_uniform_bytes[i * stride..i * stride + std::mem::size_of::<CharUniforms>()];
+                    dst.copy_from_slice(bytemuck::bytes_of(&u));
+                }
+                self.queue
+                    .write_buffer(&cd.char_uniform, 0, char_uniform_bytes.as_slice());
+            }
+        }
+
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
@@ -2208,29 +2248,18 @@ impl Gpu {
             }
 
             if let Some(ref cd) = self.character {
-                pass.set_pipeline(&cd.pipeline);
-                pass.set_vertex_buffer(0, cd.vb.slice(..));
-                pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
-                for &model in character_models {
-                    let u = CharUniforms {
-                        view_proj: view_proj.to_cols_array_2d(),
-                        model: model.to_cols_array_2d(),
-                        cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
-                        fog_color: [0.12, 0.09, 0.18, 1.0],
-                        fog_params: [0.022, 0.0, 0.0, 0.0],
-                        _p0: [0.0; 4],
-                        _p1: [0.0; 4],
-                        _p2: [0.0; 4],
-                        _p3: [0.0; 4],
-                        _p4: [0.0; 4],
-                    };
-                    self.queue
-                        .write_buffer(&cd.char_uniform, 0, bytemuck::bytes_of(&u));
-                    pass.set_bind_group(0, &cd.char_globals_bg, &[]);
-                    for b in &cd.batches {
-                        pass.set_bind_group(1, &b.bind_group, &[]);
-                        let end = b.first_index.saturating_add(b.index_count);
-                        pass.draw_indexed(b.first_index..end, 0, 0..1);
+                if char_n > 0 {
+                    pass.set_pipeline(&cd.pipeline);
+                    pass.set_vertex_buffer(0, cd.vb.slice(..));
+                    pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
+                    let stride = cd.char_uniform_stride;
+                    for i in 0..char_n {
+                        pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                        for b in &cd.batches {
+                            pass.set_bind_group(1, &b.bind_group, &[]);
+                            let end = b.first_index.saturating_add(b.index_count);
+                            pass.draw_indexed(b.first_index..end, 0, 0..1);
+                        }
                     }
                 }
             }
