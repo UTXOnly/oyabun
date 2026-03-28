@@ -307,7 +307,7 @@ fn fs_bill(i: Bout) -> @location(0) vec4<f32> {
 const MAX_BILL_QUADS: usize = 48;
 const BILL_VERTS: usize = MAX_BILL_QUADS * 4;
 const BILL_IDX: usize = MAX_BILL_QUADS * 6;
-/// Upper bound for boss + rival + remotes (see draw_world batching).
+/// Boss + rival + remotes + offline demos (see draw_world batching).
 const MAX_CHARACTER_INSTANCES: usize = 32;
 
 #[repr(C)]
@@ -474,8 +474,8 @@ pub struct Gpu {
     world: WorldRaster,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    /// Mural / reference backdrop (and later: world-placed signage textures).
     bill_pipeline: wgpu::RenderPipeline,
-    bill_npc_pipeline: wgpu::RenderPipeline,
     bill_tex: wgpu::Texture,
     bill_view: wgpu::TextureView,
     bill_sampler: wgpu::Sampler,
@@ -495,16 +495,6 @@ pub struct Gpu {
     arms_texture: wgpu::Texture,
     arms_bind_group: wgpu::BindGroup,
     pub arms_ready: bool,
-    boss_texture: wgpu::Texture,
-    boss_bind_group: wgpu::BindGroup,
-    pub boss_ready: bool,
-    boss_vb: wgpu::Buffer,
-    boss_ib: wgpu::Buffer,
-    rival_texture: wgpu::Texture,
-    rival_bind_group: wgpu::BindGroup,
-    pub rival_ready: bool,
-    rival_vb: wgpu::Buffer,
-    rival_ib: wgpu::Buffer,
     character: Option<CharacterDraw>,
 }
 
@@ -689,60 +679,6 @@ impl Gpu {
             ],
         });
 
-        let (boss_texture, boss_view) = make_transparent_tex(&device, &queue);
-        let boss_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("boss-bg"),
-            layout: &sprite_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&boss_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&bill_sampler),
-                },
-            ],
-        });
-        let boss_vb = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("boss-vb"),
-            size: (std::mem::size_of::<BillVertex>() * 4) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let boss_ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("boss-ib"),
-            contents: bytemuck::cast_slice(&[0u32, 1, 2, 0, 2, 3]),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let (rival_texture, rival_view) = make_transparent_tex(&device, &queue);
-        let rival_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("rival-bg"),
-            layout: &sprite_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&rival_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&bill_sampler),
-                },
-            ],
-        });
-        let rival_vb = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("rival-vb"),
-            size: (std::mem::size_of::<BillVertex>() * 4) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let rival_ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("rival-ib"),
-            contents: bytemuck::cast_slice(&[0u32, 1, 2, 0, 2, 3]),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
         let shader_bill = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bill"),
             source: wgpu::ShaderSource::Wgsl(SHADER_BILL.into()),
@@ -782,42 +718,6 @@ impl Gpu {
                 format: wgpu::TextureFormat::Depth24Plus,
                 depth_write_enabled: false,
                 depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
-
-        let bill_npc_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("bill-npc"),
-            layout: Some(&bill_pl),
-            vertex: wgpu::VertexState {
-                module: &shader_bill,
-                entry_point: Some("vs_bill"),
-                buffers: &[BillVertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader_bill,
-                entry_point: Some("fs_bill"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -974,7 +874,7 @@ impl Gpu {
                     Err(e) => {
                         #[cfg(target_arch = "wasm32")]
                         warn_str(&format!(
-                            "oyabaun: 3D character mesh GPU init failed ({e:?}) — enable boss.png/sprite1.png loads in index.html for NPC billboards"
+                            "oyabaun: 3D character mesh GPU init failed ({e:?}) — rebuild client/characters/oyabaun_player.glb"
                         ));
                         None
                     }
@@ -987,7 +887,7 @@ impl Gpu {
             }
             None => {
                 #[cfg(target_arch = "wasm32")]
-                warn_str("oyabaun: no oyabaun_player.glb parsed — NPCs need billboard textures (boss.png, sprite1.png) until GLB loads");
+                warn_str("oyabaun: no oyabaun_player.glb parsed — run tools/blender_make_oyabaun_character.py and wasm-pack build");
                 None
             }
         };
@@ -1005,7 +905,6 @@ impl Gpu {
             uniform,
             bind_group,
             bill_pipeline,
-            bill_npc_pipeline,
             bill_tex,
             bill_view,
             bill_sampler,
@@ -1025,16 +924,6 @@ impl Gpu {
             arms_texture,
             arms_bind_group,
             arms_ready: false,
-            boss_texture,
-            boss_bind_group,
-            boss_ready: false,
-            boss_vb,
-            boss_ib,
-            rival_texture,
-            rival_bind_group,
-            rival_ready: false,
-            rival_vb,
-            rival_ib,
             character,
         })
     }
@@ -1848,144 +1737,8 @@ impl Gpu {
         Ok(())
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub fn upload_boss_sprite(&mut self, img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
-        let w = img.width().max(1);
-        let h = img.height().max(1);
-        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("boss-sprite"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let src = ImageCopyExternalImage {
-            source: ExternalImageSource::HTMLImageElement(img.clone()),
-            origin: Origin2d::ZERO,
-            flip_y: false,
-        };
-        let dst = wgpu::ImageCopyTextureTagged {
-            texture: &tex,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-            color_space: wgpu::PredefinedColorSpace::Srgb,
-            premultiplied_alpha: false,
-        };
-        self.queue.copy_external_image_to_texture(
-            &src,
-            dst,
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
-        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("boss-bg"),
-            layout: &self.sprite_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.bill_sampler),
-                },
-            ],
-        });
-        self.boss_texture = tex;
-        self.boss_bind_group = bg;
-        self.boss_ready = true;
-        Ok(())
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn upload_rival_sprite(&mut self, img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
-        let w = img.width().max(1);
-        let h = img.height().max(1);
-        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("rival-sprite"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let src = ImageCopyExternalImage {
-            source: ExternalImageSource::HTMLImageElement(img.clone()),
-            origin: Origin2d::ZERO,
-            flip_y: false,
-        };
-        let dst = wgpu::ImageCopyTextureTagged {
-            texture: &tex,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-            color_space: wgpu::PredefinedColorSpace::Srgb,
-            premultiplied_alpha: false,
-        };
-        self.queue.copy_external_image_to_texture(
-            &src,
-            dst,
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
-        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("rival-bg"),
-            layout: &self.sprite_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.bill_sampler),
-                },
-            ],
-        });
-        self.rival_texture = tex;
-        self.rival_bind_group = bg;
-        self.rival_ready = true;
-        Ok(())
-    }
-
     #[cfg(not(target_arch = "wasm32"))]
     pub fn upload_arms_sprite(&mut self, _img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
-        Ok(())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn upload_boss_sprite(&mut self, _img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
-        Ok(())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn upload_rival_sprite(&mut self, _img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
         Ok(())
     }
 
@@ -1998,86 +1751,6 @@ impl Gpu {
         Ok(())
     }
 
-    fn make_bill_quad(cam_pos: Vec3, c: Vec3, sc: f32) -> Option<[BillVertex; 4]> {
-        let to_cam = (cam_pos - c).normalize_or_zero();
-        if to_cam.length_squared() < 0.0001 {
-            return None;
-        }
-        // Y × to_cam so the quad's vertical axis aligns with +world Y (to_cam×Y flips it upside down).
-        let mut right = Vec3::Y.cross(to_cam);
-        if right.length_squared() < 1e-10 {
-            right = Vec3::Z.cross(to_cam);
-        }
-        let right = right.normalize_or_zero();
-        if right.length_squared() < 1e-10 {
-            return None;
-        }
-        let up = to_cam.cross(right).normalize_or_zero();
-        if up.length_squared() < 1e-10 {
-            return None;
-        }
-        let hw = 0.55 * sc;
-        let hh = 1.35 * sc;
-        let mid = c + Vec3::Y * (hh * 0.55);
-        let p = [
-            mid - right * hw - up * hh,
-            mid + right * hw - up * hh,
-            mid + right * hw + up * hh,
-            mid - right * hw + up * hh,
-        ];
-        let uvs = [[0.0_f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
-        if !p.iter().all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite()) {
-            return None;
-        }
-        Some([
-            BillVertex {
-                pos: p[0].to_array(),
-                uv: uvs[0],
-            },
-            BillVertex {
-                pos: p[1].to_array(),
-                uv: uvs[1],
-            },
-            BillVertex {
-                pos: p[2].to_array(),
-                uv: uvs[2],
-            },
-            BillVertex {
-                pos: p[3].to_array(),
-                uv: uvs[3],
-            },
-        ])
-    }
-
-    fn draw_npc_billboard(
-        queue: &wgpu::Queue,
-        pass: &mut wgpu::RenderPass<'_>,
-        cam_pos: Vec3,
-        npc: Option<(Vec3, f32)>,
-        ready: bool,
-        npc_pipeline: &wgpu::RenderPipeline,
-        globals_bg: &wgpu::BindGroup,
-        bind_group: &wgpu::BindGroup,
-        vb: &wgpu::Buffer,
-        ib: &wgpu::Buffer,
-    ) {
-        if !ready {
-            return;
-        }
-        if let Some((bc, sc)) = npc {
-            if let Some(q) = Self::make_bill_quad(cam_pos, bc, sc) {
-                queue.write_buffer(vb, 0, bytemuck::cast_slice(&q));
-                let vb_bytes = 4 * std::mem::size_of::<BillVertex>() as u64;
-                pass.set_pipeline(npc_pipeline);
-                pass.set_bind_group(0, globals_bg, &[]);
-                pass.set_bind_group(1, bind_group, &[]);
-                pass.set_vertex_buffer(0, vb.slice(0..vb_bytes));
-                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..6, 0, 0..1);
-            }
-        }
-    }
-
     pub fn characters_loaded(&self) -> bool {
         self.character.is_some()
     }
@@ -2087,11 +1760,8 @@ impl Gpu {
         view_proj: Mat4,
         clear_rgb: Vec3,
         cam_pos: Vec3,
-        billboards: &[(Vec3, f32)],
         character_models: &[Mat4],
         weapon_hud: WeaponHudParams,
-        boss: Option<(Vec3, f32)>,
-        rival: Option<(Vec3, f32)>,
         level_bounds: &Aabb,
         mural_z: f32,
     ) {
@@ -2114,8 +1784,6 @@ impl Gpu {
             .write_buffer(&self.uniform, 0, bytemuck::bytes_of(&g));
 
         let mut bill_cpu: Vec<BillVertex> = Vec::new();
-        let backdrop_quads: usize = if self.sprite_ready { 1 } else { 0 };
-        let max_player_quads = MAX_BILL_QUADS.saturating_sub(backdrop_quads);
         if self.sprite_ready {
             let b = level_bounds;
             let span_x = (b.max.x - b.min.x).max(8.0);
@@ -2143,14 +1811,6 @@ impl Gpu {
                     pos: corners[i].to_array(),
                     uv: uvs[i],
                 });
-            }
-        }
-        if !billboards.is_empty() {
-            let n = billboards.len().min(max_player_quads);
-            for &(c, sc) in billboards.iter().take(n) {
-                if let Some(q) = Self::make_bill_quad(cam_pos, c, sc) {
-                    bill_cpu.extend_from_slice(&q);
-                }
             }
         }
         if !bill_cpu.is_empty() {
@@ -2276,32 +1936,6 @@ impl Gpu {
                 pass.set_vertex_buffer(0, self.bill_vb.slice(0..vb_bytes));
                 pass.set_index_buffer(self.bill_ib.slice(0..ib_bytes), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..icount, 0, 0..1);
-            }
-            if self.character.is_none() {
-                Self::draw_npc_billboard(
-                    &self.queue,
-                    &mut pass,
-                    cam_pos,
-                    boss,
-                    self.boss_ready,
-                    &self.bill_npc_pipeline,
-                    &self.bind_group,
-                    &self.boss_bind_group,
-                    &self.boss_vb,
-                    &self.boss_ib,
-                );
-                Self::draw_npc_billboard(
-                    &self.queue,
-                    &mut pass,
-                    cam_pos,
-                    rival,
-                    self.rival_ready,
-                    &self.bill_npc_pipeline,
-                    &self.bind_group,
-                    &self.rival_bind_group,
-                    &self.rival_vb,
-                    &self.rival_ib,
-                );
             }
         }
 

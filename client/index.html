@@ -256,36 +256,6 @@
         }
       }
 
-      async function loadBossSprite(app) {
-        try {
-          const img = document.createElement("img");
-          img.crossOrigin = "anonymous";
-          img.src = "./boss.png";
-          await new Promise((res, rej) => {
-            img.onload = res;
-            img.onerror = rej;
-          });
-          app.uploadBossSprite(img);
-        } catch (e) {
-          console.warn("boss.png", e);
-        }
-      }
-
-      async function loadRivalSprite(app) {
-        try {
-          const img = document.createElement("img");
-          img.crossOrigin = "anonymous";
-          img.src = "./sprite1.png";
-          await new Promise((res, rej) => {
-            img.onload = res;
-            img.onerror = rej;
-          });
-          app.uploadRivalSprite(img);
-        } catch (e) {
-          console.warn("sprite1.png", e);
-        }
-      }
-
       function drainNet(ws, app) {
         for (;;) {
           const m = app.take_net_outbound();
@@ -334,12 +304,6 @@
           await loadWeaponSprites(app);
         } catch (e) {
           console.warn("weapon sprites", e);
-        }
-        try {
-          await loadBossSprite(app);
-          await loadRivalSprite(app);
-        } catch (e) {
-          console.warn("boss/rival sprites", e);
         }
 
         const ws = new WebSocket(relayWsUrl());

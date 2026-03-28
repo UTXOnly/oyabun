@@ -405,16 +405,6 @@ impl OyabaunApp {
         self.gpu.upload_arms_sprite(&img)
     }
 
-    #[wasm_bindgen(js_name = uploadBossSprite)]
-    pub fn upload_boss_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
-        self.gpu.upload_boss_sprite(&img)
-    }
-
-    #[wasm_bindgen(js_name = uploadRivalSprite)]
-    pub fn upload_rival_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
-        self.gpu.upload_rival_sprite(&img)
-    }
-
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
     }
@@ -424,11 +414,9 @@ impl OyabaunApp {
             self.gpu.config.width.max(1) as f32 / self.gpu.config.height.max(1) as f32;
         let vp = self.game.view_proj(aspect);
         let cam = self.game.pos + Vec3::new(0.0, 1.65, 0.0);
-        let mut bills: Vec<(Vec3, f32)> = Vec::new();
         let mut character_models: Vec<Mat4> = Vec::new();
         let you = self.net.entity_id;
-        let use_mesh_chars = self.gpu.characters_loaded();
-        if use_mesh_chars {
+        if self.gpu.characters_loaded() {
             if self.boss.alive() {
                 let f = self.boss.foot();
                 let gy = self.game.ground_y_at(f.x, f.z);
@@ -489,68 +477,18 @@ impl OyabaunApp {
                     ));
                 }
             }
-        } else if self.net.joined {
-            if self.net.self_health > 0 {
-                let sy = self.game.yaw.sin();
-                let cy = self.game.yaw.cos();
-                let bx = self.game.pos.x - sy * 1.05;
-                let bz = self.game.pos.z + cy * 1.05;
-                let by = self.game.ground_y_at(bx, bz);
-                bills.push((Vec3::new(bx, by, bz), 0.62));
-            }
-            for p in &self.net.players {
-                if p.health <= 0 {
-                    continue;
-                }
-                if Some(p.id) == you {
-                    continue;
-                }
-                let gy = self.game.ground_y_at(p.x, p.z);
-                let foot_y = (p.y as f32).max(gy);
-                let s = 0.9 + (p.id % 3) as f32 * 0.06;
-                bills.push((Vec3::new(p.x, foot_y, p.z), s));
-            }
-        } else {
-            let spin = self.last_ms as f32 * 0.0007;
-            let base = self.game.pos;
-            let yaw = self.game.yaw;
-            let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
-            let right = Vec3::new(-yaw.cos(), 0.0, -yaw.sin());
-            let spots = [
-                base + fwd * 5.0 + right * 2.0,
-                base + fwd * 8.0,
-                base + fwd * 4.5 - right * 2.5,
-            ];
-            for (i, pos) in spots.iter().enumerate() {
-                let gy = self.game.ground_y_at(pos.x, pos.z);
-                let ph = i as f32 * 0.4;
-                bills.push((Vec3::new(pos.x, gy, pos.z), 0.85 + ph + spin * 0.02));
-            }
         }
         let weapon_hud = WeaponHudParams {
             weapon_id: self.loadout.current_idx() as u32,
             bob: self.last_ms as f32 * 0.0028,
             flash: self.loadout.muzzle_flash,
         };
-        let boss_draw = if self.boss.alive() {
-            Some((self.boss.foot(), self.boss.scale()))
-        } else {
-            None
-        };
-        let rival_draw = if self.rival.alive() {
-            Some((self.rival.foot(), self.rival.scale()))
-        } else {
-            None
-        };
         self.gpu.draw_world(
             vp,
             self.clear,
             cam,
-            &bills,
             &character_models,
             weapon_hud,
-            boss_draw,
-            rival_draw,
             &self.level_bounds,
             self.mural_z,
         );
