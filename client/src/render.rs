@@ -2003,15 +2003,16 @@ impl Gpu {
         if to_cam.length_squared() < 0.0001 {
             return None;
         }
-        let mut right = to_cam.cross(Vec3::Y);
+        // Y × to_cam so the quad's vertical axis aligns with +world Y (to_cam×Y flips it upside down).
+        let mut right = Vec3::Y.cross(to_cam);
         if right.length_squared() < 1e-10 {
-            right = to_cam.cross(Vec3::Z);
+            right = Vec3::Z.cross(to_cam);
         }
         let right = right.normalize_or_zero();
         if right.length_squared() < 1e-10 {
             return None;
         }
-        let up = right.cross(to_cam).normalize_or_zero();
+        let up = to_cam.cross(right).normalize_or_zero();
         if up.length_squared() < 1e-10 {
             return None;
         }
