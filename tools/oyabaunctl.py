@@ -220,6 +220,10 @@ def cmd_export_world(ns: argparse.Namespace) -> None:
         exe = str(ep.resolve())
     else:
         w = shutil.which(exe)
+        if not w and sys.platform == "darwin":
+            mac_blender = Path("/Applications/Blender.app/Contents/MacOS/Blender")
+            if mac_blender.is_file():
+                w = str(mac_blender)
         if not w:
             sys.stderr.write(
                 f"export-world: Blender not found ({exe!r}). "
