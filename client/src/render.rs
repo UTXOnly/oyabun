@@ -288,6 +288,72 @@ fn vs_hud(v: HIn) -> HOut {
   return o;
 }
 
+fn sdf_box(p: vec2<f32>, c: vec2<f32>, half: vec2<f32>) -> f32 {
+  let d = abs(p - c) - half;
+  return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
+}
+fn sdf_round_box(p: vec2<f32>, c: vec2<f32>, half: vec2<f32>, r: f32) -> f32 {
+  let d = abs(p - c) - half + vec2<f32>(r);
+  return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - r;
+}
+fn fill(d: f32) -> f32 { return smoothstep(0.003, 0.0, d); }
+fn shade_metal(base: vec3<f32>, uv: vec2<f32>, highlight_y: f32) -> vec3<f32> {
+  let spec = smoothstep(0.06, 0.0, abs(uv.y - highlight_y)) * 0.15;
+  let edge = smoothstep(0.0, 0.01, abs(uv.x - 0.5)) * 0.1;
+  return base * (1.0 + spec - edge);
+}
+
+fn draw_hand(uv: vec2<f32>, cx: f32, cy: f32, side: f32) -> vec4<f32> {
+  let skin = vec3<f32>(0.62, 0.44, 0.33);
+  let skin_dark = vec3<f32>(0.48, 0.32, 0.24);
+  let knuckle = vec3<f32>(0.55, 0.38, 0.28);
+  var a = 0.0;
+  var col = skin;
+
+  // Palm
+  let palm = sdf_round_box(uv, vec2<f32>(cx, cy), vec2<f32>(0.06, 0.06), 0.02);
+  let pa = fill(palm);
+  a = max(a, pa);
+  col = mix(col, skin, pa);
+
+  // Four fingers curling around grip
+  for (var fi = 0; fi < 4; fi = fi + 1) {
+    let fy = cy + 0.04 - f32(fi) * 0.025;
+    let fx = cx + side * 0.07;
+    let seg1 = sdf_round_box(uv, vec2<f32>(fx, fy), vec2<f32>(0.025, 0.008), 0.005);
+    let s1 = fill(seg1);
+    // Fingertip curling inward
+    let fx2 = fx + side * 0.02;
+    let seg2 = sdf_round_box(uv, vec2<f32>(fx2, fy - 0.01), vec2<f32>(0.012, 0.007), 0.004);
+    let s2 = fill(seg2);
+    let fc = mix(skin, knuckle, 0.3 + f32(fi) * 0.1);
+    a = max(a, max(s1, s2));
+    col = mix(col, fc, max(s1, s2));
+  }
+
+  // Thumb on opposite side
+  let tx = cx - side * 0.05;
+  let ty = cy + 0.05;
+  let thumb = sdf_round_box(uv, vec2<f32>(tx, ty), vec2<f32>(0.015, 0.025), 0.008);
+  let ta = fill(thumb);
+  a = max(a, ta);
+  col = mix(col, skin_dark, ta * 0.5);
+
+  // Wrist
+  let wrist = sdf_round_box(uv, vec2<f32>(cx - side * 0.02, cy - 0.12), vec2<f32>(0.05, 0.06), 0.02);
+  let wa = fill(wrist);
+  a = max(a, wa);
+  col = mix(col, skin, wa);
+
+  // Sleeve cuff
+  let sleeve = sdf_round_box(uv, vec2<f32>(cx - side * 0.02, cy - 0.20), vec2<f32>(0.055, 0.05), 0.01);
+  let sa = fill(sleeve);
+  a = max(a, sa);
+  col = mix(col, vec3<f32>(0.10, 0.10, 0.12), sa);
+
+  return vec4<f32>(col, a * 0.95);
+}
+
 @fragment
 fn fs_hud(i: HOut) -> @location(0) vec4<f32> {
   let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
@@ -297,48 +363,241 @@ fn fs_hud(i: HOut) -> @location(0) vec4<f32> {
     rgba = vec4<f32>(t.rgb * (1.02 + 0.08 * hu.flash), t.a);
   } else {
   let uv = i.uv;
-  let skin = vec3<f32>(0.66, 0.46, 0.36);
-  let lh = length(uv - vec2<f32>(0.13, 0.93));
-  let rh = length(uv - vec2<f32>(0.87, 0.91));
-  let ha = smoothstep(0.17, 0.03, lh);
-  let hb = smoothstep(0.15, 0.03, rh);
-  rgba = mix(rgba, vec4<f32>(skin, 0.9), max(ha, hb) * 0.88);
 
-  let metal = vec3<f32>(0.2, 0.19, 0.22);
-  let dark = vec3<f32>(0.12, 0.11, 0.13);
+  let metal_light = vec3<f32>(0.28, 0.27, 0.30);
+  let metal_mid   = vec3<f32>(0.18, 0.17, 0.20);
+  let metal_dark  = vec3<f32>(0.10, 0.09, 0.11);
+  let grip_color  = vec3<f32>(0.14, 0.12, 0.10);
+  let wood_color  = vec3<f32>(0.35, 0.22, 0.12);
 
-  if hu.weapon == 0u {
-    let grip = step(0.44, uv.x) * step(uv.x, 0.57) * step(0.38, uv.y) * step(uv.y, 0.7);
-    let bar = step(0.47, uv.x) * step(uv.x, 0.54) * step(0.58, uv.y) * step(uv.y, 0.96);
-    rgba = mix(rgba, vec4<f32>(dark * 0.85, 0.95), grip);
-    rgba = mix(rgba, vec4<f32>(metal, 0.98), bar);
-  } else if hu.weapon == 1u {
-    let stock = step(0.32, uv.x) * step(uv.x, 0.42) * step(0.4, uv.y) * step(uv.y, 0.68);
-    let body = step(0.38, uv.x) * step(uv.x, 0.62) * step(0.32, uv.y) * step(uv.y, 0.62);
-    let barrels = step(0.4, uv.x) * step(uv.x, 0.6) * step(0.68, uv.y) * step(uv.y, 0.94);
-    rgba = mix(rgba, vec4<f32>(dark * 0.75, 0.92), stock);
-    rgba = mix(rgba, vec4<f32>(metal * 0.9, 0.96), body);
-    rgba = mix(rgba, vec4<f32>(metal, 0.99), barrels);
+  // ===== RIGHT HAND (holding weapon) =====
+  let rhand = draw_hand(uv, 0.55, 0.48, 1.0);
+  rgba = mix(rgba, vec4<f32>(rhand.rgb, 0.95), rhand.a);
+
+  // ===== LEFT HAND (support or idle) =====
+  var lhand: vec4<f32>;
+  if hu.weapon == 1u {
+    // Shotgun: left hand forward on pump
+    lhand = draw_hand(uv, 0.42, 0.62, -1.0);
   } else if hu.weapon == 2u {
-    let mag = step(0.46, uv.x) * step(uv.x, 0.54) * step(0.36, uv.y) * step(uv.y, 0.58);
-    let body = step(0.35, uv.x) * step(uv.x, 0.65) * step(0.42, uv.y) * step(uv.y, 0.55);
-    let barrel = step(0.42, uv.x) * step(uv.x, 0.58) * step(0.56, uv.y) * step(uv.y, 0.92);
-    rgba = mix(rgba, vec4<f32>(dark, 0.94), mag);
-    rgba = mix(rgba, vec4<f32>(metal * 0.8, 0.95), body);
-    rgba = mix(rgba, vec4<f32>(metal * 0.95, 0.98), barrel);
+    // SMG: left hand on foregrip
+    lhand = draw_hand(uv, 0.40, 0.56, -1.0);
   } else {
-    let core = step(0.4, uv.x) * step(uv.x, 0.6) * step(0.4, uv.y) * step(uv.y, 0.65);
-    let coils = step(0.38, uv.x) * step(uv.x, 0.62) * step(0.62, uv.y) * step(uv.y, 0.88);
-    let glow = vec3<f32>(0.25, 0.75, 0.88);
-    rgba = mix(rgba, vec4<f32>(dark * 0.9, 0.93), core);
-    rgba = mix(rgba, vec4<f32>(mix(metal, glow, 0.55), 0.97), coils);
+    // Pistol/plasma: left hand lower, idle
+    lhand = draw_hand(uv, 0.22, 0.30, -1.0);
+  }
+  rgba = mix(rgba, vec4<f32>(lhand.rgb, 0.95), lhand.a);
+
+  // ===== WEAPONS =====
+  if hu.weapon == 0u {
+    // --- M9 PISTOL ---
+    // Grip (angled back)
+    let gp = vec2<f32>(uv.x - (uv.y - 0.45) * 0.08, uv.y);
+    let grip = sdf_round_box(gp, vec2<f32>(0.52, 0.42), vec2<f32>(0.04, 0.08), 0.008);
+    let ga = fill(grip);
+    // Grip texture (horizontal lines)
+    let grip_tex = grip_color * (0.9 + 0.1 * step(0.5, fract(uv.y * 60.0)));
+    rgba = mix(rgba, vec4<f32>(grip_tex, 0.97), ga);
+
+    // Slide (main body)
+    let slide = sdf_round_box(uv, vec2<f32>(0.51, 0.60), vec2<f32>(0.035, 0.12), 0.005);
+    let sa = fill(slide);
+    let sc = shade_metal(metal_mid, uv, 0.65);
+    rgba = mix(rgba, vec4<f32>(sc, 0.98), sa);
+
+    // Barrel
+    let barrel = sdf_round_box(uv, vec2<f32>(0.51, 0.76), vec2<f32>(0.02, 0.04), 0.003);
+    let ba = fill(barrel);
+    rgba = mix(rgba, vec4<f32>(metal_dark, 0.99), ba);
+
+    // Muzzle hole
+    let muz = length(uv - vec2<f32>(0.51, 0.80)) - 0.008;
+    rgba = mix(rgba, vec4<f32>(0.02, 0.02, 0.02, 1.0), fill(muz));
+
+    // Trigger guard
+    let tg = sdf_round_box(uv, vec2<f32>(0.51, 0.49), vec2<f32>(0.025, 0.008), 0.003);
+    let tga = fill(tg);
+    rgba = mix(rgba, vec4<f32>(metal_dark, 0.96), tga);
+
+    // Trigger
+    let tr = sdf_round_box(uv, vec2<f32>(0.52, 0.50), vec2<f32>(0.005, 0.012), 0.002);
+    rgba = mix(rgba, vec4<f32>(metal_light, 0.98), fill(tr));
+
+    // Front sight
+    let fs_d = sdf_box(uv, vec2<f32>(0.51, 0.725), vec2<f32>(0.004, 0.006));
+    rgba = mix(rgba, vec4<f32>(metal_dark, 0.98), fill(fs_d));
+
+    // Rear sight
+    let rs1 = sdf_box(uv, vec2<f32>(0.495, 0.55), vec2<f32>(0.003, 0.005));
+    let rs2 = sdf_box(uv, vec2<f32>(0.525, 0.55), vec2<f32>(0.003, 0.005));
+    rgba = mix(rgba, vec4<f32>(metal_dark, 0.98), max(fill(rs1), fill(rs2)));
+
+    // Slide serrations (vertical lines on rear)
+    let ser_area = step(0.475, uv.x) * step(uv.x, 0.545) * step(0.52, uv.y) * step(uv.y, 0.56);
+    let ser_lines = step(0.6, fract(uv.y * 80.0));
+    rgba = mix(rgba, vec4<f32>(metal_dark * 0.8, 0.95), ser_area * ser_lines * 0.5);
+
+    // Ejection port
+    let ej = sdf_box(uv, vec2<f32>(0.535, 0.60), vec2<f32>(0.003, 0.015));
+    rgba = mix(rgba, vec4<f32>(metal_dark * 0.7, 0.96), fill(ej) * 0.6);
+
+    // Hammer
+    let hm = sdf_round_box(uv, vec2<f32>(0.51, 0.505), vec2<f32>(0.008, 0.008), 0.003);
+    rgba = mix(rgba, vec4<f32>(metal_light, 0.97), fill(hm));
+
+  } else if hu.weapon == 1u {
+    // --- SHOTGUN ---
+    // Stock (wood)
+    let stock = sdf_round_box(uv, vec2<f32>(0.48, 0.35), vec2<f32>(0.04, 0.10), 0.01);
+    let stk_a = fill(stock);
+    let wood_tex = wood_color * (0.85 + 0.15 * step(0.4, fract(uv.y * 25.0 + uv.x * 8.0)));
+    rgba = mix(rgba, vec4<f32>(wood_tex, 0.96), stk_a);
+
+    // Receiver body
+    let recv = sdf_round_box(uv, vec2<f32>(0.50, 0.52), vec2<f32>(0.04, 0.08), 0.008);
+    let ra = fill(recv);
+    rgba = mix(rgba, vec4<f32>(shade_metal(metal_mid, uv, 0.55), 0.97), ra);
+
+    // Upper barrel
+    let bar1 = sdf_round_box(uv, vec2<f32>(0.50, 0.72), vec2<f32>(0.02, 0.14), 0.008);
+    let b1a = fill(bar1);
+    rgba = mix(rgba, vec4<f32>(shade_metal(metal_light, uv, 0.78), 0.98), b1a);
+
+    // Lower barrel
+    let bar2 = sdf_round_box(uv, vec2<f32>(0.50, 0.72), vec2<f32>(0.015, 0.13), 0.006);
+    let b2a = fill(bar2);
+    rgba = mix(rgba, vec4<f32>(metal_mid * 0.9, 0.97), b2a * 0.4);
+
+    // Pump/forend (wood)
+    let pump = sdf_round_box(uv, vec2<f32>(0.50, 0.62), vec2<f32>(0.03, 0.04), 0.008);
+    let pa = fill(pump);
+    rgba = mix(rgba, vec4<f32>(wood_color * 1.1, 0.97), pa);
+
+    // Muzzle
+    let muz = length(uv - vec2<f32>(0.50, 0.86)) - 0.012;
+    rgba = mix(rgba, vec4<f32>(0.03, 0.03, 0.03, 1.0), fill(muz));
+
+    // Trigger guard + trigger
+    let tg = sdf_round_box(uv, vec2<f32>(0.50, 0.46), vec2<f32>(0.022, 0.006), 0.003);
+    rgba = mix(rgba, vec4<f32>(metal_dark, 0.96), fill(tg));
+    let tr = sdf_round_box(uv, vec2<f32>(0.505, 0.47), vec2<f32>(0.004, 0.01), 0.002);
+    rgba = mix(rgba, vec4<f32>(metal_light, 0.97), fill(tr));
+
+    // Front bead sight
+    let bead = length(uv - vec2<f32>(0.50, 0.84)) - 0.005;
+    rgba = mix(rgba, vec4<f32>(0.9, 0.1, 0.05, 1.0), fill(bead));
+
+  } else if hu.weapon == 2u {
+    // --- SMG (MP5-style) ---
+    // Grip
+    let gp2 = vec2<f32>(uv.x - (uv.y - 0.40) * 0.06, uv.y);
+    let grip2 = sdf_round_box(gp2, vec2<f32>(0.52, 0.38), vec2<f32>(0.03, 0.07), 0.006);
+    let g2a = fill(grip2);
+    let grip2_tex = grip_color * (0.9 + 0.1 * step(0.5, fract(uv.y * 55.0)));
+    rgba = mix(rgba, vec4<f32>(grip2_tex, 0.97), g2a);
+
+    // Lower receiver
+    let lrcv = sdf_round_box(uv, vec2<f32>(0.50, 0.50), vec2<f32>(0.04, 0.06), 0.006);
+    rgba = mix(rgba, vec4<f32>(shade_metal(metal_dark, uv, 0.52), 0.97), fill(lrcv));
+
+    // Upper receiver
+    let urcv = sdf_round_box(uv, vec2<f32>(0.50, 0.58), vec2<f32>(0.035, 0.05), 0.005);
+    rgba = mix(rgba, vec4<f32>(shade_metal(metal_mid, uv, 0.60), 0.98), fill(urcv));
+
+    // Barrel + shroud
+    let bshr = sdf_round_box(uv, vec2<f32>(0.50, 0.72), vec2<f32>(0.022, 0.10), 0.006);
+    rgba = mix(rgba, vec4<f32>(shade_metal(metal_light, uv, 0.76), 0.98), fill(bshr));
+
+    // Barrel vent holes
+    let vent_area = step(0.48, uv.x) * step(uv.x, 0.52) * step(0.66, uv.y) * step(uv.y, 0.78);
+    let vents = step(0.7, fract(uv.y * 40.0));
+    rgba = mix(rgba, vec4<f32>(metal_dark * 0.6, 0.96), vent_area * vents * 0.4);
+
+    // Magazine (curved)
+    let mag = sdf_round_box(uv, vec2<f32>(0.50, 0.42), vec2<f32>(0.018, 0.06), 0.004);
+    rgba = mix(rgba, vec4<f32>(metal_dark * 0.85, 0.97), fill(mag));
+
+    // Folding stock
+    let stk1 = sdf_box(uv, vec2<f32>(0.48, 0.42), vec2<f32>(0.003, 0.05));
+    let stk2 = sdf_box(uv, vec2<f32>(0.46, 0.38), vec2<f32>(0.02, 0.003));
+    rgba = mix(rgba, vec4<f32>(metal_mid, 0.95), max(fill(stk1), fill(stk2)));
+
+    // Muzzle
+    let muz = length(uv - vec2<f32>(0.50, 0.82)) - 0.010;
+    rgba = mix(rgba, vec4<f32>(0.02, 0.02, 0.02, 1.0), fill(muz));
+
+    // Iron sights
+    let fs_d = sdf_box(uv, vec2<f32>(0.50, 0.80), vec2<f32>(0.003, 0.005));
+    rgba = mix(rgba, vec4<f32>(metal_dark, 0.98), fill(fs_d));
+
+    // Trigger
+    let tg2 = sdf_round_box(uv, vec2<f32>(0.50, 0.455), vec2<f32>(0.02, 0.005), 0.002);
+    rgba = mix(rgba, vec4<f32>(metal_dark, 0.96), fill(tg2));
+    let tr2 = sdf_round_box(uv, vec2<f32>(0.505, 0.46), vec2<f32>(0.004, 0.008), 0.002);
+    rgba = mix(rgba, vec4<f32>(metal_light, 0.97), fill(tr2));
+
+    // Charging handle
+    let ch = sdf_box(uv, vec2<f32>(0.535, 0.56), vec2<f32>(0.008, 0.004));
+    rgba = mix(rgba, vec4<f32>(metal_light, 0.96), fill(ch));
+
+  } else {
+    // --- PLASMA GUN (sci-fi) ---
+    let glow = vec3<f32>(0.20, 0.65, 0.88);
+    let glow_hot = vec3<f32>(0.40, 0.90, 1.0);
+    let hull = vec3<f32>(0.12, 0.14, 0.18);
+
+    // Grip
+    let gp3 = vec2<f32>(uv.x - (uv.y - 0.42) * 0.05, uv.y);
+    let grip3 = sdf_round_box(gp3, vec2<f32>(0.52, 0.40), vec2<f32>(0.03, 0.07), 0.006);
+    rgba = mix(rgba, vec4<f32>(hull * 1.2, 0.97), fill(grip3));
+
+    // Main body
+    let body = sdf_round_box(uv, vec2<f32>(0.50, 0.56), vec2<f32>(0.045, 0.08), 0.01);
+    rgba = mix(rgba, vec4<f32>(hull, 0.97), fill(body));
+
+    // Energy chamber (glowing)
+    let chamber = sdf_round_box(uv, vec2<f32>(0.50, 0.56), vec2<f32>(0.025, 0.04), 0.008);
+    let ch_a = fill(chamber);
+    let pulse = 0.7 + 0.3 * sin(hu.bob * 3.0);
+    rgba = mix(rgba, vec4<f32>(glow * pulse, 0.95), ch_a * 0.7);
+
+    // Barrel housing
+    let bh = sdf_round_box(uv, vec2<f32>(0.50, 0.72), vec2<f32>(0.03, 0.10), 0.008);
+    rgba = mix(rgba, vec4<f32>(hull * 1.1, 0.98), fill(bh));
+
+    // Energy coils (3 rings)
+    for (var ci = 0; ci < 3; ci = ci + 1) {
+      let cy = 0.66 + f32(ci) * 0.05;
+      let coil = sdf_round_box(uv, vec2<f32>(0.50, cy), vec2<f32>(0.032, 0.006), 0.003);
+      rgba = mix(rgba, vec4<f32>(glow * (0.8 + 0.2 * pulse), 0.96), fill(coil));
+    }
+
+    // Muzzle emitter (bright glow)
+    let emitter = length(uv - vec2<f32>(0.50, 0.82)) - 0.015;
+    let em_a = fill(emitter);
+    rgba = mix(rgba, vec4<f32>(glow_hot * pulse, 0.98), em_a);
+
+    // Side vents
+    let v_area = step(0.53, uv.x) * step(uv.x, 0.545) * step(0.50, uv.y) * step(uv.y, 0.62);
+    let v_lines = step(0.6, fract(uv.y * 30.0));
+    rgba = mix(rgba, vec4<f32>(glow * 0.5, 0.90), v_area * v_lines);
+
+    // Trigger
+    let tg3 = sdf_round_box(uv, vec2<f32>(0.50, 0.455), vec2<f32>(0.02, 0.005), 0.002);
+    rgba = mix(rgba, vec4<f32>(hull * 0.8, 0.96), fill(tg3));
+    let tr3 = sdf_round_box(uv, vec2<f32>(0.505, 0.46), vec2<f32>(0.004, 0.008), 0.002);
+    rgba = mix(rgba, vec4<f32>(glow * 0.6, 0.97), fill(tr3));
+
+    // Top rail
+    let rail = sdf_box(uv, vec2<f32>(0.50, 0.64), vec2<f32>(0.005, 0.08));
+    rgba = mix(rgba, vec4<f32>(hull * 1.3, 0.96), fill(rail) * 0.5);
   }
 
   }
   if hu.flash > 0.01 {
-    let mf = length(i.uv - vec2<f32>(0.505, 0.76));
-    let fl = smoothstep(0.22, 0.0, mf) * hu.flash;
-    rgba = mix(rgba, vec4<f32>(1.0, 0.88, 0.4, 1.0), fl);
+    let mf = length(i.uv - vec2<f32>(0.505, 0.82));
+    let fl = smoothstep(0.18, 0.0, mf) * hu.flash;
+    rgba = mix(rgba, vec4<f32>(1.0, 0.92, 0.5, 1.0), fl);
   }
   return rgba;
 }
