@@ -199,6 +199,66 @@ def cmd_stop(_: argparse.Namespace) -> None:
     print("stopped relay + web (process groups + port sweep)")
 
 
+def _blender_exe(ns: argparse.Namespace | None = None) -> str:
+    if ns is not None and getattr(ns, "blender", None):
+        return ns.blender
+    return os.environ.get("BLENDER", "blender")
+
+
+def cmd_export_world(ns: argparse.Namespace) -> None:
+    """Run Blender headless to write client/levels/tokyo_alley.glb and/or tokyo_street.json."""
+    blend = Path(ns.blend).expanduser().resolve()
+    if not blend.is_file():
+        sys.stderr.write(f"export-world: blend file not found: {blend}\n")
+        sys.exit(1)
+
+    import shutil
+
+    exe = _blender_exe(ns)
+    ep = Path(exe)
+    if ep.is_file():
+        exe = str(ep.resolve())
+    else:
+        w = shutil.which(exe)
+        if not w:
+            sys.stderr.write(
+                f"export-world: Blender not found ({exe!r}). "
+                "Install Blender, put it on PATH, or pass --blender /path/to/blender\n"
+            )
+            sys.exit(1)
+        exe = w
+
+    levels = ROOT / "client" / "levels"
+    levels.mkdir(parents=True, exist_ok=True)
+    out_glb = Path(ns.output_glb).expanduser().resolve() if ns.output_glb else levels / "tokyo_alley.glb"
+    out_json = Path(ns.output_json).expanduser().resolve() if ns.output_json else levels / "tokyo_street.json"
+
+    glb_script = ROOT / "tools" / "blender_export_gltf_oyabaun.py"
+    json_script = ROOT / "tools" / "blender_export_oyabaun.py"
+    if ns.fmt in ("glb", "both") and not glb_script.is_file():
+        sys.stderr.write(f"export-world: missing {glb_script}\n")
+        sys.exit(1)
+    if ns.fmt in ("json", "both") and not json_script.is_file():
+        sys.stderr.write(f"export-world: missing {json_script}\n")
+        sys.exit(1)
+
+    base_cmd = [exe, str(blend), "--background"]
+
+    if ns.fmt in ("glb", "both"):
+        env = os.environ.copy()
+        env["OYABAUN_GLB_OUT"] = str(out_glb)
+        print(f"export-world: glTF -> {out_glb}")
+        subprocess.run([*base_cmd, "--python", str(glb_script)], cwd=ROOT, env=env, check=True)
+
+    if ns.fmt in ("json", "both"):
+        env = os.environ.copy()
+        env["OYABAUN_OUT"] = str(out_json)
+        print(f"export-world: JSON  -> {out_json}")
+        subprocess.run([*base_cmd, "--python", str(json_script)], cwd=ROOT, env=env, check=True)
+
+    print("export-world: done (serve from client/; see docs/BLENDER_GLTF.md)")
+
+
 def cmd_rebuild(ns: argparse.Namespace) -> None:
     if ns.wasm:
         subprocess.run(
@@ -360,6 +420,35 @@ def main() -> None:
     sp.add_argument("--wasm-only", action="store_true", dest="wasm", help="only wasm-pack")
     sp.add_argument("--relay-only", action="store_true", dest="relay", help="only go build")
     sp.set_defaults(func=cmd_rebuild, wasm=False, relay=False)
+
+    sp = sub.add_parser(
+        "export-world",
+        help="export a .blend to client/levels (glTF .glb for WASM, optional vertex JSON fallback)",
+    )
+    sp.add_argument("--blend", required=True, help="path to Blender .blend file")
+    sp.add_argument(
+        "--format",
+        dest="fmt",
+        choices=("glb", "json", "both"),
+        default="both",
+        help="glb= textured level only, json= legacy vertex export, both= run both (default)",
+    )
+    sp.add_argument(
+        "--blender",
+        default=None,
+        help="Blender executable (default: $BLENDER env or 'blender' on PATH)",
+    )
+    sp.add_argument(
+        "--output-glb",
+        default=None,
+        help="output .glb path (default: <repo>/client/levels/tokyo_alley.glb)",
+    )
+    sp.add_argument(
+        "--output-json",
+        default=None,
+        help="output JSON path (default: <repo>/client/levels/tokyo_street.json)",
+    )
+    sp.set_defaults(func=cmd_export_world)
 
     sp = sub.add_parser("launch", help="start relay binary + static client (http.server)")
     sp.add_argument("--docker", action="store_true", help="docker compose relay instead of local binary")

@@ -2,7 +2,17 @@
 
 The WASM client loads **`client/levels/tokyo_alley.glb`** first (binary glTF with embedded images). If that fetch fails, it falls back to `tokyo_street.json` (vertex-color JSON), then the built-in procedural arena.
 
-## Export from Blender
+## CLI (oyabaunctl)
+
+From the repo root:
+
+```bash
+python3 tools/oyabaunctl.py export-world --blend /path/to/your_scene.blend
+```
+
+Writes **`client/levels/tokyo_alley.glb`** (and by default also **`tokyo_street.json`** via the legacy script). Use `--format glb` for glTF only. Set **`BLENDER`** or **`--blender`** if `blender` is not on `PATH` (macOS: path to `Blender.app/Contents/MacOS/Blender`).
+
+## Export from Blender (manual)
 
 1. **Apply scale** on meshes (Ctrl+A → Scale) so transforms are baked.
 2. **Materials**: use Principled BSDF with **Base Color** wired to an **Image Texture** (pixel art: small images, e.g. 64–256 px). The runtime uses **nearest** sampling and a 15-step posterize in the fragment shader.

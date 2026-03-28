@@ -35,7 +35,7 @@ description: >-
 ## Dev
 
 - Relay: `cd relay && go run ./cmd/oyabaun-relay` (or Docker Compose from repo root).
-- Control script: `tools/oyabaunctl.py` (state under `.oyabaun/`).
+- Control script: `tools/oyabaunctl.py` (state under `.oyabaun/`). Export levels: `python3 tools/oyabaunctl.py export-world --blend /path/to/scene.blend` → `client/levels/tokyo_alley.glb` (+ optional JSON).
 - Client static: serve `client/pkg/` after wasm-pack, or use `python3 -m http.server` from `client/` with correct headers if needed.
 
 ## Conventions
