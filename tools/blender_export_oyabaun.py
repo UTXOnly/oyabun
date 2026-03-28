@@ -6,9 +6,10 @@ Exports triangulated mesh (vertex colors from Principled base + emission tint) a
 AABBs for collision. Game uses Y-up; Blender is Z-up:
   game_xyz = (blender_x, blender_z, -blender_y)
 
-Optional: create collection "OyabaunCollision" with box meshes for manual colliders.
-If empty, solids are AABBs for each mesh whose name contains "Building" or starts
-with "Ground" (excludes Win_, OYA_Light_, REF_).
+Optional: collection "OyabaunCollision" — box meshes for manual colliders.
+Empties (game-space positions, set in Blender): OyabaunSpawn, OyabaunBoss, OyabaunRival.
+If OyabaunSpawn is missing, spawn is ground mesh center at pavement top (+4 cm).
+If empty, auto solids use AABBs for "Building" / "Ground" (excludes Win_, OYA_Light_, REF_).
 """
 from __future__ import annotations
 
@@ -32,8 +33,8 @@ OUT = globals().get(
     ),
 )
 
-# Feet on ground; camera adds 1.65 in client.
-SPAWN_GAME = globals().get("OYABAUN_SPAWN", [0.0, 0.0, 4.0])
+# Overridden by OyabaunSpawn empty or auto ground center; feet Y = pavement top + pad.
+SPAWN_GAME = globals().get("OYABAUN_SPAWN", None)
 
 
 def blender_to_game(v: Vector) -> tuple[float, float, float]:
@@ -57,6 +58,35 @@ def get_principled_rgb(mat) -> tuple[float, float, float]:
                 b = b * 0.65 + ec[2] * min(e * 0.08, 0.85)
             return (max(0.0, min(1.0, r)), max(0.0, min(1.0, g)), max(0.0, min(1.0, b)))
     return tuple(mat.diffuse_color[:3])
+
+
+def empty_game_location(name: str) -> tuple[float, float, float] | None:
+    obj = bpy.data.objects.get(name)
+    if not obj or obj.type != "EMPTY":
+        return None
+    w = obj.matrix_world.translation
+    return blender_to_game(w)
+
+
+def spawn_from_ground(mesh_objs: list) -> tuple[float, float, float]:
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    for obj in mesh_objs:
+        if not obj.name.startswith("Ground"):
+            continue
+        mw = obj.matrix_world
+        for corner in obj.bound_box:
+            gx, gy, gz = blender_to_game(mw @ Vector(corner))
+            xs.append(gx)
+            ys.append(gy)
+            zs.append(gz)
+    if not xs:
+        return (0.0, 0.12, 0.0)
+    cx = (min(xs) + max(xs)) * 0.5
+    cz = (min(zs) + max(zs)) * 0.5
+    cy_top = max(ys) + 0.04
+    return (cx, cy_top, cz)
 
 
 def triangulate_object_mesh(obj) -> bpy.types.Mesh:
@@ -164,9 +194,32 @@ def export() -> str:
                 }
             )
 
+    spawn = empty_game_location("OyabaunSpawn")
+    if spawn is None:
+        spawn = spawn_from_ground(mesh_objs)
+    if SPAWN_GAME is not None:
+        spawn = tuple(SPAWN_GAME)  # type: ignore[assignment]
+
+    bf = empty_game_location("OyabaunBoss")
+    if bf is None:
+        bf = (
+            spawn[0] + 7.0,
+            spawn[1],
+            spawn[2] - 12.0,
+        )
+    rf = empty_game_location("OyabaunRival")
+    if rf is None:
+        rf = (
+            spawn[0] - 6.0,
+            spawn[1],
+            spawn[2] - 10.0,
+        )
+
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     payload = {
-        "spawn": SPAWN_GAME,
+        "spawn": list(spawn),
+        "boss_foot": list(bf),
+        "rival_foot": list(rf),
         "vertices": verts_out,
         "indices": indices_out,
         "solids": solids,

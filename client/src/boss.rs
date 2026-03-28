@@ -3,11 +3,12 @@ use glam::Vec3;
 use crate::game::GameState;
 use crate::mesh::Aabb;
 
-const FOOT: Vec3 = Vec3::new(11.85, 0.0, -11.85);
+const FOOT_DEFAULT: Vec3 = Vec3::new(11.85, 0.0, -11.85);
 const SCALE: f32 = 1.22;
 const DAMAGE: [f32; 4] = [24.0, 42.0, 16.0, 30.0];
 
 pub struct BossState {
+    foot: Vec3,
     hp: f32,
     max_hp: f32,
 }
@@ -15,6 +16,15 @@ pub struct BossState {
 impl BossState {
     pub fn new() -> Self {
         Self {
+            foot: FOOT_DEFAULT,
+            hp: 220.0,
+            max_hp: 220.0,
+        }
+    }
+
+    pub fn with_foot(foot: Vec3) -> Self {
+        Self {
+            foot,
             hp: 220.0,
             max_hp: 220.0,
         }
@@ -25,7 +35,7 @@ impl BossState {
     }
 
     pub fn foot(&self) -> Vec3 {
-        FOOT
+        self.foot
     }
 
     pub fn scale(&self) -> f32 {
@@ -36,12 +46,13 @@ impl BossState {
         (self.hp / self.max_hp).clamp(0.0, 1.0)
     }
 
-    fn hit_aabb() -> Aabb {
+    fn hit_aabb(&self) -> Aabb {
         let sc = SCALE;
         let pad = 0.68 * sc;
+        let f = self.foot;
         Aabb {
-            min: Vec3::new(FOOT.x - pad, 0.05, FOOT.z - pad),
-            max: Vec3::new(FOOT.x + pad, 2.55 * sc, FOOT.z + pad),
+            min: Vec3::new(f.x - pad, f.y + 0.05, f.z - pad),
+            max: Vec3::new(f.x + pad, f.y + 2.55 * sc, f.z + pad),
         }
     }
 
@@ -54,7 +65,7 @@ impl BossState {
         if dir.length_squared() < 1e-8 {
             return;
         }
-        if let Some(t) = ray_aabb(eye, dir, &Self::hit_aabb()) {
+        if let Some(t) = ray_aabb(eye, dir, &self.hit_aabb()) {
             if t > 0.02 && t < 120.0 {
                 let d = DAMAGE[weapon_idx.min(3)];
                 self.hp = (self.hp - d).max(0.0);
@@ -63,11 +74,12 @@ impl BossState {
     }
 }
 
-const RIVAL_FOOT: Vec3 = Vec3::new(-10.2, 0.0, -9.4);
+const RIVAL_FOOT_DEFAULT: Vec3 = Vec3::new(-10.2, 0.0, -9.4);
 const RIVAL_SCALE: f32 = 1.08;
 const RIVAL_HP: f32 = 140.0;
 
 pub struct RivalState {
+    foot: Vec3,
     hp: f32,
     max_hp: f32,
 }
@@ -75,6 +87,15 @@ pub struct RivalState {
 impl RivalState {
     pub fn new() -> Self {
         Self {
+            foot: RIVAL_FOOT_DEFAULT,
+            hp: RIVAL_HP,
+            max_hp: RIVAL_HP,
+        }
+    }
+
+    pub fn with_foot(foot: Vec3) -> Self {
+        Self {
+            foot,
             hp: RIVAL_HP,
             max_hp: RIVAL_HP,
         }
@@ -85,7 +106,7 @@ impl RivalState {
     }
 
     pub fn foot(&self) -> Vec3 {
-        RIVAL_FOOT
+        self.foot
     }
 
     pub fn scale(&self) -> f32 {
@@ -96,12 +117,13 @@ impl RivalState {
         (self.hp / self.max_hp).clamp(0.0, 1.0)
     }
 
-    fn hit_aabb() -> Aabb {
+    fn hit_aabb(&self) -> Aabb {
         let sc = RIVAL_SCALE;
         let pad = 0.62 * sc;
+        let f = self.foot;
         Aabb {
-            min: Vec3::new(RIVAL_FOOT.x - pad, 0.05, RIVAL_FOOT.z - pad),
-            max: Vec3::new(RIVAL_FOOT.x + pad, 2.45 * sc, RIVAL_FOOT.z + pad),
+            min: Vec3::new(f.x - pad, f.y + 0.05, f.z - pad),
+            max: Vec3::new(f.x + pad, f.y + 2.45 * sc, f.z + pad),
         }
     }
 
@@ -114,7 +136,7 @@ impl RivalState {
         if dir.length_squared() < 1e-8 {
             return;
         }
-        if let Some(t) = ray_aabb(eye, dir, &Self::hit_aabb()) {
+        if let Some(t) = ray_aabb(eye, dir, &self.hit_aabb()) {
             if t > 0.02 && t < 120.0 {
                 let d = DAMAGE[weapon_idx.min(3)];
                 self.hp = (self.hp - d).max(0.0);

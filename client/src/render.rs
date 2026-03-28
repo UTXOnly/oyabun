@@ -1295,8 +1295,8 @@ impl Gpu {
         let g = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
-            fog_color: [0.05, 0.018, 0.09, 1.0],
-            fog_params: [0.042, 0.0, 0.0, 0.0],
+            fog_color: [0.12, 0.09, 0.18, 1.0],
+            fog_params: [0.022, 0.0, 0.0, 0.0],
             _pad: [0.0; 8],
         };
         self.queue

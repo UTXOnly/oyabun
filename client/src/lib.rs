@@ -16,7 +16,7 @@ use boss::{BossState, RivalState};
 use game::GameState;
 use input::InputState;
 use loadout::{Loadout, WEAPONS};
-use mesh::{arena_from_level_json, build_arena};
+use mesh::{arena_from_level_json, build_arena, LevelBoot};
 use net::NetController;
 use render::WeaponHudParams;
 pub use render::{Gpu, Vertex};
@@ -38,15 +38,20 @@ async fn fetch_level_json(url: &str) -> Option<String> {
     text_v.as_string()
 }
 
-async fn initial_arena_and_spawn() -> (mesh::Arena, Vec3) {
+async fn initial_arena_and_spawn() -> LevelBoot {
     #[cfg(target_arch = "wasm32")]
     if let Some(json) = fetch_level_json("./levels/tokyo_street.json").await {
-        if let Ok(pair) = arena_from_level_json(&json) {
-            return pair;
+        if let Ok(boot) = arena_from_level_json(&json) {
+            return boot;
         }
     }
-    let a = build_arena();
-    (a, Vec3::new(0.0, 0.0, 9.0))
+    let arena = build_arena();
+    LevelBoot {
+        spawn: Vec3::new(0.0, 0.0, 9.0),
+        boss_foot: BossState::new().foot(),
+        rival_foot: RivalState::new().foot(),
+        arena,
+    }
 }
 
 #[wasm_bindgen]
@@ -262,10 +267,10 @@ impl OyabaunApp {
 #[wasm_bindgen(js_name = createOyabaunApp)]
 pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp, JsValue> {
     console_error_panic_hook::set_once();
-    let (arena, spawn) = initial_arena_and_spawn().await;
-    let solids = arena.solids.clone();
-    let gpu = Gpu::new(canvas, &arena.vertices, &arena.indices).await?;
-    let game = GameState::new(spawn, solids);
+    let boot = initial_arena_and_spawn().await;
+    let solids = boot.arena.solids.clone();
+    let gpu = Gpu::new(canvas, &boot.arena.vertices, &boot.arena.indices).await?;
+    let game = GameState::new(boot.spawn, solids);
     let mut net = NetController::new();
     net.status = String::from("open page — WebSocket + Nostr extension");
     Ok(OyabaunApp {
@@ -274,9 +279,9 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         input: InputState::default(),
         net,
         loadout: Loadout::new(),
-        boss: BossState::new(),
-        rival: RivalState::new(),
+        boss: BossState::with_foot(boot.boss_foot),
+        rival: RivalState::with_foot(boot.rival_foot),
         last_ms: 0.0,
-        clear: Vec3::new(0.022, 0.01, 0.045),
+        clear: Vec3::new(0.045, 0.038, 0.072),
     })
 }

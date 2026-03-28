@@ -8,6 +8,10 @@ struct LevelJson {
     vertices: Vec<f32>,
     indices: Vec<u32>,
     solids: Vec<JsonAabb>,
+    #[serde(default)]
+    boss_foot: Option<[f32; 3]>,
+    #[serde(default)]
+    rival_foot: Option<[f32; 3]>,
 }
 
 #[derive(serde::Deserialize)]
@@ -16,8 +20,15 @@ struct JsonAabb {
     max: [f32; 3],
 }
 
+pub struct LevelBoot {
+    pub arena: Arena,
+    pub spawn: Vec3,
+    pub boss_foot: Vec3,
+    pub rival_foot: Vec3,
+}
+
 /// Blender export: `tools/blender_export_oyabaun.py` → `client/levels/tokyo_street.json` (Y-up game space).
-pub fn arena_from_level_json(s: &str) -> Result<(Arena, Vec3), String> {
+pub fn arena_from_level_json(s: &str) -> Result<LevelBoot, String> {
     let j: LevelJson = serde_json::from_str(s).map_err(|e| e.to_string())?;
     let spawn = Vec3::from_array(j.spawn);
     if j.vertices.len() % 6 != 0 || j.indices.len() % 3 != 0 {
@@ -38,14 +49,25 @@ pub fn arena_from_level_json(s: &str) -> Result<(Arena, Vec3), String> {
             max: Vec3::from_array(a.max),
         })
         .collect();
-    Ok((
-        Arena {
-            vertices,
-            indices: j.indices,
-            solids,
-        },
+    let arena = Arena {
+        vertices,
+        indices: j.indices,
+        solids,
+    };
+    let boss_foot = j
+        .boss_foot
+        .map(Vec3::from_array)
+        .unwrap_or(spawn + Vec3::new(7.0, 0.0, -12.0));
+    let rival_foot = j
+        .rival_foot
+        .map(Vec3::from_array)
+        .unwrap_or(spawn + Vec3::new(-6.0, 0.0, -10.0));
+    Ok(LevelBoot {
+        arena,
         spawn,
-    ))
+        boss_foot,
+        rival_foot,
+    })
 }
 
 
