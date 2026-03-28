@@ -2,6 +2,53 @@ use glam::Vec3;
 
 use crate::render::Vertex;
 
+#[derive(serde::Deserialize)]
+struct LevelJson {
+    spawn: [f32; 3],
+    vertices: Vec<f32>,
+    indices: Vec<u32>,
+    solids: Vec<JsonAabb>,
+}
+
+#[derive(serde::Deserialize)]
+struct JsonAabb {
+    min: [f32; 3],
+    max: [f32; 3],
+}
+
+/// Blender export: `tools/blender_export_oyabaun.py` → `client/levels/tokyo_street.json` (Y-up game space).
+pub fn arena_from_level_json(s: &str) -> Result<(Arena, Vec3), String> {
+    let j: LevelJson = serde_json::from_str(s).map_err(|e| e.to_string())?;
+    let spawn = Vec3::from_array(j.spawn);
+    if j.vertices.len() % 6 != 0 || j.indices.len() % 3 != 0 {
+        return Err("invalid vertices/indices length".into());
+    }
+    let mut vertices = Vec::with_capacity(j.vertices.len() / 6);
+    for chunk in j.vertices.chunks_exact(6) {
+        vertices.push(Vertex::new(
+            Vec3::new(chunk[0], chunk[1], chunk[2]),
+            Vec3::new(chunk[3], chunk[4], chunk[5]),
+        ));
+    }
+    let solids = j
+        .solids
+        .into_iter()
+        .map(|a| Aabb {
+            min: Vec3::from_array(a.min),
+            max: Vec3::from_array(a.max),
+        })
+        .collect();
+    Ok((
+        Arena {
+            vertices,
+            indices: j.indices,
+            solids,
+        },
+        spawn,
+    ))
+}
+
+
 #[derive(Clone)]
 pub struct Aabb {
     pub min: Vec3,

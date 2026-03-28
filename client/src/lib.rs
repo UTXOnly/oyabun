@@ -1,4 +1,6 @@
 use glam::Vec3;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
@@ -14,12 +16,38 @@ use boss::{BossState, RivalState};
 use game::GameState;
 use input::InputState;
 use loadout::{Loadout, WEAPONS};
-use mesh::build_arena;
+use mesh::{arena_from_level_json, build_arena};
 use net::NetController;
 use render::WeaponHudParams;
 pub use render::{Gpu, Vertex};
 
 use serde_json::json;
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_level_json(url: &str) -> Option<String> {
+    let window = web_sys::window()?;
+    let v = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+        .await
+        .ok()?;
+    let resp: web_sys::Response = v.dyn_into().ok()?;
+    if !resp.ok() {
+        return None;
+    }
+    let text_p = resp.text().ok()?;
+    let text_v = wasm_bindgen_futures::JsFuture::from(text_p).await.ok()?;
+    text_v.as_string()
+}
+
+async fn initial_arena_and_spawn() -> (mesh::Arena, Vec3) {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(json) = fetch_level_json("./levels/tokyo_street.json").await {
+        if let Ok(pair) = arena_from_level_json(&json) {
+            return pair;
+        }
+    }
+    let a = build_arena();
+    (a, Vec3::new(0.0, 0.0, 9.0))
+}
 
 #[wasm_bindgen]
 pub struct OyabaunApp {
@@ -234,10 +262,10 @@ impl OyabaunApp {
 #[wasm_bindgen(js_name = createOyabaunApp)]
 pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp, JsValue> {
     console_error_panic_hook::set_once();
-    let arena = build_arena();
+    let (arena, spawn) = initial_arena_and_spawn().await;
     let solids = arena.solids.clone();
     let gpu = Gpu::new(canvas, &arena.vertices, &arena.indices).await?;
-    let game = GameState::new(Vec3::new(0.0, 0.0, 9.0), solids);
+    let game = GameState::new(spawn, solids);
     let mut net = NetController::new();
     net.status = String::from("open page — WebSocket + Nostr extension");
     Ok(OyabaunApp {
