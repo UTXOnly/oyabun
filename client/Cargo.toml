@@ -24,6 +24,8 @@ web-sys = { version = "0.3", features = [
   "HtmlCanvasElement",
   "HtmlImageElement",
   "Request",
+  "RequestCache",
+  "RequestInit",
   "Response",
 ] }
 gltf = { version = "1.4.1", features = ["import", "names"] }

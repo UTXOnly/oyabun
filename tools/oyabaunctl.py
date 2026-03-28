@@ -205,6 +205,32 @@ def _blender_exe(ns: argparse.Namespace | None = None) -> str:
     return os.environ.get("BLENDER", "blender")
 
 
+def cmd_import_glb(ns: argparse.Namespace) -> None:
+    """Copy a hand-exported .glb into client/levels/tokyo_alley.glb (optional wasm-pack)."""
+    import shutil
+
+    src = Path(ns.glb).expanduser().resolve()
+    if not src.is_file():
+        sys.stderr.write(f"import-glb: file not found: {src}\n")
+        sys.exit(1)
+    if src.suffix.lower() != ".glb":
+        sys.stderr.write("import-glb: expected a .glb file\n")
+        sys.exit(1)
+    dest = ROOT / "client" / "levels" / "tokyo_alley.glb"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    print(f"import-glb: {src} -> {dest}")
+    if ns.rebuild:
+        subprocess.run(
+            ["wasm-pack", "build", "--target", "web", "--out-dir", "pkg"],
+            cwd=ROOT / "client",
+            check=True,
+        )
+        print("wasm client rebuilt -> client/pkg/")
+    else:
+        print("import-glb: run: python3 tools/oyabaunctl.py rebuild --wasm-only")
+
+
 def cmd_export_world(ns: argparse.Namespace) -> None:
     """Run Blender headless to write client/levels/tokyo_alley.glb and/or tokyo_street.json."""
     blend = Path(ns.blend).expanduser().resolve()
@@ -453,6 +479,18 @@ def main() -> None:
         help="output JSON path (default: <repo>/client/levels/tokyo_street.json)",
     )
     sp.set_defaults(func=cmd_export_world)
+
+    sp = sub.add_parser(
+        "import-glb",
+        help="copy an existing .glb to client/levels/tokyo_alley.glb (then rebuild wasm to refresh embed)",
+    )
+    sp.add_argument("glb", help="path to source .glb (e.g. ~/Desktop/oyabaun-av/oyabaun-level-1.glb)")
+    sp.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="run wasm-pack after copy (needed for include_bytes! embedded level)",
+    )
+    sp.set_defaults(func=cmd_import_glb)
 
     sp = sub.add_parser("launch", help="start relay binary + static client (http.server)")
     sp.add_argument("--docker", action="store_true", help="docker compose relay instead of local binary")

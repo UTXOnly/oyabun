@@ -27,7 +27,11 @@ use serde_json::json;
 #[cfg(target_arch = "wasm32")]
 async fn fetch_level_json(url: &str) -> Option<String> {
     let window = web_sys::window()?;
-    let v = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+    let init = web_sys::RequestInit::new();
+    init.set_method("GET");
+    init.set_cache(web_sys::RequestCache::NoStore);
+    let req = web_sys::Request::new_with_str_and_init(url, &init).ok()?;
+    let v = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&req))
         .await
         .ok()?;
     let resp: web_sys::Response = v.dyn_into().ok()?;
@@ -42,7 +46,11 @@ async fn fetch_level_json(url: &str) -> Option<String> {
 #[cfg(target_arch = "wasm32")]
 async fn fetch_bytes(url: &str) -> Option<Vec<u8>> {
     let window = web_sys::window()?;
-    let v = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+    let init = web_sys::RequestInit::new();
+    init.set_method("GET");
+    init.set_cache(web_sys::RequestCache::NoStore);
+    let req = web_sys::Request::new_with_str_and_init(url, &init).ok()?;
+    let v = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&req))
         .await
         .ok()?;
     let resp: web_sys::Response = v.dyn_into().ok()?;
