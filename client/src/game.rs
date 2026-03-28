@@ -20,6 +20,8 @@ pub struct GameState {
     solids: Vec<Aabb>,
     /// Lowest valid feet height (from level bounds); replaces assuming world floor at y=0.
     y_min: f32,
+    /// When colliders are only tall chunks, `feet_y_on_solids` finds nothing; use spawn height for NPCs / snaps.
+    pub walk_surface_y: f32,
 }
 
 impl GameState {
@@ -34,6 +36,7 @@ impl GameState {
             net_tz: spawn.z,
             solids,
             y_min,
+            walk_surface_y: spawn.y,
         }
     }
 
@@ -56,9 +59,14 @@ impl GameState {
         top + 0.05
     }
 
-    /// Walkable height under `(x, z)` from collision solids (for NPC / remote player feet).
+    /// Walkable height under `(x, z)` for drawing NPCs / remotes (not only thin floor colliders).
     pub fn ground_y_at(&self, x: f32, z: f32) -> f32 {
-        self.feet_y_on_solids(x, z)
+        let thin = self.feet_y_on_solids(x, z);
+        if thin > self.y_min + 0.08 {
+            thin
+        } else {
+            self.walk_surface_y
+        }
     }
 
     pub fn set_online(&mut self, v: bool) {
@@ -86,7 +94,7 @@ impl GameState {
             self.vel_y = 0.0;
             self.resolve_xz(true, false);
             self.resolve_xz(false, true);
-            self.pos.y = self.feet_y_on_solids(self.pos.x, self.pos.z);
+            self.pos.y = self.ground_y_at(self.pos.x, self.pos.z);
             self.resolve_y();
             if self.pos.y < self.y_min {
                 self.pos.y = self.y_min;

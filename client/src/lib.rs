@@ -289,6 +289,7 @@ impl OyabaunApp {
             "rival_foot": [rf.x, rf.y, rf.z],
             "boss_alive": self.boss.alive(),
             "rival_alive": self.rival.alive(),
+            "walk_surface_y": self.game.walk_surface_y,
         })
         .to_string()
     }
@@ -510,7 +511,7 @@ impl OyabaunApp {
                 bills.push((Vec3::new(p.x, foot_y, p.z), s));
             }
         } else {
-            let t = self.last_ms as f32 * 0.0007;
+            let spin = self.last_ms as f32 * 0.0007;
             let base = self.game.pos;
             let yaw = self.game.yaw;
             let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
@@ -523,7 +524,7 @@ impl OyabaunApp {
             for (i, pos) in spots.iter().enumerate() {
                 let gy = self.game.ground_y_at(pos.x, pos.z);
                 let ph = i as f32 * 0.4;
-                bills.push((Vec3::new(pos.x, gy, pos.z), 0.85 + ph));
+                bills.push((Vec3::new(pos.x, gy, pos.z), 0.85 + ph + spin * 0.02));
             }
         }
         let weapon_hud = WeaponHudParams {
