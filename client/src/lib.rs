@@ -61,32 +61,73 @@ struct GameInit {
     gltf: Option<gltf_level::GltfLevelCpu>,
 }
 
+#[cfg(target_arch = "wasm32")]
+fn wasm_warn(msg: &str) {
+    web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(msg));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
+    let bounds = cpu.bounds();
+    let spawn = cpu.spawn;
+    let yaw = cpu.spawn_yaw;
+    let (boss, rival) = mesh::npc_placements(spawn, yaw);
+    let mural_z = mesh::mural_z_plane(&bounds, spawn);
+    let mut arena = mesh::empty_arena();
+    arena.solids = cpu.solids.clone();
+    GameInit {
+        boot: LevelBoot {
+            arena,
+            spawn,
+            boss_foot: boss,
+            rival_foot: rival,
+            spawn_yaw: yaw,
+            level_bounds: bounds,
+            mural_z,
+        },
+        gltf: Some(cpu),
+    }
+}
+
 async fn load_game_init() -> GameInit {
     #[cfg(target_arch = "wasm32")]
     {
+        const EMBEDDED_GLB: &[u8] = include_bytes!("../levels/tokyo_alley.glb");
+
+        let mut fetch_failed = false;
+        let mut fetch_parse_err: Option<String> = None;
         if let Some(bytes) = fetch_bytes("./levels/tokyo_alley.glb").await {
-            if let Ok(cpu) = gltf_level::parse_glb(&bytes) {
-                let bounds = cpu.bounds();
-                let spawn = cpu.spawn;
-                let yaw = cpu.spawn_yaw;
-                let (boss, rival) = mesh::npc_placements(spawn, yaw);
-                let mural_z = mesh::mural_z_plane(&bounds, spawn);
-                let mut arena = mesh::empty_arena();
-                arena.solids = cpu.solids.clone();
-                return GameInit {
-                    boot: LevelBoot {
-                        arena,
-                        spawn,
-                        boss_foot: boss,
-                        rival_foot: rival,
-                        spawn_yaw: yaw,
-                        level_bounds: bounds,
-                        mural_z,
-                    },
-                    gltf: Some(cpu),
-                };
+            match gltf_level::parse_glb(&bytes) {
+                Ok(cpu) => return game_init_from_gltf(cpu),
+                Err(e) => fetch_parse_err = Some(e),
+            }
+        } else {
+            fetch_failed = true;
+        }
+
+        match gltf_level::parse_glb(EMBEDDED_GLB) {
+            Ok(cpu) => {
+                if let Some(ref e) = fetch_parse_err {
+                    wasm_warn(&format!(
+                        "oyabaun: fetched tokyo_alley.glb failed to parse ({e}); using embedded copy (wasm-pack build after export-world refreshes embed)."
+                    ));
+                } else if fetch_failed {
+                    wasm_warn(
+                        "oyabaun: fetch ./levels/tokyo_alley.glb failed (check DevTools → Network). Serve from client/ (oyabaunctl launch). Using embedded .glb; run wasm-pack build after export-world to refresh it.",
+                    );
+                }
+                return game_init_from_gltf(cpu);
+            }
+            Err(e) => {
+                wasm_warn(&format!("oyabaun: embedded tokyo_alley.glb parse failed: {e}"));
+                if fetch_failed {
+                    wasm_warn(
+                        "oyabaun: fetch also failed — add client/levels/tokyo_alley.glb (export-world) and wasm-pack build.",
+                    );
+                }
             }
         }
+
         if let Some(json) = fetch_level_json("./levels/tokyo_street.json").await {
             if let Ok(boot) = arena_from_level_json(&json) {
                 return GameInit {
@@ -95,6 +136,10 @@ async fn load_game_init() -> GameInit {
                 };
             }
         }
+
+        wasm_warn(
+            "oyabaun: using procedural build_arena() — this is not your Blender level. Fix level files + wasm-pack build, then reload.",
+        );
     }
     let arena = build_arena();
     let level_bounds = vertex_bounds(&arena);

@@ -6,4 +6,3 @@ relay/oyabaun-relay
 .DS_Store
 .oyabaun/
 client/levels/tokyo_street.json
-client/levels/tokyo_alley.glb
