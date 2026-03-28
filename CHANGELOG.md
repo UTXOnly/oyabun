@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-03-28 — 90s-style characters + Tokyo street atmosphere
+
+### Changes
+
+**`client/levels/tokyo_alley.glb`** (rebuilt from Blender)
+- Rebuilt Boss and Rival characters with 90s game-style geometry (10-seg cylinders,
+  multi-ring spheres) instead of blocky cubes. ~70 mesh parts total with proper
+  armature skinning via vertex groups + armature modifiers.
+- Added 268 street detail objects: neon signs (14 vertical + 8 jutting), 7 emissive
+  wall signs, 5 vending machines, 10 overhead power cables, 8 wall pipes, 12 paper
+  lanterns, 8 door frames with noren curtains, 10 hanging banners, trash bags, beer
+  crate stacks, bicycle, potted plants, puddles, drain grates, utility boxes,
+  satellite dishes, umbrella stand, wall-mounted lights.
+- 679 objects, 656 meshes, 290 materials. GLB: 2.85 MB.
+
+**`.claude/skills/`** (new)
+- Added `project-overview.md`, `blender-export.md`, `blender-characters.md` skill
+  files for efficient cross-session workflow.
+
+---
+
 ## 2026-03-28 — Enhance Tokyo alley visual fidelity
 
 ### Changes
