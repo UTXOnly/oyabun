@@ -222,8 +222,7 @@ impl GameState {
         let eye = self.eye_pos();
         let view = Mat4::look_at_rh(eye, eye + forward, Vec3::Y);
         let far = 220.0_f32;
-        let mut proj = Mat4::perspective_rh_gl(70_f32.to_radians(), aspect, 0.08, far);
-        proj.y_axis.y *= -1.0;
+        let proj = Mat4::perspective_rh(70_f32.to_radians(), aspect, 0.08, far);
         proj * view
     }
 }

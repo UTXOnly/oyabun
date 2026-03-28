@@ -1603,7 +1603,7 @@ impl Gpu {
             mid + right * hw + up * hh,
             mid - right * hw + up * hh,
         ];
-        let uvs = [[0.0_f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let uvs = [[0.0_f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
         if !p.iter().all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite()) {
             return None;
         }
