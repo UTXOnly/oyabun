@@ -42,8 +42,9 @@ type Room struct {
 	stopTick chan struct{}
 }
 
+// Match exported Tokyo alley (glTF ~ z −32…+32; main façades near z ≈ −26).
 var spawnXZ = [][2]float64{
-	{0, 9}, {0, -9}, {9, 0}, {-9, 0}, {7, 7}, {-7, -7}, {-7, 7}, {7, -7},
+	{0, -20}, {0, -14}, {2.5, -22}, {-2.5, -22}, {4, -18}, {-4, -18}, {0, -26}, {3, -16},
 }
 
 func NewRoom(id string, hub *Hub) *Room {

@@ -75,6 +75,28 @@ fn wasm_warn(msg: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn wasm_log(msg: &str) {
+    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(msg));
+}
+
+fn gltf_needs_floor_slab(solids: &[mesh::Aabb], bounds: &mesh::Aabb) -> bool {
+    if solids.is_empty() {
+        return false;
+    }
+    if solids.len() == 1 {
+        let s = &solids[0];
+        let covers = s.min.x <= bounds.min.x + 0.02
+            && s.min.z <= bounds.min.z + 0.02
+            && s.max.x >= bounds.max.x - 0.02
+            && s.max.z >= bounds.max.z - 0.02
+            && s.min.y <= bounds.min.y + 0.5
+            && s.max.y >= bounds.max.y - 0.5;
+        return !covers;
+    }
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
 fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
     let bounds = cpu.bounds();
     let spawn = cpu.spawn;
@@ -82,7 +104,22 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
     let (boss, rival) = mesh::npc_placements(spawn, yaw);
     let mural_z = mesh::mural_z_plane(&bounds, spawn);
     let mut arena = mesh::empty_arena();
-    arena.solids = cpu.solids.clone();
+    let mut solids = cpu.solids.clone();
+    if gltf_needs_floor_slab(&solids, &bounds) {
+        solids.push(mesh::Aabb {
+            min: Vec3::new(bounds.min.x - 120.0, bounds.min.y - 0.25, bounds.min.z - 120.0),
+            max: Vec3::new(bounds.max.x + 120.0, bounds.min.y + 0.12, bounds.max.z + 120.0),
+        });
+    }
+    arena.solids = solids;
+    wasm_log(&format!(
+        "oyabaun: glTF level {} verts, {} tri indices, {} draw batches; bounds Y [{:.2}, {:.2}] (online play snaps feet to colliders under you)",
+        cpu.vertices.len(),
+        cpu.indices.len() / 3,
+        cpu.batches.len(),
+        bounds.min.y,
+        bounds.max.y
+    ));
     GameInit {
         boot: LevelBoot {
             arena,
@@ -401,7 +438,12 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         gi.gltf,
     )
     .await?;
-    let game = GameState::new(boot.spawn, solids, boot.spawn_yaw);
+    let game = GameState::new(
+        boot.spawn,
+        solids,
+        boot.spawn_yaw,
+        boot.level_bounds.min.y,
+    );
     let mut net = NetController::new();
     net.status = String::from("open page — WebSocket + Nostr extension");
     Ok(OyabaunApp {
