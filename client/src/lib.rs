@@ -10,7 +10,7 @@ mod mesh;
 mod net;
 mod render;
 
-use boss::BossState;
+use boss::{BossState, RivalState};
 use game::GameState;
 use input::InputState;
 use loadout::{Loadout, WEAPONS};
@@ -29,6 +29,7 @@ pub struct OyabaunApp {
     net: NetController,
     loadout: Loadout,
     boss: BossState,
+    rival: RivalState,
     last_ms: f64,
     clear: Vec3,
 }
@@ -68,6 +69,11 @@ impl OyabaunApp {
                 s.push_str(&format!(" · BOSS {:.0}%", self.boss.hp_frac() * 100.0));
             } else {
                 s.push_str(" · BOSS DEFEATED");
+            }
+            if self.rival.alive() {
+                s.push_str(&format!(" · RIVAL {:.0}%", self.rival.hp_frac() * 100.0));
+            } else {
+                s.push_str(" · RIVAL DOWN");
             }
             s
         };
@@ -136,8 +142,9 @@ impl OyabaunApp {
                 .pump_input(time_ms, &self.game, &self.input, shoot_net);
         }
         if shot_fired {
-            self.boss
-                .register_shot(&self.game, self.loadout.current_idx());
+            let wi = self.loadout.current_idx();
+            self.boss.register_shot(&self.game, wi);
+            self.rival.register_shot(&self.game, wi);
         }
     }
 
@@ -162,6 +169,11 @@ impl OyabaunApp {
     #[wasm_bindgen(js_name = uploadBossSprite)]
     pub fn upload_boss_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
         self.gpu.upload_boss_sprite(&img)
+    }
+
+    #[wasm_bindgen(js_name = uploadRivalSprite)]
+    pub fn upload_rival_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
+        self.gpu.upload_rival_sprite(&img)
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -208,8 +220,13 @@ impl OyabaunApp {
         } else {
             None
         };
+        let rival_draw = if self.rival.alive() {
+            Some((self.rival.foot(), self.rival.scale()))
+        } else {
+            None
+        };
         self.gpu
-            .draw_world(vp, self.clear, cam, &bills, weapon_hud, boss_draw);
+            .draw_world(vp, self.clear, cam, &bills, weapon_hud, boss_draw, rival_draw);
         Ok(())
     }
 }
@@ -230,6 +247,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         net,
         loadout: Loadout::new(),
         boss: BossState::new(),
+        rival: RivalState::new(),
         last_ms: 0.0,
         clear: Vec3::new(0.022, 0.01, 0.045),
     })

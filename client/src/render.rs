@@ -317,6 +317,11 @@ pub struct Gpu {
     pub boss_ready: bool,
     boss_vb: wgpu::Buffer,
     boss_ib: wgpu::Buffer,
+    rival_texture: wgpu::Texture,
+    rival_bind_group: wgpu::BindGroup,
+    pub rival_ready: bool,
+    rival_vb: wgpu::Buffer,
+    rival_ib: wgpu::Buffer,
 }
 
 impl Gpu {
@@ -569,6 +574,33 @@ impl Gpu {
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        let (rival_texture, rival_view) = make_transparent_tex(&device, &queue);
+        let rival_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rival-bg"),
+            layout: &sprite_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&rival_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&bill_sampler),
+                },
+            ],
+        });
+        let rival_vb = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rival-vb"),
+            size: (std::mem::size_of::<BillVertex>() * 4) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let rival_ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("rival-ib"),
+            contents: bytemuck::cast_slice(&[0u32, 1, 2, 0, 2, 3]),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
         let shader_bill = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bill"),
             source: wgpu::ShaderSource::Wgsl(SHADER_BILL.into()),
@@ -793,6 +825,11 @@ impl Gpu {
             boss_ready: false,
             boss_vb,
             boss_ib,
+            rival_texture,
+            rival_bind_group,
+            rival_ready: false,
+            rival_vb,
+            rival_ib,
         })
     }
 
@@ -1071,6 +1108,69 @@ impl Gpu {
         Ok(())
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn upload_rival_sprite(&mut self, img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
+        let w = img.width().max(1);
+        let h = img.height().max(1);
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rival-sprite"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let src = ImageCopyExternalImage {
+            source: ExternalImageSource::HTMLImageElement(img.clone()),
+            origin: Origin2d::ZERO,
+            flip_y: false,
+        };
+        let dst = wgpu::ImageCopyTextureTagged {
+            texture: &tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+            color_space: wgpu::PredefinedColorSpace::Srgb,
+            premultiplied_alpha: false,
+        };
+        self.queue.copy_external_image_to_texture(
+            &src,
+            dst,
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rival-bg"),
+            layout: &self.sprite_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.bill_sampler),
+                },
+            ],
+        });
+        self.rival_texture = tex;
+        self.rival_bind_group = bg;
+        self.rival_ready = true;
+        Ok(())
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn upload_arms_sprite(&mut self, _img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
         Ok(())
@@ -1078,6 +1178,11 @@ impl Gpu {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn upload_boss_sprite(&mut self, _img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn upload_rival_sprite(&mut self, _img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
         Ok(())
     }
 
@@ -1140,6 +1245,35 @@ impl Gpu {
         ])
     }
 
+    fn draw_npc_billboard(
+        queue: &wgpu::Queue,
+        pass: &mut wgpu::RenderPass<'_>,
+        cam_pos: Vec3,
+        npc: Option<(Vec3, f32)>,
+        ready: bool,
+        bill_pipeline: &wgpu::RenderPipeline,
+        globals_bg: &wgpu::BindGroup,
+        bind_group: &wgpu::BindGroup,
+        vb: &wgpu::Buffer,
+        ib: &wgpu::Buffer,
+    ) {
+        if !ready {
+            return;
+        }
+        if let Some((bc, sc)) = npc {
+            if let Some(q) = Self::make_bill_quad(cam_pos, bc, sc) {
+                queue.write_buffer(vb, 0, bytemuck::cast_slice(&q));
+                let vb_bytes = 4 * std::mem::size_of::<BillVertex>() as u64;
+                pass.set_pipeline(bill_pipeline);
+                pass.set_bind_group(0, globals_bg, &[]);
+                pass.set_bind_group(1, bind_group, &[]);
+                pass.set_vertex_buffer(0, vb.slice(0..vb_bytes));
+                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..6, 0, 0..1);
+            }
+        }
+    }
+
     pub fn draw_world(
         &mut self,
         view_proj: Mat4,
@@ -1148,6 +1282,7 @@ impl Gpu {
         billboards: &[(Vec3, f32)],
         weapon_hud: WeaponHudParams,
         boss: Option<(Vec3, f32)>,
+        rival: Option<(Vec3, f32)>,
     ) {
         let frame = match self.surface.get_current_texture() {
             Ok(f) => f,
@@ -1252,21 +1387,30 @@ impl Gpu {
                 pass.set_index_buffer(self.bill_ib.slice(0..ib_bytes), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..icount, 0, 0..1);
             }
-            if self.boss_ready {
-                if let Some((bc, sc)) = boss {
-                    if let Some(q) = Self::make_bill_quad(cam_pos, bc, sc) {
-                        self.queue
-                            .write_buffer(&self.boss_vb, 0, bytemuck::cast_slice(&q));
-                        let vb_bytes = 4 * std::mem::size_of::<BillVertex>() as u64;
-                        pass.set_pipeline(&self.bill_pipeline);
-                        pass.set_bind_group(0, &self.bind_group, &[]);
-                        pass.set_bind_group(1, &self.boss_bind_group, &[]);
-                        pass.set_vertex_buffer(0, self.boss_vb.slice(0..vb_bytes));
-                        pass.set_index_buffer(self.boss_ib.slice(..), wgpu::IndexFormat::Uint32);
-                        pass.draw_indexed(0..6, 0, 0..1);
-                    }
-                }
-            }
+            Self::draw_npc_billboard(
+                &self.queue,
+                &mut pass,
+                cam_pos,
+                boss,
+                self.boss_ready,
+                &self.bill_pipeline,
+                &self.bind_group,
+                &self.boss_bind_group,
+                &self.boss_vb,
+                &self.boss_ib,
+            );
+            Self::draw_npc_billboard(
+                &self.queue,
+                &mut pass,
+                cam_pos,
+                rival,
+                self.rival_ready,
+                &self.bill_pipeline,
+                &self.bind_group,
+                &self.rival_bind_group,
+                &self.rival_vb,
+                &self.rival_ib,
+            );
         }
 
         {

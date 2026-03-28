@@ -63,6 +63,66 @@ impl BossState {
     }
 }
 
+const RIVAL_FOOT: Vec3 = Vec3::new(-10.2, 0.0, -9.4);
+const RIVAL_SCALE: f32 = 1.08;
+const RIVAL_HP: f32 = 140.0;
+
+pub struct RivalState {
+    hp: f32,
+    max_hp: f32,
+}
+
+impl RivalState {
+    pub fn new() -> Self {
+        Self {
+            hp: RIVAL_HP,
+            max_hp: RIVAL_HP,
+        }
+    }
+
+    pub fn alive(&self) -> bool {
+        self.hp > 0.0
+    }
+
+    pub fn foot(&self) -> Vec3 {
+        RIVAL_FOOT
+    }
+
+    pub fn scale(&self) -> f32 {
+        RIVAL_SCALE
+    }
+
+    pub fn hp_frac(&self) -> f32 {
+        (self.hp / self.max_hp).clamp(0.0, 1.0)
+    }
+
+    fn hit_aabb() -> Aabb {
+        let sc = RIVAL_SCALE;
+        let pad = 0.62 * sc;
+        Aabb {
+            min: Vec3::new(RIVAL_FOOT.x - pad, 0.05, RIVAL_FOOT.z - pad),
+            max: Vec3::new(RIVAL_FOOT.x + pad, 2.45 * sc, RIVAL_FOOT.z + pad),
+        }
+    }
+
+    pub fn register_shot(&mut self, game: &GameState, weapon_idx: usize) {
+        if !self.alive() {
+            return;
+        }
+        let eye = game.eye_pos();
+        let dir = game.view_forward();
+        if dir.length_squared() < 1e-8 {
+            return;
+        }
+        if let Some(t) = ray_aabb(eye, dir, &Self::hit_aabb()) {
+            if t > 0.02 && t < 120.0 {
+                let d = DAMAGE[weapon_idx.min(3)];
+                self.hp = (self.hp - d).max(0.0);
+            }
+        }
+    }
+}
+
 fn ray_aabb(origin: Vec3, dir: Vec3, aabb: &Aabb) -> Option<f32> {
     let mut tmin = 0.0_f32;
     let mut tmax = f32::INFINITY;

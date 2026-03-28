@@ -270,6 +270,21 @@
         }
       }
 
+      async function loadRivalSprite(app) {
+        try {
+          const img = document.createElement("img");
+          img.crossOrigin = "anonymous";
+          img.src = "./sprite1.png";
+          await new Promise((res, rej) => {
+            img.onload = res;
+            img.onerror = rej;
+          });
+          app.uploadRivalSprite(img);
+        } catch (e) {
+          console.warn("sprite1.png", e);
+        }
+      }
+
       function drainNet(ws, app) {
         for (;;) {
           const m = app.take_net_outbound();
@@ -315,6 +330,7 @@
         }
         await loadArmsSprite(app);
         await loadBossSprite(app);
+        await loadRivalSprite(app);
 
         const ws = new WebSocket(relayWsUrl());
         let nostrAuthed = false;
