@@ -1,6 +1,7 @@
 //! Load Blender-exported `.glb` (glTF 2.0). Blender's exporter emits **Y-up** space matching this client.
 //!
 //! **Spawn**: Empty named `OyabaunSpawn` or `PlayerSpawn` (case-insensitive match on `spawn` + `player`/`oyabaun`).
+//! If missing, spawn is placed near **min-Z** on the map XZ span (alley mouth), not the AABB center — long levels often have empty space at center-Z.
 //! **Collision**: Mesh on a node whose name contains `Collider` or `OyabaunCollision` (case-insensitive).
 
 use glam::{Mat4, Quat, Vec3};
@@ -152,11 +153,11 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
 
     let bounds = vertex_bounds_from_verts(&vertices);
     let spawn_pt = spawn.unwrap_or_else(|| {
-        Vec3::new(
-            (bounds.min.x + bounds.max.x) * 0.5,
-            bounds.min.y + 0.06,
-            (bounds.min.z + bounds.max.z) * 0.5,
-        )
+        let cx = (bounds.min.x + bounds.max.x) * 0.5;
+        let span_z = (bounds.max.z - bounds.min.z).max(1.0);
+        // AABB center-Z is often empty in long alleys; Tokyo export clusters façades near min-Z.
+        let z = bounds.min.z + span_z * 0.14;
+        Vec3::new(cx, bounds.min.y + 0.08, z)
     });
     let spawn_yaw = default_spawn_yaw(&bounds, spawn_pt);
 

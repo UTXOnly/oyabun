@@ -67,6 +67,7 @@ async fn fetch_bytes(url: &str) -> Option<Vec<u8>> {
 struct GameInit {
     boot: LevelBoot,
     gltf: Option<gltf_level::GltfLevelCpu>,
+    level_label: String,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -131,6 +132,7 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
             mural_z,
         },
         gltf: Some(cpu),
+        level_label: String::from("glTF tokyo_alley"),
     }
 }
 
@@ -143,7 +145,9 @@ async fn load_game_init() -> GameInit {
         let mut fetch_parse_err: Option<String> = None;
         if let Some(bytes) = fetch_bytes("./levels/tokyo_alley.glb").await {
             match gltf_level::parse_glb(&bytes) {
-                Ok(cpu) => return game_init_from_gltf(cpu),
+                Ok(cpu) => {
+                    return game_init_from_gltf(cpu);
+                }
                 Err(e) => fetch_parse_err = Some(e),
             }
         } else {
@@ -178,6 +182,7 @@ async fn load_game_init() -> GameInit {
                 return GameInit {
                     boot,
                     gltf: None,
+                    level_label: String::from("vertex JSON"),
                 };
             }
         }
@@ -201,6 +206,7 @@ async fn load_game_init() -> GameInit {
             arena,
         },
         gltf: None,
+        level_label: String::from("procedural demo"),
     }
 }
 
@@ -217,6 +223,7 @@ pub struct OyabaunApp {
     clear: Vec3,
     level_bounds: mesh::Aabb,
     mural_z: f32,
+    level_label: String,
 }
 
 #[wasm_bindgen]
@@ -245,11 +252,13 @@ impl OyabaunApp {
     pub fn hud_text(&self) -> String {
         let base = if self.net.joined {
             format!(
-                "HP {} · SCORE {} · Q/E weapons · R reload",
-                self.net.self_health, self.net.self_score
+                "HP {} · SCORE {} · Q/E weapons · R reload · {}",
+                self.net.self_health, self.net.self_score, self.level_label
             )
         } else {
             let mut s = self.net.status.clone();
+            s.push_str(" · ");
+            s.push_str(&self.level_label);
             if self.boss.alive() {
                 s.push_str(&format!(" · BOSS {:.0}%", self.boss.hp_frac() * 100.0));
             } else {
@@ -458,5 +467,6 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         clear: Vec3::new(0.045, 0.038, 0.072),
         level_bounds: boot.level_bounds,
         mural_z: boot.mural_z,
+        level_label: gi.level_label,
     })
 }
