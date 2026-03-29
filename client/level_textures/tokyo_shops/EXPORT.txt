@@ -6,8 +6,11 @@ Files:
 
 Automated (after redesign-tokyo-phase1 created ShopFront_*_recess):
 
+  python3 tools/oyabaunctl.py fix-tokyo-shopfront-materials
   python3 tools/oyabaunctl.py apply-tokyo-shop-textures
-  python3 tools/oyabaunctl.py export-world --enhance
+  python3 tools/oyabaunctl.py export-world --force-all
+
+fix-tokyo-shopfront-materials: recess -> OYA_Recess, awnings -> OYA_Awning* (not brick/trim on thin quads).
 
 This adds OyabaunShopPanels planes with OYA_ShopFace_* materials; enhance skips those materials.
 

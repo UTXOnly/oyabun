@@ -191,7 +191,7 @@ def main() -> None:
             back_center = loc_r + axis_x * half.x
             normal = -axis_x
 
-        offset = normal * 0.025
+        offset = normal * 0.048
         pw = max(0.15, ob.dimensions[1])
         ph = max(0.15, ob.dimensions[2])
 

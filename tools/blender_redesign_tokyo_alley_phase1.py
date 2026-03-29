@@ -167,7 +167,8 @@ def main() -> None:
         sys.exit(1)
 
     col = _ensure_collection(COL_NAME)
-    awning_names = ("OYA_Awning", "OYA_Trim", "OYA_Building")
+    # Only awning-tuned materials on canopies (trim/brick here caused TV-static UVs on thin quads).
+    awning_names = ("OYA_Awning", "OYA_AwningB", "OYA_AwningC")
     sign_names = ("ShopSign_0", "ShopSign_1", "ShopSign_2", "ShopSign_3")
 
     def add_for_segment(side: str, seg_ob: bpy.types.Object, idx: int) -> None:
@@ -200,7 +201,7 @@ def main() -> None:
             (recess_cx, yc, zc),
             (recess_d, door_w * 0.92, door_h),
         )
-        _link_mat(recess, "OYA_Trim")
+        _link_mat(recess, "OYA_Recess")
 
         awning_w = door_w + 0.35
         awning_d = 0.62

@@ -3,6 +3,10 @@ Tokyo alley: remove legacy generated props and assign **packed pixel albedos** s
 embeds real textures. Blender's glTF exporter does **not** bake procedural node trees — those
 became baseColorFactor (1,1,1) with no images → white level in WASM.
 
+Awnings must use OYA_Awning* only (not OYA_Trim/OYA_Building on thin quads — causes stripe glitch).
+Recess volumes use OYA_Recess. Existing blends: `oyabaunctl fix-tokyo-shopfront-materials`.
+Per-material UV tile scale replaces a single 3× repeat to reduce moiré on large walls.
+
 Run:
 
   /path/to/Blender client/levels/tokyo_alley.blend --background \\
@@ -37,7 +41,10 @@ _FALLBACK_RGB: dict[str, tuple[float, float, float]] = {
     "OYA_Trim": (0.52, 0.50, 0.55),
     "OYA_Window": (0.12, 0.18, 0.35),
     "OYA_WindowWarm": (0.35, 0.22, 0.12),
-    "OYA_Awning": (0.25, 0.22, 0.38),
+    "OYA_Awning": (0.28, 0.24, 0.32),
+    "OYA_AwningB": (0.16, 0.20, 0.34),
+    "OYA_AwningC": (0.36, 0.14, 0.16),
+    "OYA_Recess": (0.10, 0.09, 0.13),
     "OYA_ACUnit": (0.48, 0.48, 0.50),
     "OYA_NeonCrimson": (0.95, 0.15, 0.35),
     "OYA_NeonGold": (0.98, 0.82, 0.25),
@@ -213,17 +220,42 @@ def _pix_window(r0: float, g0: float, b0: float, w: int, h: int, warm: bool) -> 
     return out
 
 
-def _pix_awning(r0: float, g0: float, b0: float, w: int, h: int) -> list[float]:
+def _pix_awning(r0: float, g0: float, b0: float, w: int, h: int, seed: int = 0) -> list[float]:
+    """Weathered vinyl/canvas — wide soft folds, grime; no 4px carnival stripes."""
+    sv = (seed % 17) * 0.11
     out: list[float] = []
     for y in range(h):
         for x in range(w):
-            stripe = (x // 4) % 2
-            m = 0.76 if stripe else 1.14
-            n = _hash12(x, y) * 0.08
-            rr = min(1.0, r0 * m + n)
-            gg = min(1.0, g0 * m + n)
-            bb = min(1.0, b0 * m + n)
-            rr, gg, bb = _dither_levels(rr, gg, bb, x, y)
+            seam = 1.0 + 0.055 * math.sin(x * (2 * math.pi / 22.0) + sv)
+            fold = 0.93 + 0.07 * math.sin(y * (2 * math.pi / max(h * 0.35, 10.0)) + sv * 0.5)
+            grime = 1.0 - (y / max(h, 1)) * 0.2
+            edge = min(x, w - 1 - x, y, h - 1 - y)
+            edge_fade = min(1.0, edge / 10.0) * 0.07 + 0.93
+            n = _hash12(x // 3 + seed, y // 3) * 0.045
+            rr = min(1.0, r0 * seam * fold * grime * edge_fade + n)
+            gg = min(1.0, g0 * seam * fold * grime * edge_fade + n * 0.92)
+            bb = min(1.0, b0 * seam * fold * grime * edge_fade + n * 0.88)
+            rr, gg, bb = _dither_levels(rr, gg, bb, x, y, levels=10)
+            lr, lg, lb, la = _rgba_lin(rr, gg, bb)
+            out.extend([lr, lg, lb, la])
+    return out
+
+
+def _pix_recess_wall(r0: float, g0: float, b0: float, w: int, h: int) -> list[float]:
+    """Dark stucco behind shop opening — tile grout + water streaks (reads as interior wall)."""
+    out: list[float] = []
+    for y in range(h):
+        for x in range(w):
+            tx = x % 10
+            ty = y % 8
+            grout = 0.88 if (tx < 1 or ty < 1) else 1.0
+            streak = 1.0 - 0.12 * max(0.0, math.sin(x * 0.08 + y * 0.04))
+            wash = 1.0 - (y / max(h, 1)) * 0.25
+            n = _hash12(x // 2, y // 2) * 0.06
+            rr = min(1.0, r0 * grout * streak * wash + n)
+            gg = min(1.0, g0 * grout * streak * wash + n * 0.95)
+            bb = min(1.0, b0 * grout * streak * wash + n * 0.9)
+            rr, gg, bb = _dither_levels(rr, gg, bb, x, y, levels=9)
             lr, lg, lb, la = _rgba_lin(rr, gg, bb)
             out.extend([lr, lg, lb, la])
     return out
@@ -233,8 +265,8 @@ def _pix_neon(r0: float, g0: float, b0: float, w: int, h: int) -> list[float]:
     out: list[float] = []
     for y in range(h):
         for x in range(w):
-            scan = 0.88 if (y % 5) < 1 else 1.0
-            bleed = _hash12(x // 2, y // 2) * 0.07
+            scan = 0.94 + 0.06 * math.sin(y * (2 * math.pi / 7.0))
+            bleed = _hash12(x // 2, y // 2) * 0.05
             rr = min(1.0, r0 * scan + bleed)
             gg = min(1.0, g0 * scan + bleed)
             bb = min(1.0, b0 * scan + bleed)
@@ -245,14 +277,37 @@ def _pix_neon(r0: float, g0: float, b0: float, w: int, h: int) -> list[float]:
 
 
 def _pix_sign(r0: float, g0: float, b0: float, w: int, h: int, seed: int) -> list[float]:
+    """Vertical blade sign: dark frame, inset panel, chunky faux-katakana bars."""
     out: list[float] = []
+    hs = seed % 11
     for y in range(h):
         for x in range(w):
-            band = _hash12(x // 6 + seed, y // 8) * 0.12
-            rr = min(1.0, r0 * (0.9 + band))
-            gg = min(1.0, g0 * (0.9 + band))
-            bb = min(1.0, b0 * (0.9 + band))
-            rr, gg, bb = _dither_levels(rr, gg, bb, x, y, levels=11)
+            border = x < 5 or x >= w - 5 or y < 5 or y >= h - 5
+            inner = 10 <= x < w - 10 and 10 <= y < h - 10
+            band_y = ((y + hs) % 20)
+            char_row = inner and 5 <= band_y <= 14
+            glyph_col = char_row and inner and ((x + seed) % 9) in (2, 3, 5, 6)
+            rivet = border and ((x + y + seed) % 17) < 2 and min(x, y, w - x, h - y) < 8
+
+            if rivet:
+                rr, gg, bb = r0 * 0.55, g0 * 0.52, b0 * 0.5
+            elif border:
+                rr, gg, bb = r0 * 0.22, g0 * 0.2, b0 * 0.24
+            elif glyph_col:
+                rr = min(1.0, r0 * 1.35 + 0.2)
+                gg = min(1.0, g0 * 1.2 + 0.12)
+                bb = min(1.0, b0 * 0.85)
+            elif char_row:
+                rr = min(1.0, r0 * 0.75)
+                gg = min(1.0, g0 * 0.68)
+                bb = min(1.0, b0 * 0.62)
+            elif inner:
+                rr, gg, bb = r0 * 0.42, g0 * 0.35, b0 * 0.38
+            else:
+                rr, gg, bb = r0 * 0.35, g0 * 0.32, b0 * 0.36
+
+            n = _hash12(x + seed, y) * 0.04
+            rr, gg, bb = _dither_levels(rr + n, gg + n, bb + n, x, y, levels=12)
             lr, lg, lb, la = _rgba_lin(rr, gg, bb)
             out.extend([lr, lg, lb, la])
     return out
@@ -373,6 +428,7 @@ def _build_material_image(
     metallic: float = 0.0,
     emission: tuple[float, float, float] | None = None,
     emission_strength: float = 0.0,
+    uv_scale: float = 2.0,
 ) -> None:
     if image_name in bpy.data.images:
         img = bpy.data.images[image_name]
@@ -404,7 +460,7 @@ def _build_material_image(
     tex = nt.nodes.new("ShaderNodeTexImage")
     tc = nt.nodes.new("ShaderNodeTexCoord")
     mp = nt.nodes.new("ShaderNodeMapping")
-    mp.inputs["Scale"].default_value = (3.0, 3.0, 3.0)
+    mp.inputs["Scale"].default_value = (uv_scale, uv_scale, uv_scale)
 
     tex.image = img
     tex.interpolation = "Closest"
@@ -434,42 +490,44 @@ def _build_material_image(
 RecipeFn = Callable[[float, float, float, int, int], list[float]]
 
 
-def _recipe_for_material(name: str) -> tuple[str, RecipeFn, float, float, bool]:
-    """Returns (image_suffix, pix_fn, roughness, metallic, use_emission_hint)."""
+def _recipe_for_material(name: str) -> tuple[str, RecipeFn, float, float, bool, float]:
+    """Returns suffix, pix_fn, roughness, metallic, neon_hint, uv_tile_scale."""
+    if name == "OYA_Recess":
+        return ("recess", _pix_recess_wall, 0.9, 0.06, False, 1.2)
     if name == "OYA_Building":
-        return ("brick", _pix_brick, 0.92, 0.0, False)
+        return ("brick", _pix_brick, 0.92, 0.0, False, 2.0)
     if name in ("OYA_Concrete", "OYA_ACUnit", "Trash", "Pot_Terra"):
-        return ("concrete", _pix_noise, 0.9, 0.0, False)
+        return ("concrete", _pix_noise, 0.9, 0.0, False, 2.2)
     if name == "OYA_Asphalt":
-        return ("asphalt", _pix_asphalt, 0.95, 0.0, False)
+        return ("asphalt", _pix_asphalt, 0.95, 0.0, False, 1.8)
     if name == "OYA_Trim":
-        return ("trim", _pix_trim, 0.78, 0.15, False)
+        return ("trim", _pix_trim, 0.78, 0.15, False, 1.75)
     if name == "OYA_Window":
-        return ("window", lambda r, g, b, w, h: _pix_window(r, g, b, w, h, False), 0.25, 0.0, False)
+        return ("window", lambda r, g, b, w, h: _pix_window(r, g, b, w, h, False), 0.25, 0.0, False, 1.5)
     if name == "OYA_WindowWarm":
-        return ("window_warm", lambda r, g, b, w, h: _pix_window(r, g, b, w, h, True), 0.28, 0.0, False)
-    if name == "OYA_Awning":
-        return ("awning", _pix_awning, 0.85, 0.0, False)
+        return ("window_warm", lambda r, g, b, w, h: _pix_window(r, g, b, w, h, True), 0.28, 0.0, False, 1.5)
+    if name in ("OYA_Awning", "OYA_AwningB", "OYA_AwningC"):
+        return ("awning", _pix_awning, 0.82, 0.0, False, 1.0)
     if name.startswith("OYA_Neon"):
-        return ("neon", _pix_neon, 0.45, 0.0, True)
+        return ("neon", _pix_neon, 0.45, 0.0, True, 1.2)
     if name.startswith("Metal_"):
-        return ("metal", _pix_trim, 0.55, 0.65, False)
+        return ("metal", _pix_trim, 0.55, 0.65, False, 2.0)
     if name == "VM_Glass":
-        return ("glass", _pix_glass, 0.15, 0.0, False)
+        return ("glass", _pix_glass, 0.15, 0.0, False, 1.5)
     if name.startswith("VM_"):
-        return ("vend", _pix_vending, 0.82, 0.05, False)
+        return ("vend", _pix_vending, 0.82, 0.05, False, 2.0)
     if name in ("WoodCrate", "WoodFrame"):
-        return ("wood", _pix_wood, 0.88, 0.0, False)
+        return ("wood", _pix_wood, 0.88, 0.0, False, 2.0)
     if name.startswith(("ShopSign_", "Banner_", "Noren_")) or name in (
         "SignCream",
         "SignCrimson",
         "SignGold",
         "SignPink",
     ):
-        return ("sign", _pix_sign, 0.75, 0.0, False)
+        return ("sign", _pix_sign, 0.72, 0.0, False, 2.5)
     if name.startswith(("EmSign_", "Neon_")):
-        return ("emit", _pix_neon, 0.35, 0.0, True)
-    return ("generic", _pix_noise, 0.88, 0.0, False)
+        return ("emit", _pix_neon, 0.35, 0.0, True, 1.2)
+    return ("generic", _pix_noise, 0.88, 0.0, False, 2.0)
 
 
 def _apply_material(mat: bpy.types.Material) -> bool:
@@ -478,11 +536,15 @@ def _apply_material(mat: bpy.types.Material) -> bool:
     if not os.environ.get("OYABAUN_REPACK_ALBEDOS") and _already_packed(mat):
         return False
     r0, g0, b0 = _read_base_rgb(mat)
-    suf, fn, rough, metal, neon_hint = _recipe_for_material(mat.name)
+    suf, fn, rough, metal, neon_hint, uv_scale = _recipe_for_material(mat.name)
     seed = hash(mat.name) % 10000
     w = h = TEX_SIZE
     if suf == "sign":
         pix = fn(r0, g0, b0, w, h, seed)
+    elif suf == "awning":
+        pix = _pix_awning(r0, g0, b0, w, h, seed)
+    elif suf == "recess":
+        pix = _pix_recess_wall(r0, g0, b0, w, h)
     else:
         pix = fn(r0, g0, b0, w, h)
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in mat.name)
@@ -512,6 +574,7 @@ def _apply_material(mat: bpy.types.Material) -> bool:
             metallic=metal,
             emission=em,
             emission_strength=em_str,
+            uv_scale=uv_scale,
         )
     except Exception as e:
         print(f"oyabaun: skip {mat.name}: {e}", file=sys.stderr)

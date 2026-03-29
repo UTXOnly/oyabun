@@ -230,6 +230,29 @@ def _default_tokyo_blend() -> Path:
     return (ROOT / "client" / "levels" / "tokyo_alley.blend").resolve()
 
 
+def cmd_fix_tokyo_shopfront_materials(ns: argparse.Namespace) -> None:
+    """Run tools/blender_fix_shopfront_materials.py (recess/awning materials on existing phase1 geo)."""
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"fix-tokyo-shopfront-materials: blend not found: {blend}\n")
+        sys.exit(1)
+    script = ROOT / "tools" / "blender_fix_shopfront_materials.py"
+    if not script.is_file():
+        sys.stderr.write(f"fix-tokyo-shopfront-materials: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    print(f"fix-tokyo-shopfront-materials: {blend}", flush=True)
+    subprocess.run(
+        [exe, str(blend), "--background", "--python", str(script)],
+        cwd=ROOT,
+        check=True,
+    )
+    print(
+        "fix-tokyo-shopfront-materials: done (run export-world --force-all to repack textures)",
+        flush=True,
+    )
+
+
 def cmd_apply_tokyo_shop_textures(ns: argparse.Namespace) -> None:
     """Run tools/blender_apply_tokyo_shop_textures.py (PixelLab PNGs on ShopFront recess backs)."""
     blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
@@ -685,6 +708,14 @@ def main() -> None:
     sp.add_argument("--blend", default=None, help="path to .blend (default: client/levels/tokyo_alley.blend)")
     sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
     sp.set_defaults(func=cmd_apply_tokyo_shop_textures)
+
+    sp = sub.add_parser(
+        "fix-tokyo-shopfront-materials",
+        help="assign OYA_Recess + awning-only mats to existing ShopFront_* meshes (then export-world --force-all)",
+    )
+    sp.add_argument("--blend", default=None, help="path to .blend (default: client/levels/tokyo_alley.blend)")
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.set_defaults(func=cmd_fix_tokyo_shopfront_materials)
 
     sp = sub.add_parser(
         "import-glb",

@@ -44,7 +44,7 @@ This is NOT photorealism. Think **Streets of Rage**, **Yakuza (PS2 era)**, **Fin
 
 ### 1. Shop Fronts (HIGHEST PRIORITY)
 
-**PixelLab texture pack (repo):** `client/level_textures/tokyo_shops/` — eight **side-view** 320×384 PNG storefronts. **They only appear in-game after Blender applies them to the GLB:** run `python3 tools/oyabaunctl.py apply-tokyo-shop-textures` (needs `ShopFront_*_recess` from `redesign-tokyo-phase1`), then `export-world --enhance` and `wasm-pack` if you embed the level. See `client/level_textures/tokyo_shops/EXPORT.txt`.
+**PixelLab texture pack (repo):** `client/level_textures/tokyo_shops/` — eight **side-view** 320×384 PNG storefronts. **Pipeline:** `apply-tokyo-shop-textures` → `export-world --enhance`. If awnings ever used trim/brick materials, run **`fix-tokyo-shopfront-materials`** then **`export-world --force-all`** to repack procedural albedos (see `blender_enhance_tokyo_alley.py`). Details in `client/level_textures/tokyo_shops/EXPORT.txt`.
 
 The alley walls need to become actual **storefronts** — not just flat surfaces with sign textures. Each shop should have:
 
