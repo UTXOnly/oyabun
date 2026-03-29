@@ -112,11 +112,12 @@ fn vs_main(v: Vin) -> Vout {
 }
 @fragment
 fn fs_main(i: Vout) -> @location(0) vec4<f32> {
-    let base = i.col * (0.82 + 0.18 * i.col.r);
+    let base = i.col * (0.90 + 0.10 * i.col.r) + vec3<f32>(0.08, 0.06, 0.10);
+    let q = floor(clamp(base, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
     let dist = length(i.world_pos - g.cam_pos.xyz);
     let fog_amt = 1.0 - exp(-dist * g.fog_params.x);
     let fc = g.fog_color.rgb;
-    return vec4<f32>(mix(base, fc, clamp(fog_amt, 0.0, 1.0)), 1.0);
+    return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), 1.0);
 }
 "#;
 
@@ -166,10 +167,7 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
     // Procedural brick/block pattern on dark surfaces (walls, ground)
     var detail = 1.0;
     if (lum < 0.45) {
-        // Use XY as wall UV (works for most vertical surfaces)
         let wall_uv = vec2<f32>(wp.x + wp.z, wp.y);
-
-        // Brick pattern: offset every other row
         let bp = wall_uv * vec2<f32>(1.5, 3.0);
         let row = floor(bp.y);
         var bx = bp.x;
@@ -178,20 +176,33 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
         let mortar = 0.06;
         let brick = step(mortar, cell.x) * step(mortar, 1.0 - cell.x)
                    * step(mortar, cell.y) * step(mortar, 1.0 - cell.y);
-
-        // Noise grime
-        let grime = oya_hash(floor(wall_uv * 4.0)) * 0.15;
-
-        // Vertical water streak
+        let grime = oya_hash(floor(wall_uv * 4.0)) * 0.10;
         let streak = oya_hash(vec2<f32>(floor(wall_uv.x * 8.0), 0.5))
-                   * step(fract(wall_uv.y * 2.0), 0.3) * 0.12;
-
-        detail = mix(0.75, 1.0, brick) * (1.0 - grime) * (1.0 - streak);
+                   * step(fract(wall_uv.y * 2.0), 0.3) * 0.08;
+        detail = mix(0.82, 1.0, brick) * (1.0 - grime) * (1.0 - streak);
     }
 
-    let ambient = vec3<f32>(0.03, 0.02, 0.04);
-    let lit = t.rgb * detail + ambient;
-    let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 15.0) / 15.0;
+    // Cyberpunk ambient: warm overhead + cool neon bounce
+    let h_norm = clamp((wp.y - 0.0) / 6.0, 0.0, 1.0);
+    let ambient_warm = vec3<f32>(0.30, 0.22, 0.16) * (0.5 + 0.5 * h_norm);
+    let ambient_cool = vec3<f32>(0.12, 0.20, 0.26) * (1.0 - h_norm * 0.5);
+    let ambient = ambient_warm + ambient_cool;
+
+    // Fake neon spill: sinusoidal color bands along the alley
+    let neon_phase = wp.x * 0.15 + wp.z * 0.12;
+    let neon_r = 0.10 * max(sin(neon_phase * 2.1 + 1.0), 0.0);
+    let neon_g = 0.06 * max(sin(neon_phase * 1.7 + 3.5), 0.0);
+    let neon_b = 0.12 * max(sin(neon_phase * 2.8 + 5.2), 0.0);
+    let neon_spill = vec3<f32>(neon_r, neon_g, neon_b) * (1.0 - h_norm * 0.4);
+
+    // Bright emissive surfaces glow extra (signs, neons)
+    // Stronger boost so kanji signs really pop against dark walls
+    let emit_boost = max(lum - 0.35, 0.0) * 1.2;
+
+    let lit = t.rgb * detail * 2.0 + ambient + neon_spill + t.rgb * emit_boost;
+
+    // Posterize to 24 levels for that arcade CRT look (less crushing than 15)
+    let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
     let dist = length(wp - g.cam_pos.xyz);
     let fog_amt = 1.0 - exp(-dist * g.fog_params.x);
     let fc = g.fog_color.rgb;
@@ -200,8 +211,10 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
 "#;
 
 /// Textured character mesh; vertex applies **per-entity model** (relay pose).
-// 8-column atlas. char_params.x = mesh yaw (radians, same convention as lib `yaw_face_cam_xz`).
-// Fragment picks column from (camera bearing − mesh_yaw) so the correct facing shows while the card yaws toward you.
+// 8-column atlas, N rows (row 0 = idle, rows 1..N = walk frames).
+// char_params.x = mesh yaw, .y = world_x, .z = world_z, .w = anim_row (0=idle, 1-6=walk).
+// Fragment picks column from (camera bearing − mesh_yaw) so the correct facing shows.
+/// Standard 3D character shader — real geometry, flat-lit cyberpunk style.
 const SHADER_CHAR_TEX: &str = r#"
 struct CharU {
   view_proj: mat4x4<f32>,
@@ -238,31 +251,35 @@ fn vs_char(v: Vin) -> Vout {
 }
 @fragment
 fn fs_char(i: Vout) -> @location(0) vec4<f32> {
-    let mesh_yaw = cu.char_params.x;
-    let chx = cu.char_params.y;
-    let chz = cu.char_params.z;
-    let dx = cu.cam_pos.x - chx;
-    let dz = cu.cam_pos.z - chz;
-    // Same bearing convention as `mesh::default_spawn_yaw` / gameplay forward (dx, -dz).
-    var view = atan2(dx, -dz);
-    if (view < 0.0) { view = view + 6.28318530718; }
-    var rel = view - mesh_yaw;
-    rel = rel - floor(rel / 6.28318530718) * 6.28318530718;
-    if (rel < 0.0) { rel = rel + 6.28318530718; }
-    let dir_f = (rel + 0.39269908) / 0.78539816;
-    let dir_idx = (u32(dir_f) + 4u) % 8u;
-    let atlas_u = (i.uv.x + f32(dir_idx)) * 0.125;
-    let uv_atlas = vec2<f32>(atlas_u, i.uv.y);
-    let t = textureSample(albedo, albedo_samp, uv_atlas) * mu.tint;
+    let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
     if (t.a < 0.35) { discard; }
     let wp = i.world_pos;
-    let ambient = vec3<f32>(0.12, 0.10, 0.14);
-    let lit = t.rgb + ambient;
-    let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 15.0) / 15.0;
+
+    // Approximate normal from model center for depth shading
+    let center = cu.model[3].xyz + vec3<f32>(0.0, 0.9, 0.0);
+    let n = normalize(wp - center);
+
+    // Cyberpunk lighting: overhead warm + side neon bounce
+    let light_dir = normalize(vec3<f32>(0.3, 1.0, -0.5));
+    let ndl = max(dot(n, light_dir), 0.0);
+    let ambient = vec3<f32>(0.30, 0.24, 0.32);
+    let direct = vec3<f32>(0.85, 0.80, 0.70);
+    // Camera-facing rim light for visual pop
+    let to_cam = normalize(cu.cam_pos.xyz - wp);
+    let rim = pow(1.0 - max(dot(n, to_cam), 0.0), 3.0) * 0.25;
+
+    // Hit flash (char_params.w > 100 = flash active)
+    let flash_val = cu.char_params.w;
+    let hit_mix = clamp(flash_val - 100.0, 0.0, 1.0);
+
+    let lit = t.rgb * (ambient + direct * ndl * 0.6) + vec3<f32>(0.15, 0.20, 0.30) * rim;
+    let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 16.0) / 16.0;
+    let flashed = mix(q, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
+
     let dist = length(wp - cu.cam_pos.xyz);
     let fog_amt = 1.0 - exp(-dist * cu.fog_params.x);
     let fc = cu.fog_color.rgb;
-    return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), t.a);
+    return vec4<f32>(mix(flashed, fc, clamp(fog_amt, 0.0, 1.0)), t.a);
 }
 "#;
 
@@ -314,7 +331,8 @@ struct HudUniform {
     bob: f32,
     recoil: f32,
     reload: f32,
-    _pad: [f32; 3],
+    aspect: f32,
+    _pad: [f32; 2],
 }
 
 #[repr(C)]
@@ -346,7 +364,7 @@ impl HudVertex {
 }
 
 const SHADER_HUD: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, _p1: f32, _p2: f32, _p3: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, _p1: f32, _p2: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var wtex: texture_2d<f32>;
 @group(1) @binding(1) var wsamp: sampler;
@@ -356,25 +374,33 @@ struct HOut { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32>, }
 
 @vertex
 fn vs_hud(v: HIn) -> HOut {
-  // Walk bob
-  let bx = sin(hu.bob) * 0.03;
-  let by = cos(hu.bob * 1.35) * 0.02;
-  // Recoil kick: weapon jumps up and slightly back on fire
-  let recoil_y = hu.recoil * hu.recoil * 0.08;
-  let recoil_x = hu.recoil * 0.015;
+  // Aspect ratio correction — keep weapon square regardless of screen shape
+  let inv_aspect = 1.0 / max(hu.aspect, 0.5);
+
+  // Walk bob (scaled for aspect)
+  let bx = sin(hu.bob) * 0.025 * inv_aspect;
+  let by = cos(hu.bob * 1.35) * 0.018;
+
+  // Recoil kick: weapon jumps up strongly on fire
+  let recoil_y = hu.recoil * hu.recoil * 0.14;
+  let recoil_x = -hu.recoil * 0.03 * inv_aspect;
+
   // Reload: weapon drops below screen then comes back
   var reload_y = 0.0;
   if (hu.reload > 0.0) {
     if (hu.reload < 1.0) {
-      // Lower phase: smooth drop
-      reload_y = -hu.reload * 0.6;
+      reload_y = -hu.reload * 0.7;
     } else {
-      // Raise phase: smooth lift
-      reload_y = -(2.0 - hu.reload) * 0.6;
+      reload_y = -(2.0 - hu.reload) * 0.7;
     }
   }
+
+  // Position: correct X for aspect ratio, offset weapon slightly right
+  var p = v.pos;
+  p.x = p.x * inv_aspect + 0.12 * inv_aspect;
+
   var o: HOut;
-  o.clip = vec4<f32>(v.pos + vec2<f32>(bx + recoil_x, by + recoil_y + reload_y), 0.0, 1.0);
+  o.clip = vec4<f32>(p + vec2<f32>(bx + recoil_x, by + recoil_y + reload_y), 0.0, 1.0);
   o.uv = v.uv;
   return o;
 }
@@ -383,16 +409,34 @@ fn vs_hud(v: HIn) -> HOut {
 fn fs_hud(i: HOut) -> @location(0) vec4<f32> {
   let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
   let t = textureSample(wtex, wsamp, uv_tex);
-  var rgba = vec4<f32>(0.0);
-  if (t.a > 0.10) {
-    rgba = vec4<f32>(t.rgb * (1.02 + 0.08 * hu.flash), t.a);
+
+  // Discard transparent pixels
+  if (t.a < 0.10) { discard; }
+
+  // Base color with flash brightening
+  let flash_boost = 1.0 + 0.6 * hu.flash;
+  var rgb = t.rgb * flash_boost;
+
+  // White-hot flash on weapon surface when firing
+  if (hu.flash > 0.3) {
+    let hot = (hu.flash - 0.3) * 1.43; // 0..1
+    rgb = mix(rgb, vec3<f32>(1.0, 0.95, 0.85), hot * 0.35);
   }
-  if hu.flash > 0.01 {
-    let mf = length(i.uv - vec2<f32>(0.505, 0.82));
-    let fl = smoothstep(0.18, 0.0, mf) * hu.flash;
-    rgba = mix(rgba, vec4<f32>(1.0, 0.92, 0.5, 1.0), fl);
+
+  // Muzzle flash glow — large dramatic burst at barrel tip
+  if (hu.flash > 0.01) {
+    // Flash center: top-right area where barrel is (adjusted for new sprite layout)
+    let muzzle_uv = vec2<f32>(0.72, 0.78);
+    let mf = length(i.uv - muzzle_uv);
+    // Large primary flash
+    let fl1 = smoothstep(0.30, 0.0, mf) * hu.flash;
+    // Hot core
+    let fl2 = smoothstep(0.10, 0.0, mf) * hu.flash;
+    let flash_color = mix(vec3<f32>(1.0, 0.7, 0.2), vec3<f32>(1.0, 1.0, 0.9), fl2);
+    rgb = mix(rgb, flash_color, fl1 * 0.8);
   }
-  return rgba;
+
+  return vec4<f32>(rgb, t.a);
 }
 
 @fragment
@@ -400,7 +444,7 @@ fn fs_hud_arms(i: HOut) -> @location(0) vec4<f32> {
   let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
   let t = textureSample(wtex, wsamp, uv_tex);
   if (t.a < 0.06) { discard; }
-  return vec4<f32>(t.rgb * (1.0 + 0.1 * hu.flash), t.a);
+  return vec4<f32>(t.rgb * (1.0 + 0.3 * hu.flash), t.a);
 }
 "#;
 
@@ -449,7 +493,7 @@ struct CharUniforms {
     cam_pos: [f32; 4],
     fog_color: [f32; 4],
     fog_params: [f32; 4],
-    char_params: [f32; 4], // [mesh_yaw, world_x, world_z, unused]
+    char_params: [f32; 4], // [mesh_yaw, world_x, world_z, anim_row]
     _p1: [f32; 4],
     _p2: [f32; 4],
     _p3: [f32; 4],
@@ -491,6 +535,8 @@ pub struct CharacterInstance {
     pub model: Mat4,
     pub mesh_yaw: f32,
     pub skin: CharacterSkin,
+    /// 0.0 = idle row, 1.0–6.0 = walk frame rows in the atlas.
+    pub anim_frame: f32,
 }
 
 fn append_char_gun_billboard(
@@ -916,21 +962,22 @@ impl Gpu {
             multiview: None,
             cache: None,
         });
+        // Weapon HUD quad — larger coverage, aspect correction done in shader
         let hud_verts: [HudVertex; 4] = [
             HudVertex {
-                pos: [-0.42, -0.98],
+                pos: [-0.50, -1.05],
                 uv: [0.0, 0.0],
             },
             HudVertex {
-                pos: [0.42, -0.98],
+                pos: [0.50, -1.05],
                 uv: [1.0, 0.0],
             },
             HudVertex {
-                pos: [0.42, -0.1],
+                pos: [0.50, 0.05],
                 uv: [1.0, 1.0],
             },
             HudVertex {
-                pos: [-0.42, -0.1],
+                pos: [-0.50, 0.05],
                 uv: [0.0, 1.0],
             },
         ];
@@ -1862,8 +1909,8 @@ impl Gpu {
         let g = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
-            fog_color: [0.12, 0.09, 0.18, 1.0],
-            fog_params: [0.022, 0.0, 0.0, 0.0],
+            fog_color: [0.06, 0.04, 0.10, 1.0],
+            fog_params: [0.003, 0.0, 0.0, 0.0],
             _pad: [0.0; 8],
         };
         self.queue
@@ -1903,13 +1950,8 @@ impl Gpu {
             }
             mural_vert_count = 4;
         }
-        if self.character.is_some() {
-            for inst in &capped {
-                if !append_char_gun_billboard(&mut bill_cpu, inst, cam_pos) {
-                    break;
-                }
-            }
-        }
+        // Gun billboards removed — they created a distracting floating gun
+        // near NPC faces; the character atlas already includes weapon sprites.
         let mural_idx_count: u32 = (mural_vert_count / 4 * 6) as u32;
         let bill_idx_count: u32 = (bill_cpu.len() / 4 * 6) as u32;
         let gun_idx_count: u32 = bill_idx_count.saturating_sub(mural_idx_count);
@@ -1936,9 +1978,9 @@ impl Gpu {
                     view_proj: view_proj.to_cols_array_2d(),
                     model: m,
                     cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
-                    fog_color: [0.12, 0.09, 0.18, 1.0],
-                    fog_params: [0.022, 0.0, 0.0, 0.0],
-                    char_params: [inst.mesh_yaw, char_x, char_z, 0.0],
+                    fog_color: [0.06, 0.04, 0.10, 1.0],
+                    fog_params: [0.003, 0.0, 0.0, 0.0],
+                    char_params: [inst.mesh_yaw, char_x, char_z, inst.anim_frame],
                     _p1: [0.0; 4],
                     _p2: [0.0; 4],
                     _p3: [0.0; 4],
@@ -2168,13 +2210,15 @@ impl Gpu {
         }
 
         {
+            let screen_aspect = self.config.width as f32 / self.config.height.max(1) as f32;
             let hu = HudUniform {
                 weapon: weapon_hud.weapon_id,
                 flash: weapon_hud.flash.clamp(0.0, 1.0),
                 bob: weapon_hud.bob,
                 recoil: weapon_hud.recoil.clamp(0.0, 1.0),
                 reload: weapon_hud.reload.clamp(0.0, 2.0),
-                _pad: [0.0; 3],
+                aspect: screen_aspect,
+                _pad: [0.0; 2],
             };
             self.queue
                 .write_buffer(&self.hud_uniform, 0, bytemuck::bytes_of(&hu));

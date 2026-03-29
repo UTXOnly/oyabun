@@ -424,10 +424,23 @@ fn visit_node(
             let pbr = mat.pbr_metallic_roughness();
             let raw_tint: [f32; 4] = pbr.base_color_factor();
             let emissive = mat.emissive_factor();
-            let (image_index, uv_set) = pbr
-                .base_color_texture()
+            let bct_info = pbr.base_color_texture();
+            let (image_index, uv_set) = bct_info
+                .as_ref()
                 .map(|info| (info.texture().source().index(), info.tex_coord()))
                 .unwrap_or((usize::MAX, 0u32));
+            // Extract KHR_texture_transform (UV offset/scale/rotation) if present.
+            let (uv_offset, uv_scale, uv_rotation) = bct_info
+                .as_ref()
+                .and_then(|info| info.texture_transform())
+                .map(|tt| {
+                    let off = tt.offset();
+                    let sc = tt.scale();
+                    let rot = tt.rotation();
+                    ([off[0], off[1]], [sc[0], sc[1]], rot)
+                })
+                .unwrap_or(([0.0, 0.0], [1.0, 1.0], 0.0));
+
             // For factor-only materials (no texture): use emissive color
             // when baseColor is near-black (Blender emission-only materials).
             // Also add emissive contribution to base color.
@@ -456,7 +469,7 @@ fn visit_node(
             }
 
             let r_uv = prim.reader(|b| Some(&buffers[b.index()]));
-            let uv0: Vec<[f32; 2]> = match r_uv.read_tex_coords(uv_set).map(|tc| tc.into_f32().collect::<Vec<[f32; 2]>>()) {
+            let raw_uvs: Vec<[f32; 2]> = match r_uv.read_tex_coords(uv_set).map(|tc| tc.into_f32().collect::<Vec<[f32; 2]>>()) {
                 Some(collected) if collected.len() == positions.len() => collected,
                 Some(collected) => positions
                     .iter()
@@ -472,6 +485,19 @@ fn visit_node(
                     .map(|p| world_space_fallback_uv(world.transform_point3(*p)))
                     .collect(),
                 None => vec![[0.0, 0.0]; positions.len()],
+            };
+            // Apply KHR_texture_transform: uv' = rotation(uv) * scale + offset
+            let uv0: Vec<[f32; 2]> = if uv_rotation.abs() > 1e-6 {
+                let (sin_r, cos_r) = uv_rotation.sin_cos();
+                raw_uvs.iter().map(|uv| {
+                    let ru = uv[0] * cos_r - uv[1] * sin_r;
+                    let rv = uv[0] * sin_r + uv[1] * cos_r;
+                    [ru * uv_scale[0] + uv_offset[0], rv * uv_scale[1] + uv_offset[1]]
+                }).collect()
+            } else {
+                raw_uvs.iter().map(|uv| {
+                    [uv[0] * uv_scale[0] + uv_offset[0], uv[1] * uv_scale[1] + uv_offset[1]]
+                }).collect()
             };
 
             let r_idx = prim.reader(|b| Some(&buffers[b.index()]));

@@ -1,0 +1,68 @@
+---
+description: Oyabaun level design — Blender → GLB pipeline, materials, shaders, collision
+alwaysApply: true
+---
+
+# Level design rules
+
+## Pipeline: Blender → GLB → WASM
+
+1. Build levels in **Blender** (Z-up), export via glTF 2.0 Binary (`.glb`) with `export_yup=True`.
+2. GLB is loaded at runtime from `client/levels/tokyo_alley.glb` (fetched with cache-bust `?v=timestamp`).
+3. GLB is also embedded in WASM via `include_bytes!()` — **always run `wasm-pack build` after changing the GLB**.
+4. Export script: `tools/blender_export_gltf_oyabaun.py` — run headless with `OYABAUN_GLB_OUT` env var.
+5. CLI wrapper: `oyabaunctl.py export-world` handles the full pipeline.
+
+## Critical: KHR_texture_transform
+
+- The `gltf` Rust crate must have `"KHR_texture_transform"` feature enabled in `Cargo.toml`.
+- UV offset/scale/rotation from `KHR_texture_transform` is baked into vertex UVs at load time in `gltf_level.rs`.
+- If Blender materials use texture mapping (Scale, Offset), this extension is emitted. Without the feature, the **entire GLB fails to parse** and the game falls back to a white procedural arena.
+
+## Blender naming conventions
+
+| Pattern | Purpose |
+|---|---|
+| `OyabaunSpawn` / `PlayerSpawn` | Player spawn (Empty object) |
+| `*Collider*` / `*OyabaunCollision*` | Collision AABB (mesh bounding box) |
+| `OYA_*` | Material prefix |
+| `Boss_*` / `Rival_*` / `ACBody*` | NPC placeholders (stripped on export) |
+
+## Material rules
+
+- Use **Principled BSDF** only. Procedural shader nodes do NOT export to glTF.
+- **Textured materials**: Base Color → Image Texture (PNG, embedded in .blend).
+- **Emissive materials**: Set Emission Color + Emission Strength for neon/glow. Shader adds emissive boost.
+- **Flat-color materials**: Set Base Color factor, no texture. Used for gun parts, simple surfaces.
+- Texture interpolation: **Nearest** (pixel art). Shader uses nearest sampler.
+- Texture size: 32–256px. Pack into .blend file.
+
+## Shader lighting model (render.rs `fs_tex`)
+
+- **Ambient**: Height-gradient warm (orange overhead) + cool (teal ground bounce).
+- **Neon spill**: Sinusoidal colored light bands along alley (procedural, no light objects needed).
+- **Emissive boost**: Bright surfaces (lum > 0.5) get extra glow.
+- **Posterization**: 24 color levels (arcade CRT look).
+- **Fog**: Purple haze, density 0.015, color `(0.10, 0.06, 0.16)`.
+- **Detail overlay**: Procedural brick pattern on dark surfaces (lum < 0.45).
+- **Texture brightness**: Multiplied by 1.8× before ambient is added.
+
+## Collision
+
+- **AABB only** — no per-vertex collision. Name meshes with `Collider` to mark them.
+- Auto-generates floor slab if no explicit colliders found.
+- Player movement uses `ground_y_at()` for foot height.
+
+## NPC placement
+
+- `npc_placements(spawn, yaw, bounds)` in `mesh.rs` computes boss/rival positions.
+- Boss: 11m forward + 1.8m right of spawn. Rival: 17m forward - 2.4m left.
+- Forward = direction from spawn toward alley center (not spawn yaw).
+
+## Don'ts
+
+- Do NOT add client-side procedural world geometry.
+- Do NOT use filterable texture samplers (breaks pixel art).
+- Do NOT use `dpdx`/`dpdy` in WGSL (silent pipeline failure on some WebGPU).
+- Do NOT exceed 100k triangles per level.
+- Do NOT reference external texture files — embed everything in the .blend.

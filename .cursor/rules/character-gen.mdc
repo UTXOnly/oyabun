@@ -1,0 +1,98 @@
+---
+description: Oyabaun character generation — PixelLab sprites, atlas building, GLB pipeline
+globs: client/characters/**, tools/blender_make_oyabaun_character.py, client/sprite1.png
+alwaysApply: false
+---
+
+# Character generation pipeline
+
+Oyabaun characters are **8-direction pixel-art sprites** on billboard quads. The shader selects the correct direction based on camera angle (Doom/Diablo style).
+
+## Pipeline
+
+```
+PixelLab MCP → 8 × 64x64 RGBA PNGs (S, SE, E, NE, N, NW, W, SW)
+    ↓
+Python crop + assemble → 512×{h} atlas PNG (h = cropped char height, ~49px)
+    ↓
+Save as client/sprite1.png
+    ↓
+Blender script → client/characters/oyabaun_player.glb (quad mesh + embedded atlas)
+    ↓
+wasm-pack build → WASM embeds GLB via include_bytes!
+    ↓
+Shader (fs_char) selects atlas column by camera angle, +4 offset for facing
+```
+
+## PixelLab API parameters (all characters)
+
+| Param          | Value                          |
+|----------------|--------------------------------|
+| `mode`         | `standard`                     |
+| `size`         | `64`                           |
+| `n_directions` | `8`                            |
+| `view`         | `low top-down`                 |
+| `outline`      | `single color black outline`   |
+| `shading`      | `detailed shading`             |
+| `detail`       | `high detail`                  |
+| `body_type`    | `humanoid`                     |
+
+Only `description` and `name` change per character.
+
+## Atlas build (Python)
+
+```python
+from PIL import Image
+import numpy as np
+
+dirs = ['south','south-east','east','north-east',
+        'north','north-west','west','south-west']
+
+# 1. Find unified vertical crop bounds
+all_rmin, all_rmax = 63, 0
+for d in dirs:
+    alpha = np.array(Image.open(f'{name}_{d}.png').convert('RGBA'))[:,:,3]
+    rows = np.where(np.any(alpha > 0, axis=1))[0]
+    all_rmin = min(all_rmin, rows[0])
+    all_rmax = max(all_rmax, rows[-1])
+
+# 2. Assemble native-res atlas (no upscale)
+crop_h = all_rmax - all_rmin + 1
+atlas = Image.new('RGBA', (64 * 8, crop_h), (0,0,0,0))
+for i, d in enumerate(dirs):
+    sprite = Image.open(f'{name}_{d}.png').convert('RGBA')
+    cropped = sprite.crop((0, all_rmin, 64, all_rmax + 1))
+    atlas.paste(cropped, (i * 64, 0))
+atlas.save('client/sprite1.png')
+```
+
+## GLB build
+
+```bash
+/Applications/Blender.app/Contents/MacOS/Blender \
+  --background --python tools/blender_make_oyabaun_character.py
+```
+
+## WASM rebuild
+
+```bash
+cd client && wasm-pack build --target web --out-dir pkg
+```
+
+## Current character IDs (PixelLab)
+
+| Character     | ID                                     | Description |
+|---------------|----------------------------------------|-------------|
+| Oyabaun Boss  | `6d169ab6-bb02-4ef2-bf1e-6bec41553472` | Japanese yakuza crime lord, dark suit |
+| Yakuza Rival  | `213e25e0-9c7a-4d71-a37f-cd199a4f9855` | Young enforcer, leather jacket |
+| Player Ronin  | `ea4cdb4d-00bb-4f77-853d-843061b465f2` | Street ronin, hoodie + katana |
+
+## Critical rules
+
+- **NEAREST sampling**: Never use linear filtering on pixel art
+- **No upscale**: Atlas stays at native 512×{h}. GPU NEAREST handles magnification
+- **Crop feet to bottom**: Vertical crop removes transparent padding so feet touch ground
+- **Alpha pipeline**: RGBA PNG → Blender Alpha → glTF → Rgba8UnormSrgb → ALPHA_BLENDING → discard < 0.35
+- **Direction offset +4**: Shader adds 4 to dir_idx so camera-north shows front sprite
+- **include_bytes!**: GLB is embedded at compile time. Must rebuild WASM after any GLB change
+- **Cache bust**: Static server caches aggressively. Use `?v=Date.now()` or hard-refresh

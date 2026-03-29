@@ -28,4 +28,4 @@ web-sys = { version = "0.3", features = [
   "RequestInit",
   "Response",
 ] }
-gltf = { version = "1.4.1", features = ["import", "names"] }
+gltf = { version = "1.4.1", features = ["import", "names", "KHR_texture_transform"] }

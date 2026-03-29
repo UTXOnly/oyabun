@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026-03-28 — Tokyo alley full redesign (Phases 1-3)
+
+### Level overhaul: from flat walls to cyberpunk Tokyo
+
+- **Phase 1 — Shop depth**: 84 objects added — recessed doorways (OYA_Trim), tilted awnings, vertical blade signs per building segment. Every wall section now has 3D depth instead of flat surfaces.
+- **Phase 2 — Shop identities**: 120 objects added — 8 distinct shop types across 28 segments:
+  - Ramen shops (noren curtains, warm glow, menu boards, step stones)
+  - Pachinko parlors (neon arches in pink/cyan, fluorescent panels)
+  - Yakuza offices (dark glass doors, gold kanji signs)
+  - Konbini (fluorescent-lit windows, magazine rack silhouettes)
+  - Tattoo parlors (dark entrances, dragon art panels)
+  - Izakaya (red/white lanterns, wood sliding doors)
+  - Shuttered shops (corrugated metal strips, rust, graffiti, "for rent" signs)
+  - Arcades (cyan glow, cabinet silhouettes)
+  - Bars, pharmacies, bookshops, noodle shops (warm glass, step stones)
+- **Phase 3 — Environment detail**: 145 objects added:
+  - Ground: drain channels along both walls, 4 manhole covers, 12 puddles, painted parking lines, 48 debris clusters
+  - Overhead: 14 cross-cables at varying heights, 6 longitudinal cables, 12 AC units with drip stains
+  - Infrastructure: 6 horizontal rusty pipes, fire escape with 8 steps + railings + landing platform
+- **89 materials packed** with procedural pixel-art textures (96×96, dithered, Bayer pattern) for proper glTF export
+- **36 new materials** created: noren fabric, shutters, neon arches, dark glass, lanterns, drain grates, manholes, puddles, cables, pipes, fire escapes, etc.
+- **Performance**: 28,684 triangles (budget: 100k), 3.6 MB GLB (budget: 5 MB), 92 textures
+
+---
+
+## 2026-03-28 — Fix level textures (KHR_texture_transform), walk animation system
+
+### Critical fix: Level textures rendering
+
+- **Root cause**: Blender exported `tokyo_alley.glb` with `KHR_texture_transform` in `extensionsRequired`. The Rust `gltf` crate rejected the entire file, so the game fell back to the plain white procedural arena — no textures, no materials, no colors.
+- **Fix 1 — Cargo.toml**: Added `"KHR_texture_transform"` feature to the `gltf` crate so it accepts the extension.
+- **Fix 2 — gltf_level.rs**: Extract UV `offset`, `scale`, and `rotation` from `KHR_texture_transform` on each material's `baseColorTexture` and bake transforms into vertex UVs at load time (`uv' = rotate(uv) * scale + offset`). The shader samples with the pre-transformed UVs so tiling (e.g. 3×3 brick repeat) works correctly.
+- All 61 texture images in the GLB (asphalt, brick, concrete, windows, neon signs, awnings, shop signs, etc.) now render properly.
+
+### Walk animation system (all three characters)
+
+- **Multi-frame atlas format**: Character atlases are now 8 columns × 7 rows (row 0 = idle, rows 1–6 = walk frames). Previous format was 8 columns × 1 row (idle only).
+- **Shader walk frame selection**: `fs_char` reads `char_params.w` as `anim_row` and computes `atlas_v = (uv.y + anim_row) / ATLAS_ROWS` to select the correct row.
+- **`CharacterInstance.anim_frame`**: New field passed through `char_params.w`. NPCs send 0.0 (idle), remote players cycle walk frames at 8 FPS.
+- **`walk_anim_frame()` helper**: Computes frame index from `game_time` and movement speed.
+- **All three characters animated** via PixelLab template walk (8 directions × 6 frames each):
+  - Boss (`sprite1.png`, 512×350), Rival (`sprite_rival.png`, 512×357), Player (`sprite_player.png`, 512×336)
+- **GLB rebuild**: `blender_make_oyabaun_character.py` updated for new atlas cell aspect ratio; accepts `OYABAUN_OUT`/`OYABAUN_SPRITE` env vars.
+
+---
+
 ## 2026-03-28 — Tokyo alley redesign Phase 1 (shop depth) + doc/ctl alignment
 
 ### Level geometry

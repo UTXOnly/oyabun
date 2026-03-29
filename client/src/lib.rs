@@ -29,18 +29,47 @@ fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
     Mat4::from_scale_rotation_translation(Vec3::splat(scale), Quat::from_rotation_y(yaw), foot)
 }
 
-fn make_character(foot: Vec3, mesh_yaw: f32, scale: f32, skin: CharacterSkin) -> CharacterInstance {
+fn make_character(foot: Vec3, facing_yaw: f32, scale: f32, skin: CharacterSkin) -> CharacterInstance {
     CharacterInstance {
-        model: character_model(foot, mesh_yaw, scale),
-        mesh_yaw,
+        model: character_model(foot, facing_yaw, scale),
+        mesh_yaw: facing_yaw,
         skin,
+        anim_frame: 0.0,
     }
+}
+
+/// Compute walk animation frame (1.0–6.0) from time, or 0.0 for idle.
+/// `speed` is the character's XZ movement speed; below threshold → idle.
+const WALK_FRAME_COUNT: f32 = 6.0;
+const WALK_FPS: f32 = 8.0;
+const WALK_SPEED_THRESHOLD: f32 = 0.3;
+
+fn walk_anim_frame(time: f32, speed: f32) -> f32 {
+    if speed < WALK_SPEED_THRESHOLD {
+        return 0.0; // idle
+    }
+    // Cycle through frames 1-6 based on time, scale rate by speed
+    let rate = WALK_FPS * (speed / 3.0).max(0.6);
+    let frame = (time * rate) % WALK_FRAME_COUNT;
+    frame.floor() + 1.0 // rows 1-6 in the atlas
+}
+
+/// Vertical walk bob (sinusoidal bounce) to prevent floating/sliding look.
+fn walk_bob_y(time: f32, speed: f32) -> f32 {
+    if speed < WALK_SPEED_THRESHOLD {
+        return 0.0;
+    }
+    let rate = WALK_FPS * (speed / 3.0).max(0.6);
+    // Two bounces per walk cycle (each foot hits ground)
+    let phase = time * rate * 2.0 * std::f32::consts::PI / WALK_FRAME_COUNT;
+    phase.sin().abs() * 0.06 // 6cm vertical bounce
 }
 
 fn yaw_face_cam_xz(foot: Vec3, cam: Vec3) -> f32 {
     let dx = cam.x - foot.x;
     let dz = cam.z - foot.z;
-    (-dz).atan2(dx)
+    // Must match shader convention: atan2(dx, -dz)
+    dx.atan2(-dz)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -260,6 +289,11 @@ pub struct OyabaunApp {
     loadout: Loadout,
     npcs: NpcManager,
     last_ms: f64,
+    game_time: f32,
+    /// Set to true on the frame an NPC is hit; JS reads and clears it.
+    last_hit: bool,
+    /// Name of last killed NPC (empty if none this frame).
+    last_kill: String,
     clear: Vec3,
     level_bounds: mesh::Aabb,
     mural_z: f32,
@@ -282,6 +316,65 @@ impl OyabaunApp {
         self.input.shoot_press();
     }
 
+    /// Returns true if an NPC was hit since last call (auto-clears).
+    pub fn take_hit(&mut self) -> bool {
+        let h = self.last_hit;
+        self.last_hit = false;
+        h
+    }
+
+    /// Returns the name of the last killed NPC (empty if none). Auto-clears.
+    pub fn take_kill(&mut self) -> String {
+        let k = self.last_kill.clone();
+        self.last_kill.clear();
+        k
+    }
+
+    /// Debug: force a shot and return what happened.
+    pub fn debug_shoot(&mut self) -> String {
+        let eye = self.game.eye_pos();
+        let dir = self.game.view_forward();
+        let wi = self.loadout.current_idx();
+        let clip = self.loadout.clip_for(wi);
+        let mut result = format!(
+            "eye=({:.2},{:.2},{:.2}) dir=({:.3},{:.3},{:.3}) weapon={} clip={}",
+            eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, wi, clip
+        );
+        for (i, npc) in self.npcs.npcs.iter().enumerate() {
+            let f = npc.foot;
+            let aabb = format!(
+                " npc{}[{}] foot=({:.2},{:.2},{:.2}) hp={:.0} alive={}",
+                i, npc.def.label, f.x, f.y, f.z, npc.hp, npc.alive()
+            );
+            result.push_str(&aabb);
+
+            // Manual ray test
+            let sc = npc.def.scale;
+            let pad = npc.def.hitbox_pad * sc;
+            let hmin = Vec3::new(f.x - pad, f.y + 0.05, f.z - pad);
+            let hmax = Vec3::new(f.x + pad, f.y + npc.def.hitbox_height * sc, f.z + pad);
+            result.push_str(&format!(
+                " box=({:.2},{:.2},{:.2})-({:.2},{:.2},{:.2})",
+                hmin.x, hmin.y, hmin.z, hmax.x, hmax.y, hmax.z
+            ));
+        }
+
+        // Actually try firing
+        let fired = self.loadout.try_fire();
+        result.push_str(&format!(" fired={}", fired));
+        if fired {
+            let hp_before: Vec<f32> = self.npcs.npcs.iter().map(|n| n.hp).collect();
+            self.npcs.register_shot(&self.game, wi);
+            for (i, npc) in self.npcs.npcs.iter().enumerate() {
+                if npc.hp < hp_before[i] {
+                    result.push_str(&format!(" HIT_NPC{}! {:.0}->{:.0}", i, hp_before[i], npc.hp));
+                    self.last_hit = true;
+                }
+            }
+        }
+        result
+    }
+
     pub fn ingest_server_json(&mut self, json: &str) {
         self.net.ingest(json);
         self.game.set_online(self.net.joined);
@@ -293,8 +386,8 @@ impl OyabaunApp {
 
     #[wasm_bindgen(js_name = bootDebugJson)]
     pub fn boot_debug_json(&self) -> String {
-        let bf = self.npcs.boss().foot;
-        let rf = self.npcs.rival().foot;
+        let bf = self.npcs.npcs.first().map(|n| n.foot).unwrap_or(Vec3::ZERO);
+        let rf = self.npcs.npcs.get(1).map(|n| n.foot).unwrap_or(Vec3::ZERO);
         json!({
             "level_label": self.level_label,
             "vert_count": self.vert_count,
@@ -307,8 +400,8 @@ impl OyabaunApp {
             "character_rival_loaded": self.gpu.character_rival_loaded(),
             "boss_foot": [bf.x, bf.y, bf.z],
             "rival_foot": [rf.x, rf.y, rf.z],
-            "boss_alive": self.npcs.boss().alive(),
-            "rival_alive": self.npcs.rival().alive(),
+            "wave": self.npcs.wave + 1,
+            "alive_count": self.npcs.alive_count(),
             "walk_surface_y": self.game.walk_surface_y,
             "player_yaw": self.game.yaw,
             "player_pos": [self.game.pos.x, self.game.pos.y, self.game.pos.z],
@@ -326,16 +419,10 @@ impl OyabaunApp {
             let mut s = self.net.status.clone();
             s.push_str(" · ");
             s.push_str(&self.level_label);
-            if self.npcs.boss().alive() {
-                s.push_str(&format!(" · BOSS {:.0}%", self.npcs.boss().hp_frac() * 100.0));
-            } else {
-                s.push_str(" · BOSS DEFEATED");
-            }
-            if self.npcs.rival().alive() {
-                s.push_str(&format!(" · RIVAL {:.0}%", self.npcs.rival().hp_frac() * 100.0));
-            } else {
-                s.push_str(" · RIVAL DOWN");
-            }
+            s.push_str(&format!(" · {} · {} ENEMIES",
+                self.npcs.wave_text(),
+                self.npcs.alive_count(),
+            ));
             s
         };
         if !self.net.toast.is_empty() {
@@ -374,6 +461,7 @@ impl OyabaunApp {
             0.0
         };
         self.last_ms = time_ms;
+        self.game_time += dt;
 
         self.game.set_online(self.net.joined);
         if self.net.joined {
@@ -404,7 +492,38 @@ impl OyabaunApp {
         }
         if shot_fired {
             let wi = self.loadout.current_idx();
-            self.npcs.register_shot(&self.game, wi);
+            // Check HP before and after to detect hits and kills
+            let hp_before: Vec<(f32, bool)> = self.npcs.npcs.iter()
+                .map(|n| (n.hp, n.alive()))
+                .collect();
+            let hit = self.npcs.register_shot(&self.game, wi);
+            if hit {
+                self.last_hit = true;
+            }
+            // Check for kills
+            for (i, npc) in self.npcs.npcs.iter().enumerate() {
+                if hp_before[i].1 && !npc.alive() {
+                    self.last_kill = npc.def.label.to_uppercase();
+                }
+            }
+            // Debug log every shot
+            #[cfg(target_arch = "wasm32")]
+            {
+                let eye = self.game.eye_pos();
+                let dir = self.game.view_forward();
+                let alive = self.npcs.alive_count();
+                let msg = format!(
+                    "SHOT wi={} hit={} alive={} wave={} eye=({:.1},{:.1},{:.1}) dir=({:.2},{:.2},{:.2})",
+                    wi, hit, alive, self.npcs.wave + 1,
+                    eye.x, eye.y, eye.z, dir.x, dir.y, dir.z
+                );
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
+            }
+        }
+
+        // Tick NPC AI (patrol, chase, death)
+        if dt > 0.0 {
+            self.npcs.tick(dt, self.game.pos, &self.level_bounds);
         }
     }
 
@@ -439,26 +558,37 @@ impl OyabaunApp {
         let you = self.net.entity_id;
         if self.gpu.characters_loaded() {
             for npc in &self.npcs.npcs {
-                if !npc.alive() {
+                // Skip fully faded dead NPCs
+                if npc.state == npc::NpcState::Dead && npc.death_timer >= 1.0 {
+                    continue;
+                }
+                // Skip dead NPCs that haven't started dying (shouldn't happen but safety)
+                if !npc.alive() && npc.state != npc::NpcState::Dead {
                     continue;
                 }
                 let f = npc.foot;
-                let foot_y = self.game.feet_draw_y(f.x, f.z);
-                let mesh_yaw = yaw_face_cam_xz(
-                    Vec3::new(f.x, 0.0, f.z),
-                    Vec3::new(cam.x, 0.0, cam.z),
-                );
-                let skin = if npc.def.label == npc::RIVAL_DEF.label {
-                    CharacterSkin::Rival
-                } else {
-                    CharacterSkin::Boss
+                let bob_y = walk_bob_y(self.game_time, npc.speed);
+                let foot_y = self.game.feet_draw_y(f.x, f.z) + bob_y;
+                let facing_yaw = npc.yaw; // NPC's actual facing direction for 3D rotation
+                let skin = match npc.def.skin {
+                    npc::NpcSkin::Rival => CharacterSkin::Rival,
+                    npc::NpcSkin::Boss => CharacterSkin::Boss,
                 };
-                characters.push(make_character(
+                // Scale shrinks as NPC dies (collapse effect)
+                let death_scale = if npc.state == npc::NpcState::Dead {
+                    1.0 - npc.death_timer * 0.7
+                } else {
+                    1.0
+                };
+                let mut ch = make_character(
                     Vec3::new(f.x, foot_y, f.z),
-                    mesh_yaw,
-                    0.72 * npc.scale(),
+                    facing_yaw,
+                    0.72 * npc.scale() * death_scale,
                     skin,
-                ));
+                );
+                // Pass hit flash through anim_frame (>100 signals flash to shader)
+                ch.anim_frame = if npc.hit_flash > 0.0 { 100.0 + npc.hit_flash } else { 0.0 };
+                characters.push(ch);
             }
             if self.net.joined {
                 for p in &self.net.players {
@@ -474,53 +604,19 @@ impl OyabaunApp {
                         Vec3::new(p.x, 0.0, p.z),
                         Vec3::new(cam.x, 0.0, cam.z),
                     );
-                    characters.push(make_character(
+                    let mut ch = make_character(
                         Vec3::new(p.x, foot_y, p.z),
                         mesh_yaw,
                         sc,
                         CharacterSkin::Remote,
-                    ));
-                }
-            } else {
-                // Offline demo: place characters at fixed world positions
-                // (midway between boss and rival, plus two flanking spots)
-                let bf = self.npcs.boss().foot;
-                let rf = self.npcs.rival().foot;
-                let mid = (bf + rf) * 0.5;
-                let spots = [
-                    Vec3::new(mid.x + 2.0, 0.0, mid.z),
-                    Vec3::new(mid.x - 2.5, 0.0, mid.z - 3.0),
-                    Vec3::new(mid.x + 0.5, 0.0, mid.z + 4.0),
-                ];
-                for pos in &spots {
-                    let foot_y = self.game.feet_draw_y(pos.x, pos.z);
-                    let mesh_yaw = yaw_face_cam_xz(
-                        Vec3::new(pos.x, 0.0, pos.z),
-                        Vec3::new(cam.x, 0.0, cam.z),
                     );
-                    characters.push(make_character(
-                        Vec3::new(pos.x, foot_y, pos.z),
-                        mesh_yaw,
-                        0.88,
-                        CharacterSkin::Remote,
-                    ));
+                    // Remote players are only visible when moving, so walk anim
+                    ch.anim_frame = walk_anim_frame(self.game_time, 1.0);
+                    characters.push(ch);
                 }
             }
-            // Offline: show your own body with the same GLB/atlas (first-person otherwise has no mesh).
-            if !self.net.joined {
-                let gp = self.game.pos;
-                let foot_y = self.game.feet_draw_y(gp.x, gp.z);
-                let mesh_yaw = yaw_face_cam_xz(
-                    Vec3::new(gp.x, 0.0, gp.z),
-                    Vec3::new(cam.x, 0.0, cam.z),
-                );
-                characters.push(make_character(
-                    Vec3::new(gp.x, foot_y, gp.z),
-                    mesh_yaw,
-                    0.64,
-                    CharacterSkin::Remote,
-                ));
-            }
+            // Offline: no demo characters or self-body in first person
+            // (those were billboard sprites; 3D models clip into the camera)
         }
         let weapon_hud = WeaponHudParams {
             weapon_id: self.loadout.current_idx() as u32,
@@ -608,9 +704,16 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         input: InputState::default(),
         net,
         loadout: Loadout::new(),
-        npcs: NpcManager::new(boot.boss_foot, boot.rival_foot),
+        npcs: {
+            let mut nm = NpcManager::new(boot.boss_foot, boot.rival_foot);
+            nm.init_patrols(&boot.level_bounds);
+            nm
+        },
         last_ms: 0.0,
-        clear: Vec3::new(0.045, 0.038, 0.072),
+        game_time: 0.0,
+        last_hit: false,
+        last_kill: String::new(),
+        clear: Vec3::new(0.06, 0.04, 0.10),
         level_bounds: boot.level_bounds,
         mural_z: boot.mural_z,
         level_label: gi.level_label,

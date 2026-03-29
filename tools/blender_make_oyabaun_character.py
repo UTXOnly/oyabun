@@ -1,18 +1,24 @@
 """
-Export a **front-facing character card** (single quad + optional back face) for Oyabaun.
+Export an **8-direction character card** for Oyabaun.
 
-The old two-cube rig + smart_project UVs stretched any texture into a noise blob.
-This mesh is a vertical plane in Blender space (**Z up** before glTF `export_yup`),
-with UVs 0–1 so `client/sprite1.png` maps as a full-body front view.
+The atlas is 8 columns × N rows (row 0 = idle, rows 1+ = walk frames).
+Each cell is 64×crop_h pixels. The shader selects the right column (direction)
+and row (animation frame) at runtime via ATLAS_ROWS.
+
+Quad mesh is in Blender Z-up space; glTF export flips to Y-up.
+Feet sit at Z=0 so the model matrix foot_y places them on the ground.
 
 Run from repo root:
   /path/to/Blender --background --python tools/blender_make_oyabaun_character.py
+
+Environment variables:
+  OYABAUN_OUT     — output GLB path (default: client/characters/oyabaun_player.glb)
+  OYABAUN_SPRITE  — atlas PNG path (default: client/sprite1.png)
 
 Writes client/characters/oyabaun_player.glb (overwrites).
 """
 from __future__ import annotations
 
-import math
 import os
 import sys
 
@@ -21,13 +27,22 @@ import bmesh
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 OUT_DIR = os.path.join(ROOT, "client", "characters")
-OUT = os.path.join(OUT_DIR, "oyabaun_player.glb")
-SPRITE = os.path.join(ROOT, "client", "sprite1.png")
+OUT = os.environ.get("OYABAUN_OUT", os.path.join(OUT_DIR, "oyabaun_player.glb"))
+SPRITE = os.environ.get(
+    "OYABAUN_SPRITE", os.path.join(ROOT, "client", "sprite1.png")
+)
 
-# Authoring: Blender file uses Z-up (matches previous script). glTF export flips to Y-up.
+# Atlas layout: 8 columns × ATLAS_ROWS rows.
+# Each cell is 64 × cell_h pixels; total atlas is 512 × (cell_h * ATLAS_ROWS).
+# The quad aspect matches one cell (not the full atlas), since the shader
+# scales UVs by 1/8 horizontally and 1/ATLAS_ROWS vertically.
+ATLAS_ROWS = 7  # 1 idle + 6 walk frames
+# Cell aspect at 64×50: 64/50 = 1.28. At HEIGHT=1.68m, width = 2.15m.
+# Character is ~30% of cell width, so visual width ≈ 0.65m.
+CELL_W = 64
+CELL_H = 50  # cropped height per cell (boss atlas)
 HEIGHT = 1.68
-HALF_W = 0.30
-# Slight X offset so the sheet sits between feet; faces +X (into the level forward −Z after export).
+HALF_W = HEIGHT * (float(CELL_W) / float(CELL_H)) / 2.0
 X_PLANE = 0.02
 
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -35,23 +50,24 @@ os.makedirs(OUT_DIR, exist_ok=True)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
 bm = bmesh.new()
-# Front face (+X normal): BL, BR, TR, TL — PNG feet at bottom (v=1 in wgpu sample space for bill was bottom; glTF UV v=0 is often image bottom — we match PNG bottom to mesh feet)
 uv_layer = bm.loops.layers.uv.new()
+
+# Front face (+X normal in Blender → −Z normal in glTF Y-up)
 v_bl = bm.verts.new((X_PLANE, -HALF_W, 0.0))
-v_br = bm.verts.new((X_PLANE, HALF_W, 0.0))
-v_tr = bm.verts.new((X_PLANE, HALF_W, HEIGHT))
+v_br = bm.verts.new((X_PLANE,  HALF_W, 0.0))
+v_tr = bm.verts.new((X_PLANE,  HALF_W, HEIGHT))
 v_tl = bm.verts.new((X_PLANE, -HALF_W, HEIGHT))
 face = bm.faces.new((v_bl, v_br, v_tr, v_tl))
-# UV: image bottom (feet) at v=0, top at v=1 — standard OpenGL-style used by glTF
+# UVs span entire atlas (0,0)→(1,1). Shader selects column.
 uvs = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
 for loop, uv in zip(face.loops, uvs):
     loop[uv_layer].uv = uv
 
-# Thin back face (same UVs) so the card is visible from behind at shallow angles
+# Back face (thin offset for rear visibility)
 eps = 0.04
 v2_bl = bm.verts.new((X_PLANE - eps, -HALF_W, 0.0))
-v2_br = bm.verts.new((X_PLANE - eps, HALF_W, 0.0))
-v2_tr = bm.verts.new((X_PLANE - eps, HALF_W, HEIGHT))
+v2_br = bm.verts.new((X_PLANE - eps,  HALF_W, 0.0))
+v2_tr = bm.verts.new((X_PLANE - eps,  HALF_W, HEIGHT))
 v2_tl = bm.verts.new((X_PLANE - eps, -HALF_W, HEIGHT))
 face2 = bm.faces.new((v2_br, v2_bl, v2_tl, v2_tr))
 for loop, uv in zip(face2.loops, uvs):

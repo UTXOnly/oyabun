@@ -79,13 +79,19 @@ pub fn mural_z_plane(bounds: &Aabb, spawn: Vec3) -> f32 {
     }
 }
 
-pub fn npc_placements(spawn: Vec3, yaw: f32) -> (Vec3, Vec3) {
-    let sx = yaw.sin();
-    let sz = yaw.cos();
-    let fwd = Vec3::new(sx, 0.0, -sz);
-    let right = Vec3::new(-sz, 0.0, -sx);
-    let boss = spawn + fwd * 11.0 + right * 1.8;
-    let rival = spawn + fwd * 17.0 - right * 2.4;
+pub fn npc_placements(spawn: Vec3, _yaw: f32, bounds: &Aabb) -> (Vec3, Vec3) {
+    // Place NPCs toward the center of the alley from spawn, not along spawn yaw
+    let cx = (bounds.min.x + bounds.max.x) * 0.5;
+    let cz = (bounds.min.z + bounds.max.z) * 0.5;
+    let dx = cx - spawn.x;
+    let dz = cz - spawn.z;
+    let len = (dx * dx + dz * dz).sqrt().max(0.5);
+    let fwd = Vec3::new(dx / len, 0.0, dz / len);
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    // Clamp distances so NPCs stay within bounds with margin
+    let max_d = len * 0.85;
+    let boss = spawn + fwd * max_d.min(11.0) + right * 1.8;
+    let rival = spawn + fwd * max_d.min(17.0) - right * 2.4;
     (boss, rival)
 }
 
@@ -120,7 +126,7 @@ pub fn arena_from_level_json(s: &str) -> Result<LevelBoot, String> {
     let spawn_yaw = j
         .spawn_yaw
         .unwrap_or_else(|| default_spawn_yaw(&level_bounds, spawn));
-    let (auto_boss, auto_rival) = npc_placements(spawn, spawn_yaw);
+    let (auto_boss, auto_rival) = npc_placements(spawn, spawn_yaw, &level_bounds);
     let boss_foot = j.boss_foot.map(Vec3::from_array).unwrap_or(auto_boss);
     let rival_foot = j.rival_foot.map(Vec3::from_array).unwrap_or(auto_rival);
     let mural_z = mural_z_plane(&level_bounds, spawn);

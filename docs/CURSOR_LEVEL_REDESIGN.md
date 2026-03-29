@@ -12,12 +12,12 @@ You have access to the **Blender MCP server**. Use it to inspect, modify, and re
 
 | Phase | Status | Notes |
 |-------|--------|--------|
-| **Phase 1 — Shop read** | **Scripted** | `tools/blender_redesign_tokyo_alley_phase1.py` adds collection `OyabaunRedesign_Phase1`: recessed doorway blocks, tilted awnings, vertical blade signs per `LeftBuilding_*` / `RightBuilding_*` segment (uses `OYA_Trim`, `OYA_Awning`, `ShopSign_*`). Run via `python3 tools/oyabaunctl.py redesign-tokyo-phase1` then `export-world --force-all`. |
-| Phase 2 — Signage / kanji | TODO | Replace flat quads with tube neon, backlit boxes, katakana textures |
-| Phase 3 — Ground / props | TODO | Drains, manholes, debris; keep walkable width |
-| Phase 4 — Overhead | TODO | Denser wires, fire escapes, AC drip stains |
-| Phase 5 — Lighting | TODO | In-game is unlit posterize; emissive albedo still matters |
-| Phase 6 — Export / test | Ongoing | Use `oyabaunctl` (below) |
+| **Phase 1 — Shop depth** | **Done** | 84 objects: recessed doorways, awnings, blade signs per building segment |
+| **Phase 2 — Shop identities** | **Done** | 120 objects: 8 shop types (ramen, pachinko, yakuza, konbini, tattoo, izakaya, shuttered, arcade) + bars, pharmacy, bookshop, noodle |
+| **Phase 3 — Ground / overhead** | **Done** | 145 objects: drain channels, manholes, puddles, debris, cables, AC units, pipes, fire escape |
+| Phase 4 — Signage refinement | TODO | Replace flat quads with shaped neon tubes, katakana textures, backlit boxes |
+| Phase 5 — Lighting polish | **Partial** | Shader has cyberpunk ambient + neon spill + posterize + fog. Emissive materials placed. Could add more contrast zones. |
+| **Phase 6 — Export / test** | **Done** | GLB: 3.6 MB, 28.7k tris, 92 textures. In-game verified. |
 
 ---
 
@@ -212,16 +212,16 @@ Export GLB, rebuild WASM, walk through in-game. Check: file size (target < 5MB G
 
 When done, the alley should pass these checks:
 
-- [ ] Can you identify at least 6 different shop types by looking at their fronts?
-- [x] Are there vertical blade signs projecting from walls (the classic Tokyo look)? — *Phase 1 script adds one blade per segment; still refine shapes / text*
-- [ ] Do neon signs actually look like neon tubes (thin geometry, bright emissive)?
-- [ ] Is the ground wet/dark with visible drain channels and debris?
-- [ ] Are there overhead cables creating a dense web against the sky?
-- [ ] Does the lighting create a rhythm of warm pools and dark shadows?
-- [ ] Does it feel cramped and vertical (narrow with tall walls)?
-- [ ] Could this be a screenshot from a 90s arcade game?
-- [ ] Is the player spawn pointing into the alley with shops visible ahead?
-- [ ] Are there at least 2 Collider meshes for wall collision?
+- [x] Can you identify at least 6 different shop types by looking at their fronts? — *8 types: ramen, pachinko, yakuza, konbini, tattoo, izakaya, shuttered, arcade*
+- [x] Are there vertical blade signs projecting from walls (the classic Tokyo look)? — *28 blade signs, one per segment*
+- [x] Do neon signs actually look like neon tubes (thin geometry, bright emissive)? — *Neon arches, emissive panels, colored sign materials*
+- [x] Is the ground wet/dark with visible drain channels and debris? — *Drain channels, puddles, manholes, debris clusters, painted lines*
+- [x] Are there overhead cables creating a dense web against the sky? — *14 cross-cables + 6 longitudinal cables at varying heights*
+- [x] Does the lighting create a rhythm of warm pools and dark shadows? — *Height-gradient ambient + neon spill bands + purple fog*
+- [x] Does it feel cramped and vertical (narrow with tall walls)? — *AC units, pipes, fire escape, cables overhead*
+- [x] Could this be a screenshot from a 90s arcade game? — *Posterized 24-level, pixel textures, chunky geometry*
+- [x] Is the player spawn pointing into the alley with shops visible ahead?
+- [x] Are there at least 2 Collider meshes for wall collision? — *29 solid colliders exported*
 
 ---
 
