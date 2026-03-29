@@ -205,6 +205,55 @@ def _blender_exe(ns: argparse.Namespace | None = None) -> str:
     return os.environ.get("BLENDER", "blender")
 
 
+def _resolve_blender_executable(ns: argparse.Namespace | None) -> str:
+    import shutil
+
+    exe = _blender_exe(ns)
+    ep = Path(exe)
+    if ep.is_file():
+        return str(ep.resolve())
+    w = shutil.which(exe)
+    if not w and sys.platform == "darwin":
+        mac_blender = Path("/Applications/Blender.app/Contents/MacOS/Blender")
+        if mac_blender.is_file():
+            w = str(mac_blender)
+    if not w:
+        sys.stderr.write(
+            f"oyabaunctl: Blender not found ({exe!r}). "
+            "Install Blender, put it on PATH, set BLENDER, or pass --blender /path/to/blender\n"
+        )
+        sys.exit(1)
+    return w
+
+
+def _default_tokyo_blend() -> Path:
+    return (ROOT / "client" / "levels" / "tokyo_alley.blend").resolve()
+
+
+def cmd_enhance_tokyo_alley(ns: argparse.Namespace) -> None:
+    """Run tools/blender_enhance_tokyo_alley.py (packed glTF-ready albedos, strip OyabaunTokyoDetail)."""
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"enhance-tokyo-alley: blend not found: {blend}\n")
+        sys.exit(1)
+    script = ROOT / "tools" / "blender_enhance_tokyo_alley.py"
+    if not script.is_file():
+        sys.stderr.write(f"enhance-tokyo-alley: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    env = os.environ.copy()
+    if ns.repack:
+        env["OYABAUN_REPACK_ALBEDOS"] = "1"
+    print(f"enhance-tokyo-alley: {blend}", flush=True)
+    subprocess.run(
+        [exe, str(blend), "--background", "--python", str(script)],
+        cwd=ROOT,
+        env=env,
+        check=True,
+    )
+    print("enhance-tokyo-alley: done", flush=True)
+
+
 def cmd_import_glb(ns: argparse.Namespace) -> None:
     """Copy a hand-exported .glb into client/levels/tokyo_alley.glb (optional wasm-pack)."""
     import shutil
@@ -233,30 +282,17 @@ def cmd_import_glb(ns: argparse.Namespace) -> None:
 
 def cmd_export_world(ns: argparse.Namespace) -> None:
     """Run Blender headless to write client/levels/tokyo_alley.glb and/or tokyo_street.json."""
-    blend = Path(ns.blend).expanduser().resolve()
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
     if not blend.is_file():
         sys.stderr.write(f"export-world: blend file not found: {blend}\n")
         sys.exit(1)
 
-    import shutil
+    if ns.enhance:
+        cmd_enhance_tokyo_alley(
+            argparse.Namespace(blend=str(blend), repack=ns.repack, blender=ns.blender)
+        )
 
-    exe = _blender_exe(ns)
-    ep = Path(exe)
-    if ep.is_file():
-        exe = str(ep.resolve())
-    else:
-        w = shutil.which(exe)
-        if not w and sys.platform == "darwin":
-            mac_blender = Path("/Applications/Blender.app/Contents/MacOS/Blender")
-            if mac_blender.is_file():
-                w = str(mac_blender)
-        if not w:
-            sys.stderr.write(
-                f"export-world: Blender not found ({exe!r}). "
-                "Install Blender, put it on PATH, or pass --blender /path/to/blender\n"
-            )
-            sys.exit(1)
-        exe = w
+    exe = _resolve_blender_executable(ns)
 
     levels = ROOT / "client" / "levels"
     levels.mkdir(parents=True, exist_ok=True)
@@ -455,7 +491,21 @@ def main() -> None:
         "export-world",
         help="export a .blend to client/levels (glTF .glb for WASM, optional vertex JSON fallback)",
     )
-    sp.add_argument("--blend", required=True, help="path to Blender .blend file")
+    sp.add_argument(
+        "--blend",
+        default=None,
+        help="path to Blender .blend (default: client/levels/tokyo_alley.blend)",
+    )
+    sp.add_argument(
+        "--enhance",
+        action="store_true",
+        help="run enhance-tokyo-alley first (packed albedos for glTF; use with --repack to rebuild all)",
+    )
+    sp.add_argument(
+        "--repack",
+        action="store_true",
+        help="with --enhance: set OYABAUN_REPACK_ALBEDOS (rebuild every OyabaunPx_ texture)",
+    )
     sp.add_argument(
         "--format",
         dest="fmt",
@@ -478,7 +528,28 @@ def main() -> None:
         default=None,
         help="output JSON path (default: <repo>/client/levels/tokyo_street.json)",
     )
-    sp.set_defaults(func=cmd_export_world)
+    sp.set_defaults(func=cmd_export_world, enhance=False, repack=False)
+
+    sp = sub.add_parser(
+        "enhance-tokyo-alley",
+        help="pack pixel albedos in Tokyo alley .blend (glTF-safe textures; removes OyabaunTokyoDetail if present)",
+    )
+    sp.add_argument(
+        "--blend",
+        default=None,
+        help="path to .blend (default: client/levels/tokyo_alley.blend)",
+    )
+    sp.add_argument(
+        "--repack",
+        action="store_true",
+        help="rebuild all packed materials (OYABAUN_REPACK_ALBEDOS)",
+    )
+    sp.add_argument(
+        "--blender",
+        default=None,
+        help="Blender executable (default: $BLENDER env or 'blender' on PATH)",
+    )
+    sp.set_defaults(func=cmd_enhance_tokyo_alley, repack=False)
 
     sp = sub.add_parser(
         "import-glb",

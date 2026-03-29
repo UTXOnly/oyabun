@@ -4,22 +4,31 @@ The WASM client loads **`client/levels/tokyo_alley.glb`** first (binary glTF wit
 
 ## CLI (oyabaunctl)
 
-From the repo root:
+From the repo root (defaults to **`client/levels/tokyo_alley.blend`** if you omit `--blend`):
 
 ```bash
+# Export GLB + legacy JSON (default)
+python3 tools/oyabaunctl.py export-world
+
+# Other .blend path
 python3 tools/oyabaunctl.py export-world --blend /path/to/your_scene.blend
+
+# Regenerate packed albedos, then export (Tokyo alley)
+python3 tools/oyabaunctl.py export-world --enhance
+
+# Rebuild every packed texture (slow); then export
+python3 tools/oyabaunctl.py export-world --enhance --repack
+
+# Albedos only (no GLB write)
+python3 tools/oyabaunctl.py enhance-tokyo-alley
+python3 tools/oyabaunctl.py enhance-tokyo-alley --repack
 ```
 
-### Optional: Tokyo alley materials (Blender-only)
+### Tokyo alley materials (`enhance-tokyo-alley` / `export-world --enhance`)
 
-`tools/blender_enhance_tokyo_alley.py` **removes** legacy collection **`OyabaunTokyoDetail`** (old script-generated street clutter) if present, then assigns **packed 96×96 pixel albedos** (Image Texture → Principled) on materials used by mesh objects so **glTF embeds real textures**. Purely procedural node trees **do not** export to `.glb` (they become white in-game). Re-running skips materials already using **`OyabaunPx_`*** images; set **`OYABAUN_REPACK_ALBEDOS=1`** to rebuild them. Skips **`Gun_*`** / **`FPS_*`** so first-person meshes in the same blend keep their factors. It does **not** spawn new props in the lane.
+`tools/blender_enhance_tokyo_alley.py` **removes** legacy collection **`OyabaunTokyoDetail`** (old script-generated street clutter) if present, then assigns **packed 96×96 pixel albedos** (Image Texture → Principled) on materials used by mesh objects so **glTF embeds real textures**. Purely procedural node trees **do not** export to `.glb` (they become white in-game). Re-running skips materials already using **`OyabaunPx_`*** images; use **`enhance-tokyo-alley --repack`** or **`export-world --enhance --repack`** to rebuild them. Skips **`Gun_*`** / **`FPS_*`** so first-person meshes in the same blend keep their factors. It does **not** spawn new props in the lane.
 
 **Art direction:** compare exports against refs in repo-root **`example_images/`** (e.g. `sokes1.png`, `soke*.mp4`).
-
-```bash
-/path/to/Blender client/levels/tokyo_alley.blend --background --python tools/blender_enhance_tokyo_alley.py
-python3 tools/oyabaunctl.py export-world --blend client/levels/tokyo_alley.blend
-```
 
 `export-world` writes **`client/levels/tokyo_alley.glb`** (and by default **`tokyo_street.json`** via the legacy script). Use `--format glb` for glTF only. Set **`BLENDER`** or **`--blender`** if `blender` is not on `PATH` (macOS: path to `Blender.app/Contents/MacOS/Blender`).
 
