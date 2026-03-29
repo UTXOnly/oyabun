@@ -1,6 +1,6 @@
 # Character Improvement Task Doc
 
-## Status: IN PROGRESS
+## Status: IN PROGRESS (3D generator: `tools/blender_make_oyabaun_character.py`, `OYABAUN_VARIANT=all`)
 
 ## Goal
 
@@ -65,7 +65,7 @@ fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
 | `client/src/npc.rs` | NPC AI, hitboxes, wave spawning, smooth_turn |
 | `client/characters/oyabaun_player.glb` | Boss character model |
 | `client/characters/oyabaun_rival.glb` | Rival character model |
-| `tools/blender_make_oyabaun_character.py` | OLD sprite pipeline (deprecated) |
+| `tools/blender_make_oyabaun_character.py` | Procedural 3D boss/rival (`OYABAUN_VARIANT=boss\|rival\|all`) |
 
 ## What Needs Improvement
 

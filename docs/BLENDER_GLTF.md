@@ -59,15 +59,15 @@ python3 tools/oyabaunctl.py enhance-tokyo-alley --repack
 | **`OyabaunCollider` / `Collider`** in node name | Mesh used only for **axis-aligned collision** bounds (per primitive). |
 | Visual meshes | Any other names; rendered with textures. |
 
-### Playable character body (`oyabaun_player.glb`)
+### Playable character bodies (`oyabaun_player.glb`, `oyabaun_rival.glb`)
 
-Multiplayer and local boss/rival use a **shared 3D character mesh** (`client/characters/oyabaun_player.glb`), not rigged dolls in the alley GLB. Texture it with PixelLab output in Blender, then export GLB. Regenerate the default placeholder with:
+NPCs use **procedural 3D** meshes (multi-material, no image textures — tints in-game). Regenerate both from the repo with:
 
 ```bash
-/Applications/Blender.app/Contents/MacOS/Blender --background --python tools/blender_make_oyabaun_character.py
+OYABAUN_VARIANT=all /path/to/Blender --background --python tools/blender_make_oyabaun_character.py
 ```
 
-(Adjust the path to `Blender` on your OS.) The page may fetch `./characters/oyabaun_player.glb` after load; the WASM bundle also **embeds** a copy via `include_bytes!`.
+Optional: `OYABAUN_VARIANT=boss` or `=rival` and `OYABAUN_OUT=...` for a single file. Then `wasm-pack build` from `client/` so `include_bytes!` picks up the new GLBs.
 
 The alley export still **removes** legacy **`Boss_*`**, **`Rival_*`**, and **`ACBody*`** blocky meshes so they are not confused with real characters. Set **`OYABAUN_KEEP_PLACEHOLDER_NPCS=1`** if you need those dummies back in Blender for layout only.
 
