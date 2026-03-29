@@ -276,7 +276,7 @@ fn char_bayer4(p: vec2<i32>) -> f32 {
 }
 
 @fragment
-fn fs_char(@builtin(position) frag_coord: vec4<f32>, i: Vout) -> @location(0) vec4<f32> {
+fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let anim_row = cu.char_params.w;
 
     var hit_mix = 0.0;
@@ -306,7 +306,7 @@ fn fs_char(@builtin(position) frag_coord: vec4<f32>, i: Vout) -> @location(0) ve
     let ndf = dot(n, fill_dir);
     let shade_raw = clamp(ndk * 0.62 + ndf * 0.28 + 0.40, 0.0, 1.0);
 
-    let px = vec2<i32>(frag_coord.xy);
+    let px = vec2<i32>(i.clip.xy);
     let b = char_bayer4(px);
     let d = (b + 0.5) / 16.0 - 0.5;
     let n_cel = 4.0;
