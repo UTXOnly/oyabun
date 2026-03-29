@@ -19,8 +19,7 @@ PixelLab MCP create_character (pro mode, ~112px canvas, 8 dirs)
 ## Active PixelLab Characters (v3 pro)
 
 - **Boss** `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` — 112×112, walk anim, ✅ in-game
-- **Boss v4 (pistol oyabun)** `38781ecc-b15b-44ab-b2a2-0c4b4ee3fb8b` — 112×112, pro gen queued 2026-03-29; add walk when complete, then rebuild atlas
-- **Rival** `dabe33dd-b9d5-481c-9413-402cd0002747` — 116×116, rotations only
+- **Rival** `dabe33dd-b9d5-481c-9413-402cd0002747` — 116×116, rotations only (add walk on PixelLab web for a rival-specific atlas later)
 - **Player** `fe8d4102-8926-4267-ab1c-4600441cfcf4` — 104×104, rotations only
 
 ## Character Art Repo

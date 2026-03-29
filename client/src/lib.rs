@@ -620,7 +620,11 @@ impl OyabaunApp {
                     continue;
                 }
                 let f = npc.foot;
-                let bob_y = walk_bob_y(self.game_time, npc.speed);
+                let bob_y = if self.gpu.char_sprite_billboard_active() {
+                    0.0
+                } else {
+                    walk_bob_y(self.game_time, npc.speed)
+                };
                 let foot_y = self.game.feet_draw_y(f.x, f.z) + bob_y;
                 let facing_yaw = npc.yaw; // NPC's actual facing direction for 3D rotation
                 let skin = match npc.def.skin {
@@ -639,8 +643,14 @@ impl OyabaunApp {
                     0.78 * npc.scale() * death_scale,
                     skin,
                 );
-                // Pass hit flash through anim_frame (>100 signals flash to shader)
-                ch.anim_frame = if npc.hit_flash > 0.0 { 100.0 + npc.hit_flash } else { 0.0 };
+                // Billboard: rows 1–6 = walk; 0 = idle. (>100 = hit flash for 3D shader; billboards treat as idle row.)
+                ch.anim_frame = if npc.hit_flash > 0.0 {
+                    100.0 + npc.hit_flash
+                } else if npc.state == npc::NpcState::Dead {
+                    0.0
+                } else {
+                    walk_anim_frame(self.game_time, npc.speed)
+                };
                 characters.push(ch);
             }
             if self.net.joined {

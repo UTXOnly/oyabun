@@ -68,11 +68,15 @@ PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
 | Character | PixelLab ID | Canvas | Animations | In-Game |
 |-----------|-------------|--------|------------|---------|
 | Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | walk (8 dirs × 6 frames) | ✅ Active |
-| Boss v4 (pistol oyabun, 2026-03-29) | `38781ecc-b15b-44ab-b2a2-0c4b4ee3fb8b` | 112×112 | **Add walk** when gen completes (see below) | ⏳ Generating |
-| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | None yet | ❌ Uses boss atlas |
-| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | None yet | ❌ Uses boss atlas |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | rotations only (add **walk** on PixelLab when ready) | ❌ Uses boss atlas |
+| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | rotations only | ❌ Uses boss atlas |
+| Extra (suit enforcer, no gun in prompt) | `ffe4c106-addf-4e53-902a-9ef73f44ea56` | 48×48 | 1 animation | — |
 
-**Boss v4 next steps:** Poll PixelLab / MCP `get_character(character_id="38781ecc-b15b-44ab-b2a2-0c4b4ee3fb8b")` until rotations exist. Then queue **walk** (template `walk` or `walking`): use the [PixelLab](https://pixellab.ai) site if Cursor’s `animate_character` MCP call errors (some clients send invalid JSON for string args). Export ZIP → `build_game_atlas.py` → `tools/export_character_atlas_to_rgba.py` → replace `boss_v3_atlas.rgba` (or add a second atlas + bind group when per-skin wiring lands).
+### PixelLab MCP vs web app (why you might see “nothing generating”)
+
+- **Same API key**: `.cursor/mcp.json` must use **your** PixelLab `Bearer` token ([PixelLab account / API](https://pixellab.ai)). If the token differs from the account you open in the browser, **create** jobs will not show in the web UI and `list_characters` (MCP) is the source of truth for that key.
+- **Verify**: Run MCP `list_characters` — if a new ID never appears after ~5 minutes, the job did not land on that key or failed server-side; create the character on **pixellab.ai** instead and copy the ID into this table.
+- **`animate_character` from Cursor**: Some clients send broken JSON for string fields (`template_animation_id`), so template walks often must be queued from the **PixelLab website** (Animations → template **walk** / **walking**, all directions).
 
 ### Previous Characters (v2 standard, v1 deprecated)
 

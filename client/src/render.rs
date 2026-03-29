@@ -2084,6 +2084,11 @@ impl Gpu {
         self.character.is_some()
     }
 
+    /// Sprite atlas billboards use walk frames for leg motion; skip vertical bob (it looked like a South Park bounce).
+    pub fn char_sprite_billboard_active(&self) -> bool {
+        self.char_sprite_bg.is_some()
+    }
+
     pub fn character_rival_loaded(&self) -> bool {
         self.character_rival.is_some()
     }

@@ -1,9 +1,9 @@
 # Changelog
 
-## 2026-03-29 — PixelLab Boss v4 (pistol oyabun) queued
+## 2026-03-29 — NPC sprite walk frames; no bob on billboards; PixelLab MCP notes
 
-- **Art**: New pro-mode character `38781ecc-b15b-44ab-b2a2-0c4b4ee3fb8b` (112×112, 8 dirs) — yakuza boss with pistol; walk animation to be queued when generation completes (PixelLab web if MCP `animate_character` fails).
-- **Docs**: IDs and export steps updated in `docs/CURSOR_CHARACTER_IMPROVEMENT.md`, `.cursor/rules/character-gen.mdc`, `.claude/skills/blender-characters.md`.
+- **Client**: NPCs use `walk_anim_frame` for atlas rows 1–6 when moving; vertical **bob is disabled** when sprite billboards are active (walk legs carry motion). Dead NPCs stay on idle row.
+- **Docs**: PixelLab **API key vs web app** (why creates may not show in the browser), `list_characters` as key truth, and **`animate_character` via website** when Cursor MCP breaks string JSON.
 
 ## 2026-03-29 — Sprite billboard ground alignment + atlas UV rows
 
