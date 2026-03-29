@@ -13,6 +13,7 @@ mod mesh;
 mod net;
 mod npc;
 mod render;
+mod street_dressing;
 
 use game::GameState;
 use npc::NpcManager;
@@ -119,7 +120,8 @@ fn gltf_needs_floor_slab(solids: &[mesh::Aabb], bounds: &mesh::Aabb) -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
+fn game_init_from_gltf(mut cpu: gltf_level::GltfLevelCpu) -> GameInit {
+    street_dressing::append_tokyo_facades(&mut cpu);
     let bounds = cpu.bounds();
     let spawn = cpu.spawn;
     let yaw = cpu.spawn_yaw;

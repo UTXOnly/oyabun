@@ -300,7 +300,7 @@ fn fs_bill(i: Bout) -> @location(0) vec4<f32> {
 }
 "#;
 
-const MAX_BILL_QUADS: usize = 48;
+const MAX_BILL_QUADS: usize = 64;
 const BILL_VERTS: usize = MAX_BILL_QUADS * 4;
 const BILL_IDX: usize = MAX_BILL_QUADS * 6;
 /// Boss + rival + remotes + offline demos (see draw_world batching).
@@ -491,6 +491,57 @@ pub struct CharacterInstance {
     pub model: Mat4,
     pub mesh_yaw: f32,
     pub skin: CharacterSkin,
+}
+
+fn append_char_gun_billboard(
+    out: &mut Vec<BillVertex>,
+    inst: &CharacterInstance,
+    cam_pos: Vec3,
+) -> bool {
+    if out.len() / 4 >= MAX_BILL_QUADS {
+        return false;
+    }
+    let c = inst.model.col(3);
+    let foot = Vec3::new(c.x, c.y, c.z);
+    let yaw = inst.mesh_yaw;
+    let fwd = Vec3::new(yaw.sin(), 0.0, yaw.cos());
+    let right = Vec3::new(fwd.z, 0.0, -fwd.x);
+    let shoulder = foot + Vec3::new(0.0, 1.02, 0.0) + right * 0.3 + fwd * 0.12;
+    let mut to_cam = cam_pos - shoulder;
+    to_cam.y = 0.0;
+    let to_cam = if to_cam.length_squared() < 1e-6 {
+        (-fwd).normalize()
+    } else {
+        to_cam.normalize()
+    };
+    let up = Vec3::Y;
+    let mut r = to_cam.cross(up);
+    if r.length_squared() < 1e-8 {
+        r = right;
+    } else {
+        r = r.normalize();
+    }
+    let u_raw = r.cross(to_cam);
+    let u = if u_raw.length_squared() < 1e-8 {
+        Vec3::Y
+    } else {
+        u_raw.normalize()
+    };
+    let hw = 0.16;
+    let hh = 0.11;
+    let bl = shoulder - r * hw - u * hh;
+    let br = shoulder + r * hw - u * hh;
+    let tr = shoulder + r * hw + u * hh;
+    let tl = shoulder - r * hw + u * hh;
+    let corners = [bl, br, tr, tl];
+    let uvs = [[0.0_f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+    for i in 0..4 {
+        out.push(BillVertex {
+            pos: corners[i].to_array(),
+            uv: uvs[i],
+        });
+    }
+    true
 }
 
 pub struct Gpu {
@@ -1818,7 +1869,10 @@ impl Gpu {
         self.queue
             .write_buffer(&self.uniform, 0, bytemuck::bytes_of(&g));
 
+        let capped: Vec<&CharacterInstance> = characters.iter().take(MAX_CHARACTER_INSTANCES).collect();
+
         let mut bill_cpu: Vec<BillVertex> = Vec::new();
+        let mut mural_vert_count: usize = 0;
         if self.sprite_ready {
             let b = level_bounds;
             let span_x = (b.max.x - b.min.x).max(8.0);
@@ -1847,15 +1901,27 @@ impl Gpu {
                     uv: uvs[i],
                 });
             }
+            mural_vert_count = 4;
         }
+        if self.character.is_some() {
+            for inst in &capped {
+                if !append_char_gun_billboard(&mut bill_cpu, inst, cam_pos) {
+                    break;
+                }
+            }
+        }
+        let mural_idx_count: u32 = (mural_vert_count / 4 * 6) as u32;
+        let bill_idx_count: u32 = (bill_cpu.len() / 4 * 6) as u32;
+        let gun_idx_count: u32 = bill_idx_count.saturating_sub(mural_idx_count);
+
         if !bill_cpu.is_empty() {
             self.queue
                 .write_buffer(&self.bill_vb, 0, bytemuck::cast_slice(&bill_cpu));
         }
 
-        let capped: Vec<&CharacterInstance> = characters.iter().take(MAX_CHARACTER_INSTANCES).collect();
         let (rivals, boss_like): (Vec<_>, Vec<_>) = capped
-            .into_iter()
+            .iter()
+            .copied()
             .partition(|c| c.skin == CharacterSkin::Rival);
 
         let fill_char_uniforms = |list: &[&CharacterInstance], cd: &CharacterDraw| -> Vec<u8> {
@@ -1983,17 +2049,24 @@ impl Gpu {
         };
 
         let draw_billboard = |pass: &mut wgpu::RenderPass<'_>| {
-            if self.sprite_ready && !bill_cpu.is_empty() {
-                let vcount = bill_cpu.len() as u32;
-                let icount = (vcount / 4) * 6;
-                let vb_bytes = bill_cpu.len() as u64 * std::mem::size_of::<BillVertex>() as u64;
-                let ib_bytes = icount as u64 * 4;
-                pass.set_pipeline(&self.bill_pipeline);
-                pass.set_bind_group(0, &self.bind_group, &[]);
+            if bill_cpu.is_empty() || bill_idx_count == 0 {
+                return;
+            }
+            let vb_bytes = bill_cpu.len() as u64 * std::mem::size_of::<BillVertex>() as u64;
+            let ib_bytes = bill_idx_count as u64 * 4;
+            pass.set_pipeline(&self.bill_pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_vertex_buffer(0, self.bill_vb.slice(0..vb_bytes));
+            pass.set_index_buffer(self.bill_ib.slice(0..ib_bytes), wgpu::IndexFormat::Uint32);
+            if mural_idx_count > 0 && self.sprite_ready {
                 pass.set_bind_group(1, &self.bill_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.bill_vb.slice(0..vb_bytes));
-                pass.set_index_buffer(self.bill_ib.slice(0..ib_bytes), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..icount, 0, 0..1);
+                pass.draw_indexed(0..mural_idx_count, 0, 0..1);
+            }
+            if gun_idx_count > 0 && self.character.is_some() {
+                if let Some(bg) = self.weapon_bind_groups.get(0) {
+                    pass.set_bind_group(1, bg, &[]);
+                    pass.draw_indexed(mural_idx_count..bill_idx_count, 0, 0..1);
+                }
             }
         };
 
