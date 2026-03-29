@@ -1,36 +1,67 @@
 # Blender Character Modeling Skill
 
-## Current Characters in Scene
-- **Boss_Armature** at Blender (0.5, -7.0, 0.0) facing +Y — 18 mesh children
-- **Rival_Armature** at Blender (1.5, -12.0, 0.0) facing +Y — 19 mesh children
-- Collection: "Characters"
+## Current Pipeline: 3D Skin Modifier Models
 
-## Style Target
-90s game aesthetic — NOT blocky/Roblox. Think Virtua Fighter, Tekken, early PS1.
-- Smooth limbs with actual shape (tapered cylinders, not cubes)
-- Distinct facial features, hair detail
-- Clothing folds/detail via geometry, not just color
-- Proportions: semi-realistic, slight stylization
+Characters are built in Blender using Python scripting with the **skin modifier** technique. The old PixelLab sprite/billboard pipeline is deprecated.
 
-## Armature Convention
-7 bones: Hips, Spine, Head, ArmL, ArmR, LegL, LegR
-- All mesh parts must have vertex groups matching bone names
-- Automatic weights via parent_set='ARMATURE_AUTO'
+### Pipeline
 
-## Materials (Boss)
-Boss_Skin(0.35,0.18,0.08), Boss_Suit(0.92,0.90,0.85), Boss_Hat(0.95,0.93,0.88),
-Boss_Flower(0.85,0.08,0.08), Boss_Shoes(0.06,0.04,0.03), Boss_Shirt(0.75,0.72,0.68)
+```
+Skin modifier skeleton (joints + edges + radii)
+    → Subdivision level 2 (smooth organic shape)
+    → Decimate to ~30% (~1000 faces)
+    → Assign materials by face center position
+    → Add detail meshes (glasses, weapons, neon, tie, etc.)
+    → Join all into single mesh
+    → Export GLB with export_yup=True
+    → client/characters/oyabaun_player.glb (boss)
+    → client/characters/oyabaun_rival.glb (rival)
+```
 
-## Materials (Rival)
-Rival_Jacket(0.08,0.10,0.18), Rival_Glasses(0.15,0.35,0.45), Rival_Hair(0.02,0.02,0.04),
-Rival_Skin(0.72,0.55,0.42), Rival_Pants(0.12,0.12,0.15), Rival_Shoes(0.05,0.04,0.04)
+### Conventions
 
-## Animation
-- Actions: Boss_Idle, Rival_Idle (60 frames)
-- Keyframes at 1, 15, 30, 45, 60 with linear interpolation
-- Subtle breathing/sway motion
+- Blender Z-up, character front faces -Y
+- Feet at Z=0
+- glTF export flips to Y-up (export_yup=True)
+- `character_model()` in lib.rs adds PI to yaw for the Blender→game facing conversion
+- Materials: Principled BSDF with base color (no textures). Emissive for neon glow.
 
-## Mesh Parenting Fix
-When creating meshes at offset positions and parenting to armature:
-- Subtract the creation offset from mesh local position BEFORE parenting
-- Or create meshes at origin, shape them, then parent
+### Current Characters
+
+**Boss** (oyabaun_player.glb):
+- Dark suit, broad shoulders, slicked hair
+- Sunglasses, red tie, pistol in right hand
+- Cyan neon accents (lapels, pocket, belt, cuffs)
+- ~1100 verts, 11 materials
+
+**Rival** (oyabaun_rival.glb):
+- White/cream suit, lean athletic build, bleached spiky hair
+- Purple glasses, facial scar, katana in left hand
+- Purple neon accents (lapels, collar, belt, katana edge)
+- ~1186 verts, 11 materials
+
+### Shader
+
+`SHADER_CHAR_TEX` in `render.rs`:
+- Standard 3D model transform (NOT billboard)
+- Material tint from GLB material base color
+- Directional lighting + cyberpunk ambient
+- Hit flash (anim_frame > 100 encodes flash intensity)
+- Distance fog
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `client/src/render.rs` | Character shader, pipeline, uniform struct |
+| `client/src/lib.rs` | character_model(), make_character(), NPC render loop |
+| `client/src/gltf_level.rs` | parse_character_glb() — loads GLB |
+| `client/src/npc.rs` | NPC AI, hitboxes, wave spawning |
+| `client/characters/*.glb` | Character model files |
+
+### DEPRECATED — Do NOT Use
+
+- PixelLab MCP tools for character sprites
+- Billboard/atlas shaders
+- `tools/blender_make_oyabaun_character.py` (old sprite→quad pipeline)
+- Atlas UV selection, ATLAS_ROWS, direction indices

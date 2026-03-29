@@ -26,7 +26,12 @@ pub use render::{CharacterInstance, CharacterSkin, Gpu, Vertex};
 use serde_json::json;
 
 fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
-    Mat4::from_scale_rotation_translation(Vec3::splat(scale), Quat::from_rotation_y(yaw), foot)
+    // Blender models face -Y → glTF +Z. Game yaw 0 = facing -Z. Add PI to flip.
+    Mat4::from_scale_rotation_translation(
+        Vec3::splat(scale),
+        Quat::from_rotation_y(yaw + std::f32::consts::PI),
+        foot,
+    )
 }
 
 fn make_character(foot: Vec3, facing_yaw: f32, scale: f32, skin: CharacterSkin) -> CharacterInstance {
@@ -524,6 +529,10 @@ impl OyabaunApp {
         // Tick NPC AI (patrol, chase, death)
         if dt > 0.0 {
             self.npcs.tick(dt, self.game.pos, &self.level_bounds);
+            // Sync NPC foot.y with terrain so hitboxes match visual positions
+            for npc in &mut self.npcs.npcs {
+                npc.foot.y = self.game.feet_draw_y(npc.foot.x, npc.foot.z);
+            }
         }
     }
 

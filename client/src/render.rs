@@ -214,7 +214,9 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
 // 8-column atlas, N rows (row 0 = idle, rows 1..N = walk frames).
 // char_params.x = mesh yaw, .y = world_x, .z = world_z, .w = anim_row (0=idle, 1-6=walk).
 // Fragment picks column from (camera bearing − mesh_yaw) so the correct facing shows.
-/// Standard 3D character shader — real geometry, flat-lit cyberpunk style.
+/// Billboard character shader — textured sprite quad always faces camera.
+/// Fragment selects atlas column based on NPC facing vs camera angle.
+/// 3D character shader — standard model transform with material tint colors.
 const SHADER_CHAR_TEX: &str = r#"
 struct CharU {
   view_proj: mat4x4<f32>,
@@ -239,47 +241,48 @@ struct Vout {
   @builtin(position) clip: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) world_pos: vec3<f32>,
+  @location(2) normal_approx: vec3<f32>,
 };
 @vertex
 fn vs_char(v: Vin) -> Vout {
   let world_pos = (cu.model * vec4<f32>(v.pos, 1.0)).xyz;
+  // Approximate normal from model matrix (uniform scale assumed)
+  let n = normalize((cu.model * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
   var o: Vout;
   o.world_pos = world_pos;
   o.clip = cu.view_proj * vec4<f32>(world_pos, 1.0);
   o.uv = v.uv;
+  o.normal_approx = n;
   return o;
 }
 @fragment
 fn fs_char(i: Vout) -> @location(0) vec4<f32> {
+    let anim_row = cu.char_params.w;
+
+    // Hit flash: values > 100 encode flash intensity
+    var hit_mix = 0.0;
+    if (anim_row > 99.0) {
+        hit_mix = clamp(anim_row - 100.0, 0.0, 1.0);
+    }
+
+    // Material color from tint (3D models use per-material colors, not atlas)
     let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
-    if (t.a < 0.35) { discard; }
+
+    // Simple directional lighting
+    let light_dir = normalize(vec3<f32>(0.3, 0.8, -0.5));
+    let ndotl = max(dot(normalize(i.normal_approx), light_dir), 0.0);
+    let ambient = vec3<f32>(0.25, 0.20, 0.28);
+    let lit = t.rgb * (ambient + vec3<f32>(0.7) * ndotl);
+
+    // Hit flash: red-white overlay
+    let flashed = mix(lit, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
+
+    // Distance fog
     let wp = i.world_pos;
-
-    // Approximate normal from model center for depth shading
-    let center = cu.model[3].xyz + vec3<f32>(0.0, 0.9, 0.0);
-    let n = normalize(wp - center);
-
-    // Cyberpunk lighting: overhead warm + side neon bounce
-    let light_dir = normalize(vec3<f32>(0.3, 1.0, -0.5));
-    let ndl = max(dot(n, light_dir), 0.0);
-    let ambient = vec3<f32>(0.30, 0.24, 0.32);
-    let direct = vec3<f32>(0.85, 0.80, 0.70);
-    // Camera-facing rim light for visual pop
-    let to_cam = normalize(cu.cam_pos.xyz - wp);
-    let rim = pow(1.0 - max(dot(n, to_cam), 0.0), 3.0) * 0.25;
-
-    // Hit flash (char_params.w > 100 = flash active)
-    let flash_val = cu.char_params.w;
-    let hit_mix = clamp(flash_val - 100.0, 0.0, 1.0);
-
-    let lit = t.rgb * (ambient + direct * ndl * 0.6) + vec3<f32>(0.15, 0.20, 0.30) * rim;
-    let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 16.0) / 16.0;
-    let flashed = mix(q, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
-
     let dist = length(wp - cu.cam_pos.xyz);
     let fog_amt = 1.0 - exp(-dist * cu.fog_params.x);
     let fc = cu.fog_color.rgb;
-    return vec4<f32>(mix(flashed, fc, clamp(fog_amt, 0.0, 1.0)), t.a);
+    return vec4<f32>(mix(flashed, fc, clamp(fog_amt, 0.0, 1.0)), 1.0);
 }
 "#;
 
@@ -537,57 +540,6 @@ pub struct CharacterInstance {
     pub skin: CharacterSkin,
     /// 0.0 = idle row, 1.0–6.0 = walk frame rows in the atlas.
     pub anim_frame: f32,
-}
-
-fn append_char_gun_billboard(
-    out: &mut Vec<BillVertex>,
-    inst: &CharacterInstance,
-    cam_pos: Vec3,
-) -> bool {
-    if out.len() / 4 >= MAX_BILL_QUADS {
-        return false;
-    }
-    let c = inst.model.col(3);
-    let foot = Vec3::new(c.x, c.y, c.z);
-    let yaw = inst.mesh_yaw;
-    let fwd = Vec3::new(yaw.sin(), 0.0, yaw.cos());
-    let right = Vec3::new(fwd.z, 0.0, -fwd.x);
-    let shoulder = foot + Vec3::new(0.0, 1.02, 0.0) + right * 0.3 + fwd * 0.12;
-    let mut to_cam = cam_pos - shoulder;
-    to_cam.y = 0.0;
-    let to_cam = if to_cam.length_squared() < 1e-6 {
-        (-fwd).normalize()
-    } else {
-        to_cam.normalize()
-    };
-    let up = Vec3::Y;
-    let mut r = to_cam.cross(up);
-    if r.length_squared() < 1e-8 {
-        r = right;
-    } else {
-        r = r.normalize();
-    }
-    let u_raw = r.cross(to_cam);
-    let u = if u_raw.length_squared() < 1e-8 {
-        Vec3::Y
-    } else {
-        u_raw.normalize()
-    };
-    let hw = 0.16;
-    let hh = 0.11;
-    let bl = shoulder - r * hw - u * hh;
-    let br = shoulder + r * hw - u * hh;
-    let tr = shoulder + r * hw + u * hh;
-    let tl = shoulder - r * hw + u * hh;
-    let corners = [bl, br, tr, tl];
-    let uvs = [[0.0_f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
-    for i in 0..4 {
-        out.push(BillVertex {
-            pos: corners[i].to_array(),
-            uv: uvs[i],
-        });
-    }
-    true
 }
 
 pub struct Gpu {
@@ -1184,7 +1136,7 @@ impl Gpu {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: false,
+                depth_write_enabled: true, // solid 3D models need depth write
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),

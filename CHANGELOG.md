@@ -1,5 +1,71 @@
 # Changelog
 
+## 2026-03-29 — 3D character overhaul: skin modifier models replace sprite billboards
+
+### Breaking change: Deprecated PixelLab sprite pipeline
+
+The entire billboard sprite system has been replaced with proper 3D character models. The old pipeline (PixelLab → atlas PNG → billboard quad GLB → atlas UV shader) is fully deprecated.
+
+### New character pipeline: Blender skin modifier
+
+Characters are now organic 3D humanoid meshes built via Blender's skin modifier technique:
+
+1. **Skeleton definition**: Joint positions as vertices, connected by edges
+2. **Skin modifier**: Inflates skeleton into smooth organic mesh with per-joint radii controlling body proportions (broad shoulders, thin waist, etc.)
+3. **Subdivision + Decimate**: Subdivide level 2 for smoothness, decimate to ~30% for game performance (~1100 verts)
+4. **Material assignment**: Face center Z-position determines material (shoes/suit/skin/hair)
+5. **Detail meshes**: Separate objects for sunglasses, weapons, neon accents, tie
+6. **Join + Export**: Single GLB per character type
+
+### Characters
+
+| Character | File | Verts | Materials | Features |
+|-----------|------|-------|-----------|----------|
+| Boss | oyabaun_player.glb | 1100 | 11 | Dark suit, sunglasses, pistol, red tie, cyan neon accents, slicked hair |
+| Rival | oyabaun_rival.glb | 1186 | 11 | White suit, purple glasses, katana with glowing edge, bleached spiky hair, facial scar, purple neon accents |
+
+### Shader overhaul (SHADER_CHAR_TEX)
+
+- **Replaced**: Billboard vertex shader (extracted foot pos, computed camera-facing axes, positioned quad)
+- **New**: Standard 3D model transform (`world_pos = model * vec4(v.pos, 1.0)`)
+- **Replaced**: Atlas UV column/row selection (8 directions × 7 animation rows)
+- **New**: Material tint color sampling (`textureSample * mu.tint`)
+- **Added**: Directional lighting with cyberpunk ambient tones
+- **Changed**: Depth write ON (solid 3D models vs transparent sprites)
+- **Kept**: Hit flash (anim_frame > 100), distance fog
+
+### Facing fix
+
+- Characters faced away from player because Blender -Y front → glTF +Z, but game yaw 0 = -Z
+- Fixed by adding PI offset in `character_model()`: `Quat::from_rotation_y(yaw + PI)`
+
+### Hitbox Y-sync fix (shooting)
+
+- NPC `foot.y` was stuck at spawn value (0.0) while visual rendering used terrain-aware `feet_draw_y()`
+- Hitbox AABB was at wrong Y height, causing shots to miss
+- Fixed: `foot.y` now syncs with `feet_draw_y()` every tick after NPC AI update
+
+### Removed
+
+- `append_char_gun_billboard()` function (dead code from old gun sprite overlay)
+- All atlas-related shader code (ATLAS_ROWS, TAU, direction index computation, atlas UV mapping)
+
+### Updated docs/rules
+
+- `.cursor/rules/character-gen.mdc` — Updated from PixelLab sprite pipeline to 3D skin modifier pipeline
+- `.claude/skills/blender-characters.md` — Updated with new pipeline, conventions, file references
+- `docs/CURSOR_CHARACTER_IMPROVEMENT.md` — New task doc for further character detail improvements
+- `docs/character-gen-spec.md` — Needs update (still references old sprite pipeline)
+
+### Files changed
+
+- `client/src/render.rs` — New SHADER_CHAR_TEX (3D transform), removed billboard shader + gun billboard function, depth write enabled
+- `client/src/lib.rs` — character_model() PI offset, foot.y terrain sync
+- `client/characters/oyabaun_player.glb` — New 3D boss model (51KB, was sprite quad)
+- `client/characters/oyabaun_rival.glb` — New 3D rival model (155KB, was sprite quad)
+
+---
+
 ## 2026-03-28 — Tokyo alley full redesign (Phases 1-3)
 
 ### Level overhaul: from flat walls to cyberpunk Tokyo
