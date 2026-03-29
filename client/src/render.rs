@@ -13,10 +13,12 @@ fn warn_str(s: &str) {
     web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(s));
 }
 
-/// Exponential fog `1 - exp(-dist * x)`. Lower density keeps mid-distance alleys readable.
-const FOG_DENSITY: f32 = 0.00075;
-/// Slightly lifted from near-black so fog/clear never crush the whole frame to #000.
-const FOG_COLOR_RGBA: [f32; 4] = [0.14, 0.12, 0.20, 1.0];
+/// Exponential fog `1 - exp(-dist * density)`, capped by [`FOG_MAX_BLEND`] (passed as `fog_params.y`).
+const FOG_DENSITY: f32 = 0.00038;
+/// Upper bound on fog mix so distant alley stays readable (arcade refs: crisp signage).
+const FOG_MAX_BLEND: f32 = 0.34;
+/// Haze tint — slightly neutral vs old heavy purple so signs/neon stay saturated when fogged.
+const FOG_COLOR_RGBA: [f32; 4] = [0.10, 0.095, 0.135, 1.0];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -128,7 +130,7 @@ fn fs_main(i: Vout) -> @location(0) vec4<f32> {
     let base = i.col * (0.90 + 0.10 * i.col.r) + vec3<f32>(0.08, 0.06, 0.10);
     let q = floor(clamp(base, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
     let dist = length(i.world_pos - g.cam_pos.xyz);
-    let fog_amt = min(1.0 - exp(-dist * g.fog_params.x), 0.58);
+    let fog_amt = min(1.0 - exp(-dist * g.fog_params.x), g.fog_params.y);
     let fc = g.fog_color.rgb;
     return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), 1.0);
 }
@@ -203,21 +205,20 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
 
     // Fake neon spill: sinusoidal color bands along the alley
     let neon_phase = wp.x * 0.15 + wp.z * 0.12;
-    let neon_r = 0.10 * max(sin(neon_phase * 2.1 + 1.0), 0.0);
-    let neon_g = 0.06 * max(sin(neon_phase * 1.7 + 3.5), 0.0);
-    let neon_b = 0.12 * max(sin(neon_phase * 2.8 + 5.2), 0.0);
-    let neon_spill = vec3<f32>(neon_r, neon_g, neon_b) * (1.0 - h_norm * 0.4);
+    let neon_r = 0.14 * max(sin(neon_phase * 2.1 + 1.0), 0.0);
+    let neon_g = 0.09 * max(sin(neon_phase * 1.7 + 3.5), 0.0);
+    let neon_b = 0.15 * max(sin(neon_phase * 2.8 + 5.2), 0.0);
+    let neon_spill = vec3<f32>(neon_r, neon_g, neon_b) * (1.0 - h_norm * 0.35);
 
     // Bright emissive surfaces glow extra (signs, neons)
-    // Stronger boost so kanji signs really pop against dark walls
-    let emit_boost = max(lum - 0.35, 0.0) * 1.2;
+    let emit_boost = max(lum - 0.32, 0.0) * 1.45;
 
     let lit = t.rgb * detail * 2.0 + ambient + neon_spill + t.rgb * emit_boost;
 
     // Posterize to 24 levels for that arcade CRT look (less crushing than 15)
     let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
     let dist = length(wp - g.cam_pos.xyz);
-    let fog_amt = min(1.0 - exp(-dist * g.fog_params.x), 0.58);
+    let fog_amt = min(1.0 - exp(-dist * g.fog_params.x), g.fog_params.y);
     let fc = g.fog_color.rgb;
     return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), t.a);
 }
@@ -379,7 +380,7 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let flashed = mix(poster_vis, vec3<f32>(1.0, 0.28, 0.18), hit_mix * 0.62);
 
     let dist = length(wp - cu.cam_pos.xyz);
-    let fog_amt = min(1.0 - exp(-dist * cu.fog_params.x), 0.58);
+    let fog_amt = min(1.0 - exp(-dist * cu.fog_params.x), cu.fog_params.y);
     let fc = cu.fog_color.rgb;
     return vec4<f32>(mix(flashed, fc, clamp(fog_amt, 0.0, 1.0)), 1.0);
 }
@@ -784,6 +785,7 @@ pub struct GpuRenderDiag {
     pub world_index_count: u64,
     pub world_batch_count: u32,
     pub fog_density: f32,
+    pub fog_max_blend: f32,
     pub fog_color: [f32; 4],
     pub character_boss_loaded: bool,
     pub character_rival_loaded: bool,
@@ -1638,6 +1640,7 @@ impl Gpu {
             world_index_count,
             world_batch_count,
             fog_density: FOG_DENSITY,
+            fog_max_blend: FOG_MAX_BLEND,
             fog_color: FOG_COLOR_RGBA,
             character_boss_loaded: self.character.is_some(),
             character_rival_loaded: self.character_rival.is_some(),
@@ -2743,7 +2746,7 @@ impl Gpu {
             view_proj: view_proj.to_cols_array_2d(),
             cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
             fog_color: FOG_COLOR_RGBA,
-            fog_params: [FOG_DENSITY, 0.0, 0.0, 0.0],
+            fog_params: [FOG_DENSITY, FOG_MAX_BLEND, 0.0, 0.0],
             _pad: [0.0; 8],
         };
         self.queue
@@ -2946,7 +2949,7 @@ impl Gpu {
                     model: m,
                     cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
                     fog_color: FOG_COLOR_RGBA,
-                    fog_params: [FOG_DENSITY, 0.0, 0.0, 0.0],
+                    fog_params: [FOG_DENSITY, FOG_MAX_BLEND, 0.0, 0.0],
                     char_params: [inst.mesh_yaw, char_x, char_z, inst.anim_frame],
                     _p1: [0.0; 4],
                     _p2: [0.0; 4],
