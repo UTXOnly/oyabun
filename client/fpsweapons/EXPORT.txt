@@ -1,7 +1,5 @@
-Weapon HUD sprites are **PixelLab map-object** pixel art (regenerate same style):
+Weapon HUD art here is **Blender-rendered FP sprites** committed in git (`git show 112c497:client/fpsweapons/pistol.png` etc.). Do not replace with procedural PIL shapes.
 
-  python3 tools/pixellab_v2.py map-object "<prompt>" client/fpsweapons/pistol.png
+Optional swap: CC BY-SA 3.0 pack — see LICENSE.txt; source folder was `~/Downloads/fpsweapons/sprites/` (m9_pistol, mossberg_500, scar, maglite).
 
-Optional: CC BY-SA 3.0 pack — LICENSE.txt; `~/Downloads/fpsweapons/sprites/`.
-
-arms.png — FP arms overlay; add manually if desired.
+arms.png — first-person arms overlay; add manually if desired.

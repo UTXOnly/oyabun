@@ -888,7 +888,7 @@ pub struct CharacterInstance {
     pub model: Mat4,
     pub mesh_yaw: f32,
     pub skin: CharacterSkin,
-    /// Billboard atlas row index as float: 0 idle; 1–6 walk; 7–12 run or compact shoot (13-row atlas); 13–18 shoot (19+ rows); ≥100 hit flash (3D path).
+    /// Billboard atlas row index as float: 0 idle; 1–6 walk; 7–12 run or compact shoot (13-row atlas); 13–18 shoot (19+ rows). Hit flash uses `bill_tint`, not row ≥100.
     pub anim_frame: f32,
     /// Sprite billboard RGBA multiplier (injury, hit flash, corpse); `[1,1,1,1]` for remotes / default.
     pub bill_tint: [f32; 4],
@@ -2759,11 +2759,7 @@ impl Gpu {
                 let col = ((rel_norm + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as u32 % 8;
                 let rows_i = atlas_rows.max(1.0) as u32;
                 let max_r = rows_i.saturating_sub(1);
-                let row = if ci.anim_frame >= 100.0 {
-                    0u32
-                } else {
-                    (ci.anim_frame.floor() as u32).min(max_r)
-                };
+                let row = (ci.anim_frame.floor() as u32).min(max_r);
                 let rows = atlas_rows.max(1.0);
                 let u0 = col as f32 / CHAR_BILLBOARD_ATLAS_COLS as f32;
                 let u1 = (col as f32 + 1.0) / CHAR_BILLBOARD_ATLAS_COLS as f32;

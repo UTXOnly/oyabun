@@ -94,7 +94,7 @@ fn walk_anim_frame(time: f32, speed: f32) -> f32 {
 const RUN_FRAME_COUNT: f32 = 6.0;
 const RUN_FPS: f32 = 11.0;
 const RUN_SPEED_THRESHOLD: f32 = 2.25;
-const SHOOT_FPS: f32 = 9.0;
+const SHOOT_FPS: f32 = 5.0;
 const SHOOT_FRAME_COUNT: f32 = 6.0;
 
 fn run_anim_frame(time: f32, speed: f32) -> f32 {
@@ -143,9 +143,8 @@ fn spawn_hud_shells_for_weapon(wi: usize, shells: &mut Vec<HudShell>) {
 }
 
 fn npc_billboard_anim_frame(time: f32, npc: &npc::Npc, atlas_rows: u32) -> f32 {
-    if npc.hit_flash > 0.0 {
-        return 100.0 + npc.hit_flash;
-    }
+    // Hit flash must not use the 3D-only `anim_row >= 100` path: billboard UVs treat that as row 0,
+    // so every bullet snapped the sprite to idle and killed the shoot cycle. Use `bill_tint` for hit red.
     if !npc.alive() {
         return 0.0;
     }
