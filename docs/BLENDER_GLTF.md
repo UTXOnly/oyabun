@@ -10,9 +10,11 @@ From the repo root:
 python3 tools/oyabaunctl.py export-world --blend /path/to/your_scene.blend
 ```
 
-### Optional: bulk Tokyo street props (Blender-only)
+### Optional: Tokyo alley materials (Blender-only)
 
-`tools/blender_enhance_tokyo_alley.py` fills **`client/levels/tokyo_alley.blend`** with collection **`OyabaunTokyoDetail`** (sign boards, neon strips, awnings, wall AC blocks, conduits, vending shells, lanterns, planters, hydrants). It uses the scene’s existing mesh **world AABB** for placement. Re-running replaces that collection.
+`tools/blender_enhance_tokyo_alley.py` **removes** legacy collection **`OyabaunTokyoDetail`** (old script-generated street clutter) if present, then adds **procedural texture** to existing façade materials (`OYA_*`, signs, neon, etc.). It does **not** spawn new props in the lane. Re-running is idempotent.
+
+**Art direction:** compare exports against refs in repo-root **`example_images/`** (e.g. `sokes1.png`, `soke*.mp4`).
 
 ```bash
 /path/to/Blender client/levels/tokyo_alley.blend --background --python tools/blender_enhance_tokyo_alley.py

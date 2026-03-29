@@ -11,7 +11,7 @@ Nostr-native multiplayer FPS (MVP): Rust + WebGPU in the browser, specialized Go
 | `protocol/` | Schema stubs + pointers to `docs/PROTOCOL.md` |
 | `docs/` | Architecture and protocol |
 | `infra/` | Docker Compose for the relay |
-| `example_images/` | Reference clips for character / tone — not loaded by the client yet |
+| `example_images/` | Local art-direction refs (e.g. 90s pixel Tokyo vibe: `sokes1.png`, `soke*.mp4`) — not loaded by the client |
 
 ## Dev CLI (`tools/oyabaunctl.py`)
 

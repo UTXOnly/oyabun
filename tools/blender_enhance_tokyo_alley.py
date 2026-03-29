@@ -14,6 +14,8 @@ Then:
 
   python3 tools/oyabaunctl.py export-world --blend client/levels/tokyo_alley.blend
 
+Art-direction refs (not used by this script): repo-root **example_images/** (e.g. sokes1.png, soke*.mp4).
+
 Re-running is idempotent (materials tagged with a NodeFrame marker are skipped).
 """
 from __future__ import annotations
