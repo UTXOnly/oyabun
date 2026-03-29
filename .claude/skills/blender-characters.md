@@ -7,11 +7,11 @@ The 3D procedural approach failed to match the neo-noir pixel art reference styl
 ## Current Pipeline
 
 ```
-PixelLab MCP create_character (pro mode, 64px canvas, 8 dirs)
-    → animate_character (walk/attack templates)
+PixelLab MCP create_character (pro mode, ~112px canvas, 8 dirs)
+    → animate walk (MCP or PixelLab web if MCP string-args break)
     → download ZIP → extract
     → ~/Desktop/oyabaun-characters/tools/build_game_atlas.py
-    → atlas PNG → convert to .rgba binary
+    → atlas PNG → oyabaun tools/export_character_atlas_to_rgba.py → .rgba
     → client/characters/<name>_atlas.rgba → include_bytes!()
     → billboard quads in draw_world() → SHADER_BILL
 ```
@@ -19,6 +19,7 @@ PixelLab MCP create_character (pro mode, 64px canvas, 8 dirs)
 ## Active PixelLab Characters (v3 pro)
 
 - **Boss** `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` — 112×112, walk anim, ✅ in-game
+- **Boss v4 (pistol oyabun)** `38781ecc-b15b-44ab-b2a2-0c4b4ee3fb8b` — 112×112, pro gen queued 2026-03-29; add walk when complete, then rebuild atlas
 - **Rival** `dabe33dd-b9d5-481c-9413-402cd0002747` — 116×116, rotations only
 - **Player** `fe8d4102-8926-4267-ab1c-4600441cfcf4` — 104×104, rotations only
 

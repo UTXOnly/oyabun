@@ -68,8 +68,11 @@ PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
 | Character | PixelLab ID | Canvas | Animations | In-Game |
 |-----------|-------------|--------|------------|---------|
 | Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | walk (8 dirs × 6 frames) | ✅ Active |
+| Boss v4 (pistol oyabun, 2026-03-29) | `38781ecc-b15b-44ab-b2a2-0c4b4ee3fb8b` | 112×112 | **Add walk** when gen completes (see below) | ⏳ Generating |
 | Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | None yet | ❌ Uses boss atlas |
 | Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | None yet | ❌ Uses boss atlas |
+
+**Boss v4 next steps:** Poll PixelLab / MCP `get_character(character_id="38781ecc-b15b-44ab-b2a2-0c4b4ee3fb8b")` until rotations exist. Then queue **walk** (template `walk` or `walking`): use the [PixelLab](https://pixellab.ai) site if Cursor’s `animate_character` MCP call errors (some clients send invalid JSON for string args). Export ZIP → `build_game_atlas.py` → `tools/export_character_atlas_to_rgba.py` → replace `boss_v3_atlas.rgba` (or add a second atlas + bind group when per-skin wiring lands).
 
 ### Previous Characters (v2 standard, v1 deprecated)
 

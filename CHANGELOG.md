@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-03-29 — PixelLab Boss v4 (pistol oyabun) queued
+
+- **Art**: New pro-mode character `38781ecc-b15b-44ab-b2a2-0c4b4ee3fb8b` (112×112, 8 dirs) — yakuza boss with pistol; walk animation to be queued when generation completes (PixelLab web if MCP `animate_character` fails).
+- **Docs**: IDs and export steps updated in `docs/CURSOR_CHARACTER_IMPROVEMENT.md`, `.cursor/rules/character-gen.mdc`, `.claude/skills/blender-characters.md`.
+
 ## 2026-03-29 — Sprite billboard ground alignment + atlas UV rows
 
 - **Client**: Character billboards use `CHAR_BILLBOARD_FEET_DROP` so feet sit on terrain despite transparent padding in atlas cells; atlas **row count** for UVs is derived from embedded width/height (8 columns).
