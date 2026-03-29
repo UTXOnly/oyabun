@@ -68,8 +68,8 @@ PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
 | Character | PixelLab ID | Canvas | Animations | In-Game |
 |-----------|-------------|--------|------------|---------|
 | Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | walk (8 dirs × 6 frames) | ✅ Active |
-| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | **walk** queued via `tools/pixellab_v2.py animate … walking` (2026-03-29) | ❌ Uses boss atlas until rival atlas built |
-| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | rotations only | ❌ Uses boss atlas |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | ✅ **Walk done** — `GET …/characters/{id}/zip` returns **200** (~90KB); API `animation_count` may show `2` while ZIP is still valid → **build rival atlas** next | ❌ Uses boss atlas until rival atlas wired |
+| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | ⚠️ v2 `animate` → *Failed to start any animation jobs* (tried `walking` / `walk` + `/characters/animations`) — queue walk on **pixellab.ai** for now | ❌ Uses boss atlas |
 | Extra (suit enforcer, no gun in prompt) | `ffe4c106-addf-4e53-902a-9ef73f44ea56` | 48×48 | 1 animation | — |
 
 ### PixelLab: Cursor MCP vs HTTP v2 (reliable workaround)
@@ -87,6 +87,7 @@ python3 tools/pixellab_v2.py create8 "description here" --size 112
 Token: `PIXELLAB_API_TOKEN` env, or omit it and the script reads `.cursor/mcp.json` (gitignored). Docs: [api.pixellab.ai/v2/llms.txt](https://api.pixellab.ai/v2/llms.txt), [MCP tools overview](https://api.pixellab.ai/mcp/docs).
 
 - **Concurrency**: Tier 1 allows **8 concurrent background jobs**. One **8-direction walk** fills all 8 slots — wait for completion before `create8` or a second `animate`, or you’ll get a “maximum 8 concurrent jobs” error.
+- **`create8` server error**: As of check-in, `POST /create-character-with-8-directions` can fail with `Character creation processing failed: 'bone_scaling'`. That is **PixelLab backend**, not your token — use **Character Creator on the web** for new sprites until fixed, or open a ticket with PixelLab.
 
 ### Previous Characters (v2 standard, v1 deprecated)
 

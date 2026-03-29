@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-29 — PixelLab check-in: rival walk ZIP ready; v2 create8 / player animate blocked server-side
+
+- **Rival v3** `dabe33dd-…`: ZIP export **200** (~90 KB) — ready for `build_game_atlas` / `.rgba`.
+- **v2 `create8`**: fails with `'bone_scaling'` (PixelLab API).
+- **Player Ronin v3** `fe8d4102-…`: v2 animate endpoints return *Failed to start any animation jobs* — use web UI or support.
+
 ## 2026-03-29 — PixelLab v2 CLI (`pixellab_v2.py`) — fixes Cursor MCP JSON bug
 
 - **Tooling**: `tools/pixellab_v2.py` calls `https://api.pixellab.ai/v2` with correct JSON (`balance`, `list`, `get`, `animate`, `create8`). Uses `PIXELLAB_API_TOKEN` or Bearer from `.cursor/mcp.json`.
