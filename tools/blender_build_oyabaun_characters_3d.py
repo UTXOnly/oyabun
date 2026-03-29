@@ -25,6 +25,9 @@ After regenerating GLBs, rebuild WASM:
 
 Optional: OYABAUN_CHAR_DECIMATE=0.42 (higher = smoother body, more verts; default 0.46).
 
+Body materials use embedded 32–48px "arcade" albedos (ordered dither, nearest sampling) so the
+GLB carries pixel-era texture; client samples with nearest filtering.
+
 Blender version: 5.1
 glTF export: export_yup=True, export_materials='EXPORT', no animations
 
@@ -70,6 +73,172 @@ def make_material(name, color, metallic=0.0, roughness=0.8,
         bsdf.inputs['Emission Strength'].default_value = emission_strength
     links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
     return mat
+
+
+# --- Low-res arcade albedos (packed into GLB; no external files) ---
+
+_BAYER4 = (
+    0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5,
+)
+
+
+def _bayer01(x: int, y: int) -> float:
+    return _BAYER4[(y & 3) * 4 + (x & 3)] / 16.0
+
+
+def _flatten_rgba(w: int, h: int, rgba_fn) -> list[float]:
+    flat: list[float] = []
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = rgba_fn(x, y)
+            flat.extend((r, g, b, a))
+    return flat
+
+
+def make_arcade_image(name: str, w: int, h: int, rgba_fn) -> bpy.types.Image:
+    """Create and pack a small RGBA image for glTF embed (Principled + Image Texture)."""
+    existing = bpy.data.images.get(name)
+    if existing:
+        bpy.data.images.remove(existing, do_unlink=True)
+    img = bpy.data.images.new(name, width=w, height=h, alpha=True)
+    buf = _flatten_rgba(w, h, rgba_fn)
+    img.pixels.foreach_set(buf)
+    img.pack()
+    img.update()
+    return img
+
+
+def make_textured_material(
+    name: str,
+    img: bpy.types.Image,
+    metallic: float = 0.0,
+    roughness: float = 0.78,
+    emission: tuple[float, float, float] = (0, 0, 0),
+    emission_strength: float = 0.0,
+) -> bpy.types.Material:
+    """Principled BSDF with nearest-neighbor base color texture (early-90s style)."""
+    existing = bpy.data.materials.get(name)
+    if existing:
+        return existing
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    nodes.clear()
+    out = nodes.new('ShaderNodeOutputMaterial')
+    bsdf = nodes.new('ShaderNodeBsdfPrincipled')
+    tex = nodes.new('ShaderNodeTexImage')
+    tex.image = img
+    tex.interpolation = 'Closest'
+    links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+    bsdf.inputs['Metallic'].default_value = metallic
+    bsdf.inputs['Roughness'].default_value = roughness
+    if emission_strength > 0:
+        bsdf.inputs['Emission Color'].default_value = (*emission, 1.0)
+        bsdf.inputs['Emission Strength'].default_value = emission_strength
+    links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+    return mat
+
+
+def _rgba_boss_suit(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    sx = x / 47.0
+    sheen = 0.32 + 0.38 * math.sin(sx * math.pi * 3.5)
+    c0 = (0.035, 0.038, 0.095)
+    c1 = (0.11, 0.075, 0.175)
+    if (x * 7 + y * 13) % 29 == 0:
+        return (0.52, 0.10, 0.28, 1.0)
+    if (x * 5 + y * 11) % 31 == 0:
+        return (0.18, 0.06, 0.14, 1.0)
+    if t + sheen * 0.38 > 0.51:
+        return (*c1, 1.0)
+    return (*c0, 1.0)
+
+
+def _rgba_boss_skin(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    c0 = (0.48, 0.34, 0.24)
+    c1 = (0.76, 0.54, 0.38)
+    c2 = (0.62, 0.42, 0.30)
+    u = t + 0.08 * math.sin((x + y) * 0.35)
+    if u > 0.58:
+        return (*c1, 1.0)
+    if u > 0.38:
+        return (*c2, 1.0)
+    return (*c0, 1.0)
+
+
+def _rgba_boss_shirt(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    c0 = (0.86, 0.82, 0.76)
+    c1 = (0.94, 0.90, 0.84)
+    if ((x // 2) + (y // 2)) % 2 == 0:
+        return (*c1, 1.0) if t > 0.48 else (*c0, 1.0)
+    return (*c0, 1.0) if t > 0.52 else (*c1, 1.0)
+
+
+def _rgba_boss_hair(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    if t > 0.5:
+        return (0.035, 0.035, 0.045, 1.0)
+    return (0.008, 0.008, 0.012, 1.0)
+
+
+def _rgba_boss_shoe(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    c0 = (0.018, 0.018, 0.025)
+    c1 = (0.09, 0.085, 0.10)
+    return (*(c1 if t > 0.5 else c0), 1.0)
+
+
+def _rgba_boss_tie(x: int, y: int) -> tuple[float, float, float, float]:
+    stripe = ((x + y * 2) // 2) % 2
+    t = _bayer01(x, y)
+    if stripe:
+        return (0.62, 0.04, 0.06, 1.0) if t > 0.45 else (0.48, 0.02, 0.05, 1.0)
+    return (0.38, 0.02, 0.08, 1.0) if t > 0.48 else (0.52, 0.03, 0.05, 1.0)
+
+
+def _rgba_rival_suit(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    sx = x / 47.0
+    sheen = 0.28 + 0.36 * math.sin(sx * math.pi * 4.0)
+    c0 = (0.68, 0.64, 0.58)
+    c1 = (0.88, 0.84, 0.78)
+    if (x * 9 + y * 7) % 27 == 0:
+        return (0.45, 0.38, 0.55, 1.0)
+    if t + sheen * 0.32 > 0.5:
+        return (*c1, 1.0)
+    return (*c0, 1.0)
+
+
+def _rgba_rival_skin(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    c0 = (0.42, 0.30, 0.22)
+    c1 = (0.68, 0.46, 0.32)
+    u = t + 0.06 * math.sin((x - y) * 0.4)
+    return (*c1, 1.0) if u > 0.52 else (*c0, 1.0)
+
+
+def _rgba_rival_hair(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    c0 = (0.72, 0.66, 0.52)
+    c1 = (0.88, 0.82, 0.65)
+    return (*c1, 1.0) if t > 0.5 else (*c0, 1.0)
+
+
+def _rgba_rival_shoe(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    c0 = (0.62, 0.60, 0.56)
+    c1 = (0.82, 0.78, 0.74)
+    return (*(c1 if t > 0.5 else c0), 1.0)
+
+
+def _rgba_rival_shirt(x: int, y: int) -> tuple[float, float, float, float]:
+    t = _bayer01(x, y)
+    c0 = (0.05, 0.05, 0.07)
+    c1 = (0.14, 0.12, 0.18)
+    return (*(c1 if t > 0.48 else c0), 1.0)
 
 
 def make_box(cx, cy, cz, sx, sy, sz):
@@ -346,11 +515,16 @@ def build_boss():
     obj = build_skin_body("Boss", joints, SKELETON_EDGES, radii)
 
     # ── Materials (slot order: 0=suit, 1=skin, 2=hair, 3=shoe, 4=shirt) ──
-    mat_suit = make_material("Boss_Suit", (0.04, 0.04, 0.06), roughness=0.65)
-    mat_skin = make_material("Boss_Skin", (0.72, 0.55, 0.42), roughness=0.85)
-    mat_hair = make_material("Boss_Hair", (0.02, 0.02, 0.02), roughness=0.35)
-    mat_shoe = make_material("Boss_Shoe", (0.02, 0.02, 0.02), metallic=0.3, roughness=0.25)
-    mat_shirt = make_material("Boss_Shirt", (0.90, 0.86, 0.80), roughness=0.55)
+    im_suit = make_arcade_image("ArcadeBoss_Suit", 48, 48, _rgba_boss_suit)
+    im_skin = make_arcade_image("ArcadeBoss_Skin", 48, 48, _rgba_boss_skin)
+    im_shirt = make_arcade_image("ArcadeBoss_Shirt", 32, 32, _rgba_boss_shirt)
+    im_hair = make_arcade_image("ArcadeBoss_Hair", 32, 32, _rgba_boss_hair)
+    im_shoe = make_arcade_image("ArcadeBoss_Shoe", 32, 32, _rgba_boss_shoe)
+    mat_suit = make_textured_material("Boss_Suit", im_suit, roughness=0.65)
+    mat_skin = make_textured_material("Boss_Skin", im_skin, roughness=0.85)
+    mat_hair = make_textured_material("Boss_Hair", im_hair, roughness=0.35)
+    mat_shoe = make_textured_material("Boss_Shoe", im_shoe, metallic=0.3, roughness=0.25)
+    mat_shirt = make_textured_material("Boss_Shirt", im_shirt, roughness=0.55)
 
     def boss_zone(x, y, z):
         if z < 0.10:
@@ -385,7 +559,8 @@ def build_boss():
                                  metallic=0.3, roughness=0.6)
     mat_neon = make_material("Boss_Neon", (0.0, 0.8, 1.0),
                              emission=(0.0, 0.8, 1.0), emission_strength=3.0)
-    mat_tie = make_material("Boss_Tie", (0.5, 0.02, 0.02), roughness=0.45)
+    im_tie = make_arcade_image("ArcadeBoss_Tie", 32, 32, _rgba_boss_tie)
+    mat_tie = make_textured_material("Boss_Tie", im_tie, roughness=0.45)
     mat_cig = make_material("Boss_Cigarette", (0.75, 0.72, 0.68), roughness=0.7)
     mat_cig_tip = make_material("Boss_CigaretteTip", (0.9, 0.4, 0.1),
                                 emission=(0.9, 0.4, 0.1), emission_strength=2.0)
@@ -600,11 +775,16 @@ def build_rival():
     obj = build_skin_body("Rival", joints, SKELETON_EDGES, radii)
 
     # ── Materials (slot order: 0=suit, 1=skin, 2=hair, 3=shoe, 4=shirt) ──
-    r_suit = make_material("Rival_Suit", (0.85, 0.82, 0.78), roughness=0.55)
-    r_skin = make_material("Rival_Skin", (0.65, 0.48, 0.35), roughness=0.85)
-    r_hair = make_material("Rival_Hair", (0.82, 0.78, 0.65), roughness=0.35)
-    r_shoe = make_material("Rival_Shoe", (0.80, 0.78, 0.75), metallic=0.2, roughness=0.25)
-    r_shirt = make_material("Rival_Shirt", (0.08, 0.08, 0.10), roughness=0.5)
+    im_rs = make_arcade_image("ArcadeRival_Suit", 48, 48, _rgba_rival_suit)
+    im_rk = make_arcade_image("ArcadeRival_Skin", 48, 48, _rgba_rival_skin)
+    im_rh = make_arcade_image("ArcadeRival_Hair", 32, 32, _rgba_rival_hair)
+    im_rf = make_arcade_image("ArcadeRival_Shoe", 32, 32, _rgba_rival_shoe)
+    im_rt = make_arcade_image("ArcadeRival_Shirt", 32, 32, _rgba_rival_shirt)
+    r_suit = make_textured_material("Rival_Suit", im_rs, roughness=0.55)
+    r_skin = make_textured_material("Rival_Skin", im_rk, roughness=0.85)
+    r_hair = make_textured_material("Rival_Hair", im_rh, roughness=0.35)
+    r_shoe = make_textured_material("Rival_Shoe", im_rf, metallic=0.2, roughness=0.25)
+    r_shirt = make_textured_material("Rival_Shirt", im_rt, roughness=0.5)
 
     def rival_zone(x, y, z):
         if z < 0.09:

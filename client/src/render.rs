@@ -385,7 +385,7 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
 
     let chrom = max(al, vec3<f32>(0.045));
     let cn = normalize(chrom);
-    var out_c = clamp(pal * (0.34 + 0.66 * cn) * vec3<f32>(1.06, 1.0, 0.97), vec3<f32>(0.0), vec3<f32>(1.0));
+    var out_c = clamp(pal * (0.20 + 0.80 * cn) * vec3<f32>(1.04, 1.0, 0.98), vec3<f32>(0.0), vec3<f32>(1.0));
 
     let edge = 1.0 - max(dot(n, view_dir), 0.0);
     let ink = smoothstep(0.72, 0.97, edge);

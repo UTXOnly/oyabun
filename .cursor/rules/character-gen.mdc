@@ -1,6 +1,6 @@
 ---
 description: Oyabaun character generation — 3D Blender models via skin modifier + detail meshes
-globs: client/characters/**, tools/blender_make_oyabaun_character.py, client/src/render.rs
+globs: client/characters/**, tools/blender_build_oyabaun_characters_3d.py, tools/blender_make_oyabaun_character.py, client/src/render.rs
 alwaysApply: false
 ---
 
@@ -25,12 +25,12 @@ Blender Python (skin modifier + detail meshes)
     → client/characters/oyabaun_player.glb (boss types)
     → client/characters/oyabaun_rival.glb (rival types)
     → wasm-pack build embeds via include_bytes!
-    → SHADER_CHAR_TEX: standard model*pos transform + material tint colors
+    → SHADER_CHAR_TEX: model transform + nearest-sampled embedded albedos + arcade grade
 ```
 
 ### Blender Modeling Technique
 
-1. **Skin modifier**: Define skeleton as vertices + edges, apply Skin modifier with per-joint radii, subdivide level 2, decimate to ~30% for ~1000 face game mesh
+1. **Skin modifier**: Joints + edges, Skin radii, subsurf **1**, decimate ~0.46 (env `OYABAUN_CHAR_DECIMATE`)
 2. **Material assignment**: Iterate faces, assign material index by face center position (Z height → suit/skin/hair/shoes)
 3. **Detail meshes**: Separate objects for glasses, weapons, neon strips, tie, etc.
 4. **Join + export**: Join all into one mesh, export as GLB
@@ -40,7 +40,7 @@ Blender Python (skin modifier + detail meshes)
 - Blender Z-up, front = -Y. glTF Y-up after export.
 - Feet at Z=0 in Blender → Y=0 in glTF
 - `character_model()` adds PI to yaw (Blender -Y front → game -Z front)
-- Materials: Principled BSDF base color only (no image textures). Emission for neon glow.
+- Materials: Principled + **packed 32–48px arcade albedos** (dithered) on suit/skin/shirt/hair/shoe/tie; solids + emission for metal/glass/neon.
 - Vertex format: `WorldVertex { pos: [f32; 3], uv: [f32; 2] }` — 20 bytes
 
 ### Shader (SHADER_CHAR_TEX in render.rs)
