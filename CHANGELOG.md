@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-03-29 — Rival atlas: full 8-dir walk; SMG character pipeline + prompts
+
+- **Art**: Re-downloaded Rival v3 ZIP (complete **8-direction walking**); rebuilt `rival_v3_atlas.rgba` via `pixellab_zip_to_atlas.py` (no idle-padding for missing dirs).
+- **SMG**: `create8` still fails `bone_scaling`; queued **create4** Uzi-style wakashu `dee01186-8482-431e-ada3-3a00f1101d01` — expand to 8 dirs on PixelLab web, walk, zip, atlas. Docs/rules updated for **MP5/Uzi** prompt targets and boss replacement path.
+
 ## 2026-03-29 — Rival v3 sprite atlas in-game; zip→atlas tool; dual billboard bind groups
 
 - **Client**: `rival_v3_atlas.rgba` embedded; **Rival** skin uses rival atlas, Boss/Remote use boss atlas (two billboard draw ranges + bind groups). `upload_rgba_atlas` helper in `render.rs`.

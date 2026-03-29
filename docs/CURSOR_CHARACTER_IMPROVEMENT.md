@@ -69,7 +69,8 @@ PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
 | Character | PixelLab ID | Canvas | Animations | In-Game |
 |-----------|-------------|--------|------------|---------|
 | Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | walk (8 dirs × 6 frames) | ✅ Active |
-| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | Walk ZIP → `tools/pixellab_zip_to_atlas.py` → `rival_v3_atlas.rgba` (in repo) | ✅ **In-game** (per-skin billboard) |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | Full **8-dir walk** in ZIP → `pixellab_zip_to_atlas.py` → `rival_v3_atlas.rgba` | ✅ In-game |
+| SMG rival (WIP) | `dee01186-8482-431e-ada3-3a00f1101d01` | 112×112 | `create4` Uzi wakashu — **expand 8 dirs on web**, walk, zip, rebuild atlas | ⏳ Processing |
 | Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | ⚠️ v2 `animate` → *Failed to start any animation jobs* (tried `walking` / `walk` + `/characters/animations`) — queue walk on **pixellab.ai** for now | ❌ Uses boss atlas |
 | Extra (suit enforcer, no gun in prompt) | `ffe4c106-addf-4e53-902a-9ef73f44ea56` | 48×48 | 1 animation | — |
 
@@ -103,17 +104,21 @@ Token: `PIXELLAB_API_TOKEN` env, or omit it and the script reads `.cursor/mcp.js
 
 ## TODOs
 
-### Priority 1: Characters with weapons baked in
+### Priority 1: Characters with weapons baked in (SMG / Uzi / MP5)
 
-Oyabaun is a **yakuza gangster** shooter: adults in suits or street-luxury, firearms first; katanas optional for specific roles — **not** cartoon teens or ninja archetypes.
+Oyabaun is a **yakuza gangster** shooter: **primary weapons should read as SMGs** (Uzi, MAC-10, MP5/MP5K-style compact submachine guns) — clearly visible in the sprite, two-hand or hip-fire stance. Pistols are OK for some roles; **avoid** katanas unless a deliberate blade character.
 
-The in-game boss atlas should show a **visible gun** in-frame. **Regenerate** with prompts like:
+**v2 API note**: `create8` often returns `bone_scaling`; use **PixelLab web (pro, 8 dirs)** for final SMG sprites, or `python3 tools/pixellab_v2.py create4 "…"` then **expand to 8 directions on the site** before walk + ZIP.
 
-- [ ] **Boss / oyabun**: Pro mode, 8 dirs — e.g. *middle-aged Japanese yakuza boss, dark pinstripe suit, sunglasses, cigarette, gold ring, holding semi-automatic pistol in two-hand forward stance, stern scarred face, neo-noir crime drama, low top-down pixel art*
-- [ ] **Rival / wakashu**: Pro mode — *young adult yakuza enforcer, leather or loud suit, visible pistol or submachine gun, bleached or dyed hair, aggressive stance, same noir tone*
-- [ ] **Player**: Pro mode — *hardened street operator in dark coat or tactical jacket, face partially obscured, **firearm clearly visible**, urban yakuza-adjacent look, not ninja*
+**Queued (create4, 4-dir) — SMG rival concept**: `dee01186-8482-431e-ada3-3a00f1101d01` (Uzi-style wakashu). When rotations exist: finish on web → 8 dirs → `animate … walking` → `zip` → `pixellab_zip_to_atlas.py` → replace `rival_v3_atlas.rgba` or add a new skin row.
 
-- [ ] **Rival with katana** (optional variant): only if you want a blade-heavy role — still reads as **gangster**, not samurai fantasy.
+**Prompt templates (copy into PixelLab pro or v2 create4):**
+
+- **Boss / oyabun + SMG**: *Middle-aged Japanese yakuza boss, dark pinstripe suit, sunglasses, cigarette, holding compact MP5-style submachine gun at chest ready stance, spare mag pouch, stern scarred face, neo-noir, low top-down pixel art*
+- **Rival / wakashu + SMG**: *Young yakuza enforcer, leather jacket, bleached or dyed hair, purple sunglasses, holding Uzi-style submachine gun forward grip, aggressive stance, neo-noir pixel art*
+- **Player + SMG**: *Urban operator, dark coat or tactical vest, face mask or hood, holding compact SMG MP5K style, tactical gloves, neo-noir, not ninja*
+
+- [ ] **Rival with katana** (optional): only for a deliberate blade-heavy role; still **gangster**, not samurai fantasy.
 
 ### Priority 2: Shooting/attack animations
 
@@ -127,11 +132,9 @@ For a shooter game, custom animations may be better:
 
 ### Priority 3: Per-character atlas wiring
 
-Currently all characters use the boss atlas. Need:
-
-- [ ] **Rival atlas**: Queue walk animations for rival v3, build atlas, convert to .rgba, add to render.rs
-- [ ] **Player atlas**: Same for player v3
-- [ ] **Per-skin bind group**: Modify render.rs to store `char_sprite_bg_boss`, `char_sprite_bg_rival`, select in `draw_world()` based on `CharacterSkin`
+- [x] **Rival atlas** + **per-skin bind groups** — `rival_v3_atlas.rgba`, Rival skin uses rival texture in `render.rs`
+- [ ] **Player atlas**: Same pipeline for player v3 when walk export is ready
+- [ ] **Boss SMG atlas**: Replace `boss_v3_atlas.rgba` after new boss sprite with MP5/SMG (web pro or fixed `create8`)
 
 ### Priority 4: Additional animations
 

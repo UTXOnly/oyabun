@@ -31,7 +31,7 @@ PixelLab MCP (pro mode, canvas typically 104–128px, 8 dirs)
 ### Art direction (Oyabaun)
 
 - **Tone**: Adult neo-Tokyo **yakuza / gangster** crime — not cartoon teens, not ninja fantasy.
-- **Weapons**: Default to a **visible firearm** (pistol, compact SMG) in the sprite; optional katana as secondary for specific roles. Bake weapons into the character — no separate weapon billboards.
+- **Weapons**: Prefer **visible SMGs** (Uzi, MP5/MP5K, compact submachine gun) in the sprite; pistols OK; bake into the character — no separate weapon billboards. `create8` may fail (`bone_scaling`) — use **web pro 8-dir** or `pixellab_v2.py create4` + expand on site.
 - **Feet / ground**: Atlas cells often have transparent padding under the feet; `CHAR_BILLBOARD_FEET_DROP` in `render.rs` nudges the quad down so soles meet terrain. Re-tune if a new atlas pivots differently.
 
 ### PixelLab Characters (v3 pro mode, active)

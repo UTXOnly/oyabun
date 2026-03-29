@@ -18,8 +18,9 @@ PixelLab: prefer `tools/pixellab_v2.py` (HTTP v2) — Cursor MCP often breaks JS
 
 ## Active PixelLab Characters (v3 pro)
 
-- **Boss** `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` — 112×112, walk anim, ✅ in-game
-- **Rival** `dabe33dd-b9d5-481c-9413-402cd0002747` — 116×116, `rival_v3_atlas.rgba` in **oyabaun** client (in-game)
+- **Boss** `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` — 112×112, walk anim, ✅ in-game (`boss_v3_atlas.rgba`) — **SMG regen** pending (web pro or fixed API)
+- **Rival** `dabe33dd-b9d5-481c-9413-402cd0002747` — 116×116, full 8-dir walk, `rival_v3_atlas.rgba` ✅
+- **SMG rival WIP** `dee01186-8482-431e-ada3-3a00f1101d01` — `create4` Uzi wakashu; finish 8 dirs + walk on PixelLab → replace rival atlas
 - **Player** `fe8d4102-8926-4267-ab1c-4600441cfcf4` — 104×104, rotations only
 
 ## Character Art Repo
