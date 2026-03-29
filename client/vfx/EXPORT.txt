@@ -4,4 +4,4 @@ Regenerate:
   python3 tools/pixellab_v2.py map-object "pixel art muzzle flash … transparent" client/vfx/muzzle_flash.png
   python3 tools/pixellab_v2.py map-object "pixel art blood splatter … transparent" client/vfx/blood_overlay.png
 
-Game: nearest-filtered; muzzle = additive pass; blood = fullscreen alpha (see render.rs SHADER_HUD_VFX).
+Game: nearest-filtered; muzzle = additive HUD quad at barrel; blood = small world-facing billboard at hit point (billboard pass, depth-tested).

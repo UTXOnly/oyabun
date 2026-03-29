@@ -523,8 +523,7 @@ struct HudUniform {
     recoil: f32,
     reload: f32,
     aspect: f32,
-    blood_splat: f32,
-    _pad: f32,
+    _pad: [f32; 2],
 }
 
 #[repr(C)]
@@ -556,7 +555,7 @@ impl HudVertex {
 }
 
 const SHADER_HUD: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, blood_splat: f32, _p2: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, _p1: f32, _p2: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var wtex: texture_2d<f32>;
 @group(1) @binding(1) var wsamp: sampler;
@@ -618,7 +617,7 @@ fn fs_hud_arms(i: HOut) -> @location(0) vec4<f32> {
 "#;
 
 const SHADER_HUD_VFX: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, blood_splat: f32, _p2: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, _p1: f32, _p2: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var vtex: texture_2d<f32>;
 @group(1) @binding(1) var vsamp: sampler;
@@ -626,23 +625,7 @@ struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect:
 struct HIn { @location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>, }
 struct HOut { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32>, }
 
-@vertex
-fn vs_blood(v: HIn) -> HOut {
-  var o: HOut;
-  o.clip = vec4<f32>(v.pos, 0.0, 1.0);
-  o.uv = v.uv;
-  return o;
-}
-
-@fragment
-fn fs_blood(i: HOut) -> @location(0) vec4<f32> {
-  let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
-  let t = textureSample(vtex, vsamp, uv_tex);
-  let a = t.a * hu.blood_splat * 0.94;
-  if (a < 0.015) { discard; }
-  return vec4<f32>(t.rgb * hu.blood_splat, a);
-}
-
+// Muzzle sprite anchored to FP weapon barrel (HUD quad space, matches vs_hud weapon placement).
 @vertex
 fn vs_muzzle(v: HIn) -> HOut {
   let inv_aspect = 1.0 / max(hu.aspect, 0.5);
@@ -655,12 +638,13 @@ fn vs_muzzle(v: HIn) -> HOut {
     if (hu.reload < 1.0) { reload_y = -hu.reload * 0.7; }
     else { reload_y = -(2.0 - hu.reload) * 0.7; }
   }
-  var ox = 0.40;
-  var oy = -0.54;
-  if (hu.weapon == 1u) { ox = 0.36; oy = -0.52; }
-  else if (hu.weapon == 2u) { ox = 0.42; oy = -0.53; }
-  else if (hu.weapon == 3u) { ox = 0.38; oy = -0.52; }
-  var p = v.pos * vec2<f32>(0.22, 0.22) + vec2<f32>(ox, oy);
+  var ox = 0.485;
+  var oy = -0.34;
+  var sc = 0.13;
+  if (hu.weapon == 1u) { ox = 0.395; oy = -0.30; sc = 0.15; }
+  else if (hu.weapon == 2u) { ox = 0.515; oy = -0.36; sc = 0.12; }
+  else if (hu.weapon == 3u) { ox = 0.455; oy = -0.33; sc = 0.125; }
+  var p = v.pos * vec2<f32>(sc, sc) + vec2<f32>(ox, oy);
   p.x = p.x * inv_aspect + 0.12 * inv_aspect;
   var o: HOut;
   o.clip = vec4<f32>(p + vec2<f32>(bx + recoil_x, by + recoil_y + reload_y), 0.0, 1.0);
@@ -788,7 +772,13 @@ pub struct WeaponHudParams {
     pub flash: f32,
     pub recoil: f32,
     pub reload: f32,
-    pub blood_splat: f32,
+}
+
+/// World-space blood splat (PixelLab texture on a small camera-facing billboard).
+#[derive(Clone, Copy)]
+pub struct BloodSplat {
+    pub pos: Vec3,
+    pub life: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -841,14 +831,12 @@ pub struct Gpu {
     arms_bind_group: wgpu::BindGroup,
     pub arms_ready: bool,
     vfx_sampler: wgpu::Sampler,
-    hud_blood_pipeline: wgpu::RenderPipeline,
     hud_muzzle_pipeline: wgpu::RenderPipeline,
     vfx_muzzle_bg: Option<wgpu::BindGroup>,
     _vfx_muzzle_tex: Option<wgpu::Texture>,
     vfx_blood_bg: Option<wgpu::BindGroup>,
     _vfx_blood_tex: Option<wgpu::Texture>,
     vfx_muzzle_vb: wgpu::Buffer,
-    vfx_blood_vb: wgpu::Buffer,
     pub vfx_muzzle_ready: bool,
     pub vfx_blood_ready: bool,
     character: Option<CharacterDraw>,
@@ -1257,11 +1245,6 @@ impl Gpu {
             label: Some("hud-vfx"),
             source: wgpu::ShaderSource::Wgsl(SHADER_HUD_VFX.into()),
         });
-        let hud_blood_targets = [Some(wgpu::ColorTargetState {
-            format,
-            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::ALL,
-        })];
         let hud_muzzle_targets = [Some(wgpu::ColorTargetState {
             format,
             blend: Some(wgpu::BlendState {
@@ -1278,31 +1261,6 @@ impl Gpu {
             }),
             write_mask: wgpu::ColorWrites::ALL,
         })];
-        let hud_blood_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("hud-blood"),
-            layout: Some(&hud_pl),
-            vertex: wgpu::VertexState {
-                module: &shader_hud_vfx,
-                entry_point: Some("vs_blood"),
-                buffers: &[HudVertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader_hud_vfx,
-                entry_point: Some("fs_blood"),
-                targets: &hud_blood_targets,
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
         let hud_muzzle_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("hud-muzzle"),
             layout: Some(&hud_pl),
@@ -1346,32 +1304,9 @@ impl Gpu {
                 uv: [0.0, 1.0],
             },
         ];
-        let vfx_blood_verts: [HudVertex; 4] = [
-            HudVertex {
-                pos: [-1.0, -1.0],
-                uv: [0.0, 0.0],
-            },
-            HudVertex {
-                pos: [1.0, -1.0],
-                uv: [1.0, 0.0],
-            },
-            HudVertex {
-                pos: [1.0, 1.0],
-                uv: [1.0, 1.0],
-            },
-            HudVertex {
-                pos: [-1.0, 1.0],
-                uv: [0.0, 1.0],
-            },
-        ];
         let vfx_muzzle_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vfx-muzzle-vb"),
             contents: bytemuck::cast_slice(&vfx_muzzle_verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let vfx_blood_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vfx-blood-vb"),
-            contents: bytemuck::cast_slice(&vfx_blood_verts),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
@@ -1454,14 +1389,12 @@ impl Gpu {
             arms_bind_group,
             arms_ready: false,
             vfx_sampler,
-            hud_blood_pipeline,
             hud_muzzle_pipeline,
             vfx_muzzle_bg: None,
             _vfx_muzzle_tex: None,
             vfx_blood_bg: None,
             _vfx_blood_tex: None,
             vfx_muzzle_vb,
-            vfx_blood_vb,
             vfx_muzzle_ready: false,
             vfx_blood_ready: false,
             character,
@@ -2509,6 +2442,7 @@ impl Gpu {
         cam_pos: Vec3,
         characters: &[CharacterInstance],
         weapon_hud: WeaponHudParams,
+        blood_splats: &[BloodSplat],
         level_bounds: &Aabb,
         mural_z: f32,
     ) {
@@ -2654,6 +2588,47 @@ impl Gpu {
         }
         let char_rival_quad_vert_end = bill_cpu.len();
 
+        let splat_vert_start = bill_cpu.len();
+        for s in blood_splats {
+            if s.life <= 0.008 {
+                continue;
+            }
+            let center = s.pos;
+            let to_cam = cam_pos - center;
+            let to_cam_xz = Vec3::new(to_cam.x, 0.0, to_cam.z);
+            let len_xz = to_cam_xz.length();
+            let right = if len_xz > 0.001 {
+                Vec3::new(-to_cam_xz.z, 0.0, to_cam_xz.x) / len_xz
+            } else {
+                Vec3::new(1.0, 0.0, 0.0)
+            };
+            let up = Vec3::new(0.0, 1.0, 0.0);
+            let sz = 0.09_f32 * (0.35 + 0.65 * s.life.clamp(0.0, 1.0));
+            let half = sz * 0.5;
+            let bl = center - right * half - up * half;
+            let br = center + right * half - up * half;
+            let tr = center + right * half + up * half;
+            let tl = center - right * half + up * half;
+            let lf = s.life.clamp(0.0, 1.0);
+            let tt = [1.35_f32 * lf, 0.9 * lf, 0.9 * lf, lf];
+            let uvs = [
+                [0.0_f32, 1.0],
+                [1.0, 1.0],
+                [1.0, 0.0],
+                [0.0, 0.0],
+            ];
+            let corners = [bl, br, tr, tl];
+            for i in 0..4 {
+                bill_cpu.push(BillVertex {
+                    pos: corners[i].to_array(),
+                    uv: uvs[i],
+                    tint: tt,
+                });
+            }
+        }
+        let splat_idx_start = (splat_vert_start / 4 * 6) as u32;
+        let splat_idx_count: u32 = ((bill_cpu.len() - splat_vert_start) / 4 * 6) as u32;
+
         let char_boss_idx_start = (char_boss_quad_vert_start / 4 * 6) as u32;
         let char_boss_idx_count = ((char_boss_quad_vert_end - char_boss_quad_vert_start) / 4 * 6) as u32;
         let char_rival_idx_start = (char_rival_quad_vert_start / 4 * 6) as u32;
@@ -2662,7 +2637,10 @@ impl Gpu {
         let char_idx_count = char_boss_idx_count + char_rival_idx_count;
 
         let bill_idx_count: u32 = (bill_cpu.len() / 4 * 6) as u32;
-        let gun_idx_count: u32 = bill_idx_count.saturating_sub(mural_idx_count).saturating_sub(char_idx_count);
+        let gun_idx_count = bill_idx_count
+            .saturating_sub(mural_idx_count)
+            .saturating_sub(char_idx_count)
+            .saturating_sub(splat_idx_count);
 
         if !bill_cpu.is_empty() {
             self.queue
@@ -2842,6 +2820,12 @@ impl Gpu {
                     );
                 }
             }
+            if splat_idx_count > 0 {
+                if let Some(ref bg) = self.vfx_blood_bg {
+                    pass.set_bind_group(1, bg, &[]);
+                    pass.draw_indexed(splat_idx_start..splat_idx_start + splat_idx_count, 0, 0..1);
+                }
+            }
         };
 
         let mut enc = self
@@ -2950,8 +2934,7 @@ impl Gpu {
                 recoil: weapon_hud.recoil.clamp(0.0, 1.0),
                 reload: weapon_hud.reload.clamp(0.0, 2.0),
                 aspect: screen_aspect,
-                blood_splat: weapon_hud.blood_splat.clamp(0.0, 1.0),
-                _pad: 0.0,
+                _pad: [0.0; 2],
             };
             self.queue
                 .write_buffer(&self.hud_uniform, 0, bytemuck::bytes_of(&hu));
@@ -2969,16 +2952,6 @@ impl Gpu {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            if self.vfx_blood_ready && weapon_hud.blood_splat > 0.004 {
-                if let Some(ref bg) = self.vfx_blood_bg {
-                    pass.set_pipeline(&self.hud_blood_pipeline);
-                    pass.set_bind_group(0, &self.hud_bind_group, &[]);
-                    pass.set_bind_group(1, bg, &[]);
-                    pass.set_vertex_buffer(0, self.vfx_blood_vb.slice(..));
-                    pass.set_index_buffer(self.hud_ib.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..6, 0, 0..1);
-                }
-            }
             pass.set_pipeline(&self.hud_pipeline);
             pass.set_bind_group(0, &self.hud_bind_group, &[]);
             let wi = (weapon_hud.weapon_id as usize).min(3);

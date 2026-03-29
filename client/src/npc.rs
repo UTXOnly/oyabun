@@ -321,23 +321,6 @@ impl Npc {
         self.foot.z = self.foot.z.clamp(bounds.min.z + pad, bounds.max.z - pad);
     }
 
-    pub fn register_shot(&mut self, game: &GameState, weapon_idx: usize) {
-        if !self.alive() {
-            return;
-        }
-        let eye = game.eye_pos();
-        let dir = game.view_forward();
-        if dir.length_squared() < 1e-8 {
-            return;
-        }
-        if let Some(t) = ray_aabb(eye, dir, &self.hit_aabb()) {
-            if t > 0.02 && t < 120.0 {
-                let d = DAMAGE[weapon_idx.min(3)];
-                self.hp = (self.hp - d).max(0.0);
-                self.hit_flash = 1.0;
-            }
-        }
-    }
 }
 
 // ── NPC Manager with wave spawning ──────────────────────────────────
@@ -490,61 +473,89 @@ impl NpcManager {
         }
     }
 
-    /// Register a shot with aim assist.
-    pub fn register_shot(&mut self, game: &GameState, weapon_idx: usize) -> bool {
+    /// Register a shot with aim assist. Returns world-space impact point for VFX (closest ray hit).
+    pub fn register_shot(&mut self, game: &GameState, weapon_idx: usize) -> Option<Vec3> {
         let eye = game.eye_pos();
         let dir = game.view_forward();
         if dir.length_squared() < 1e-8 {
-            return false;
+            return None;
+        }
+        let dir_n = dir.normalize();
+
+        // First pass: precise ray-AABB — damage every intersected NPC; splat at closest intersection.
+        let mut hit = false;
+        let mut best_ray_t = f32::INFINITY;
+        let mut impact = None;
+        let d = DAMAGE[weapon_idx.min(3)];
+        for npc in &mut self.npcs {
+            if !npc.alive() {
+                continue;
+            }
+            if let Some(t) = ray_aabb(eye, dir_n, &npc.hit_aabb()) {
+                if t > 0.02 && t < 120.0 {
+                    npc.hp = (npc.hp - d).max(0.0);
+                    npc.hit_flash = 1.0;
+                    hit = true;
+                    if t < best_ray_t {
+                        best_ray_t = t;
+                        impact = Some(eye + dir_n * t);
+                    }
+                }
+            }
         }
 
-        // First pass: precise ray-AABB
-        let mut hit = false;
-        for npc in &mut self.npcs {
-            let before = npc.hp;
-            npc.register_shot(game, weapon_idx);
-            if npc.hp < before {
-                hit = true;
-            }
+        if hit {
+            return impact;
         }
 
         // Aim assist fallback: very generous cone (45 degrees)
-        if !hit {
-            let aim_cos = 0.70; // ~45 degree cone — very forgiving for 3D characters
-            let mut best_t = f32::INFINITY;
-            let mut best_idx: Option<usize> = None;
+        let aim_cos = 0.70;
+        let mut best_dist = f32::INFINITY;
+        let mut best_idx: Option<usize> = None;
 
-            for (i, npc) in self.npcs.iter().enumerate() {
-                if !npc.alive() {
-                    continue;
-                }
-                let center = Vec3::new(
-                    npc.foot.x,
-                    npc.foot.y + npc.def.hitbox_height * npc.def.scale * 0.5,
-                    npc.foot.z,
-                );
-                let to_npc = center - eye;
-                let dist = to_npc.length();
-                if dist < 0.1 || dist > 120.0 {
-                    continue;
-                }
-                let to_npc_n = to_npc / dist;
-                let dot = dir.dot(to_npc_n);
-                if dot > aim_cos && dist < best_t {
-                    best_t = dist;
-                    best_idx = Some(i);
-                }
+        for (i, npc) in self.npcs.iter().enumerate() {
+            if !npc.alive() {
+                continue;
             }
-
-            if let Some(idx) = best_idx {
-                let d = DAMAGE[weapon_idx.min(3)];
-                self.npcs[idx].hp = (self.npcs[idx].hp - d).max(0.0);
-                self.npcs[idx].hit_flash = 1.0;
-                hit = true;
+            let center = Vec3::new(
+                npc.foot.x,
+                npc.foot.y + npc.def.hitbox_height * npc.def.scale * 0.5,
+                npc.foot.z,
+            );
+            let to_npc = center - eye;
+            let dist = to_npc.length();
+            if dist < 0.1 || dist > 120.0 {
+                continue;
+            }
+            let to_npc_n = to_npc / dist;
+            let dot = dir_n.dot(to_npc_n);
+            if dot > aim_cos && dist < best_dist {
+                best_dist = dist;
+                best_idx = Some(i);
             }
         }
 
-        hit
+        if let Some(idx) = best_idx {
+            let d = DAMAGE[weapon_idx.min(3)];
+            self.npcs[idx].hp = (self.npcs[idx].hp - d).max(0.0);
+            self.npcs[idx].hit_flash = 1.0;
+            let p = ray_aabb(eye, dir_n, &self.npcs[idx].hit_aabb())
+                .filter(|t| *t > 0.02 && *t < 120.0)
+                .map(|t| eye + dir_n * t)
+                .unwrap_or_else(|| {
+                    let c = Vec3::new(
+                        self.npcs[idx].foot.x,
+                        self.npcs[idx].foot.y
+                            + self.npcs[idx].def.hitbox_height * self.npcs[idx].def.scale * 0.45,
+                        self.npcs[idx].foot.z,
+                    );
+                    let t = (c - eye).dot(dir_n).max(0.15);
+                    eye + dir_n * t
+                });
+            return Some(p);
+        }
+
+        None
     }
 
     /// Count of living NPCs.

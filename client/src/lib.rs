@@ -20,7 +20,7 @@ use loadout::{Loadout, WEAPONS};
 use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
 use net::NetController;
 use render::WeaponHudParams;
-pub use render::{CharacterInstance, CharacterSkin, Gpu, Vertex};
+pub use render::{BloodSplat, CharacterInstance, CharacterSkin, Gpu, Vertex};
 
 use serde_json::json;
 
@@ -369,8 +369,8 @@ pub struct OyabaunApp {
     last_hit: bool,
     /// Name of last killed NPC (empty if none this frame).
     last_kill: String,
-    /// Screen blood overlay strength for HUD (0..1), arcade hit feedback.
-    blood_splat: f32,
+    /// Pixel blood splats at hit locations in world space (fade over time).
+    blood_splats: Vec<BloodSplat>,
     clear: Vec3,
     level_bounds: mesh::Aabb,
     mural_z: f32,
@@ -596,7 +596,10 @@ impl OyabaunApp {
         if dt > 0.0 {
             self.loadout.tick(dt);
             self.game.tick(dt, &mut self.input);
-            self.blood_splat = (self.blood_splat - dt * 2.65).max(0.0);
+            for s in &mut self.blood_splats {
+                s.life -= dt * 3.2;
+            }
+            self.blood_splats.retain(|s| s.life > 0.02);
         }
 
         let (wp, wn, pick, rel) = self.input.take_weapon_edges();
@@ -619,10 +622,17 @@ impl OyabaunApp {
             let hp_before: Vec<(f32, bool)> = self.npcs.npcs.iter()
                 .map(|n| (n.hp, n.alive()))
                 .collect();
-            let hit = self.npcs.register_shot(&self.game, wi);
-            if hit {
+            let impact_opt = self.npcs.register_shot(&self.game, wi);
+            if let Some(impact) = impact_opt {
                 self.last_hit = true;
-                self.blood_splat = (self.blood_splat + 0.92).min(1.0);
+                const MAX_SPLATS: usize = 14;
+                if self.blood_splats.len() >= MAX_SPLATS {
+                    self.blood_splats.remove(0);
+                }
+                self.blood_splats.push(BloodSplat {
+                    pos: impact,
+                    life: 1.0,
+                });
             }
             // Check for kills
             for (i, npc) in self.npcs.npcs.iter().enumerate() {
@@ -630,7 +640,6 @@ impl OyabaunApp {
                     self.last_kill = npc.def.label.to_uppercase();
                 }
             }
-            // Debug log every shot
             #[cfg(target_arch = "wasm32")]
             {
                 let eye = self.game.eye_pos();
@@ -638,7 +647,10 @@ impl OyabaunApp {
                 let alive = self.npcs.alive_count();
                 let msg = format!(
                     "SHOT wi={} hit={} alive={} wave={} eye=({:.1},{:.1},{:.1}) dir=({:.2},{:.2},{:.2})",
-                    wi, hit, alive, self.npcs.wave + 1,
+                    wi,
+                    impact_opt.is_some(),
+                    alive,
+                    self.npcs.wave + 1,
                     eye.x, eye.y, eye.z, dir.x, dir.y, dir.z
                 );
                 web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
@@ -767,7 +779,6 @@ impl OyabaunApp {
             flash: self.loadout.muzzle_flash,
             recoil: self.loadout.recoil,
             reload: self.loadout.reload_anim,
-            blood_splat: self.blood_splat,
         };
         self.gpu.draw_world(
             vp,
@@ -775,6 +786,7 @@ impl OyabaunApp {
             cam,
             &characters,
             weapon_hud,
+            &self.blood_splats,
             &self.level_bounds,
             self.mural_z,
         );
@@ -857,7 +869,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         game_time: 0.0,
         last_hit: false,
         last_kill: String::new(),
-        blood_splat: 0.0,
+        blood_splats: Vec::new(),
         clear: Vec3::new(0.14, 0.12, 0.20),
         level_bounds: boot.level_bounds,
         mural_z: boot.mural_z,
