@@ -200,6 +200,10 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
 "#;
 
 /// Textured character mesh; vertex applies **per-entity model** (relay pose).
+// 8-column sprite atlas (512×N: each column 64px). PixelLab “south” = front toward camera.
+// Meshes use yaw_face_cam_xz in lib — geometry already faces the camera, so sampling must
+// NOT re-pick a column from camera bearing (that double-counts and hits empty strips).
+// char_params.w = global anim time (seconds) for idle bob until walk rows exist.
 const SHADER_CHAR_TEX: &str = r#"
 struct CharU {
   view_proj: mat4x4<f32>,
@@ -207,7 +211,7 @@ struct CharU {
   cam_pos: vec4<f32>,
   fog_color: vec4<f32>,
   fog_params: vec4<f32>,
-  _pad0: vec4<f32>,
+  char_params: vec4<f32>,
   _pad1: vec4<f32>,
   _pad2: vec4<f32>,
   _pad3: vec4<f32>,
@@ -227,7 +231,10 @@ struct Vout {
 };
 @vertex
 fn vs_char(v: Vin) -> Vout {
-  let world_pos = (cu.model * vec4<f32>(v.pos, 1.0)).xyz;
+  var lp = v.pos;
+  // Idle bob until walk-cycle rows are in the atlas (CHANGELOG TODO)
+  lp.y = lp.y + sin(cu.char_params.w * 4.5) * 0.018;
+  let world_pos = (cu.model * vec4<f32>(lp, 1.0)).xyz;
   var o: Vout;
   o.world_pos = world_pos;
   o.clip = cu.view_proj * vec4<f32>(world_pos, 1.0);
@@ -236,10 +243,14 @@ fn vs_char(v: Vin) -> Vout {
 }
 @fragment
 fn fs_char(i: Vout) -> @location(0) vec4<f32> {
-    let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
+    // Fixed “front” column — mesh rotation already tracks camera in lib.rs
+    let dir_idx = 4u;
+    let atlas_u = (i.uv.x + f32(dir_idx)) * 0.125;
+    let uv_atlas = vec2<f32>(atlas_u, i.uv.y);
+    let t = textureSample(albedo, albedo_samp, uv_atlas) * mu.tint;
     if (t.a < 0.35) { discard; }
     let wp = i.world_pos;
-    let ambient = vec3<f32>(0.08, 0.06, 0.10);
+    let ambient = vec3<f32>(0.12, 0.10, 0.14);
     let lit = t.rgb + ambient;
     let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 15.0) / 15.0;
     let dist = length(wp - cu.cam_pos.xyz);
@@ -295,7 +306,9 @@ struct HudUniform {
     weapon: u32,
     flash: f32,
     bob: f32,
-    _pad: f32,
+    recoil: f32,
+    reload: f32,
+    _pad: [f32; 3],
 }
 
 #[repr(C)]
@@ -327,7 +340,7 @@ impl HudVertex {
 }
 
 const SHADER_HUD: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, _p: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, _p1: f32, _p2: f32, _p3: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var wtex: texture_2d<f32>;
 @group(1) @binding(1) var wsamp: sampler;
@@ -337,10 +350,25 @@ struct HOut { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32>, }
 
 @vertex
 fn vs_hud(v: HIn) -> HOut {
+  // Walk bob
   let bx = sin(hu.bob) * 0.03;
   let by = cos(hu.bob * 1.35) * 0.02;
+  // Recoil kick: weapon jumps up and slightly back on fire
+  let recoil_y = hu.recoil * hu.recoil * 0.08;
+  let recoil_x = hu.recoil * 0.015;
+  // Reload: weapon drops below screen then comes back
+  var reload_y = 0.0;
+  if (hu.reload > 0.0) {
+    if (hu.reload < 1.0) {
+      // Lower phase: smooth drop
+      reload_y = -hu.reload * 0.6;
+    } else {
+      // Raise phase: smooth lift
+      reload_y = -(2.0 - hu.reload) * 0.6;
+    }
+  }
   var o: HOut;
-  o.clip = vec4<f32>(v.pos + vec2<f32>(bx, by), 0.0, 1.0);
+  o.clip = vec4<f32>(v.pos + vec2<f32>(bx + recoil_x, by + recoil_y + reload_y), 0.0, 1.0);
   o.uv = v.uv;
   return o;
 }
@@ -415,7 +443,7 @@ struct CharUniforms {
     cam_pos: [f32; 4],
     fog_color: [f32; 4],
     fog_params: [f32; 4],
-    _p0: [f32; 4],
+    char_params: [f32; 4], // [unused, world_x, world_z, anim_time_s]
     _p1: [f32; 4],
     _p2: [f32; 4],
     _p3: [f32; 4],
@@ -441,6 +469,8 @@ pub struct WeaponHudParams {
     pub weapon_id: u32,
     pub bob: f32,
     pub flash: f32,
+    pub recoil: f32,
+    pub reload: f32,
 }
 
 pub struct Gpu {
@@ -1022,7 +1052,7 @@ impl Gpu {
                 entry_point: Some("fs_char"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -1034,7 +1064,7 @@ impl Gpu {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: true,
+                depth_write_enabled: false,
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
@@ -1740,6 +1770,7 @@ impl Gpu {
         clear_rgb: Vec3,
         cam_pos: Vec3,
         character_models: &[Mat4],
+        character_anim_t: f32,
         weapon_hud: WeaponHudParams,
         level_bounds: &Aabb,
         mural_z: f32,
@@ -1804,13 +1835,17 @@ impl Gpu {
                 let stride = cd.char_uniform_stride as usize;
                 char_uniform_bytes.resize(stride * char_n, 0);
                 for (i, &model) in character_models.iter().take(char_n).enumerate() {
+                    // Extract character world position from model matrix (translation column)
+                    let m = model.to_cols_array_2d();
+                    let char_x = m[3][0];
+                    let char_z = m[3][2];
                     let u = CharUniforms {
                         view_proj: view_proj.to_cols_array_2d(),
-                        model: model.to_cols_array_2d(),
+                        model: m,
                         cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
                         fog_color: [0.12, 0.09, 0.18, 1.0],
                         fog_params: [0.022, 0.0, 0.0, 0.0],
-                        _p0: [0.0; 4],
+                        char_params: [0.0, char_x, char_z, character_anim_t],
                         _p1: [0.0; 4],
                         _p2: [0.0; 4],
                         _p3: [0.0; 4],
@@ -1923,7 +1958,9 @@ impl Gpu {
                 weapon: weapon_hud.weapon_id,
                 flash: weapon_hud.flash.clamp(0.0, 1.0),
                 bob: weapon_hud.bob,
-                _pad: 0.0,
+                recoil: weapon_hud.recoil.clamp(0.0, 1.0),
+                reload: weapon_hud.reload.clamp(0.0, 2.0),
+                _pad: [0.0; 3],
             };
             self.queue
                 .write_buffer(&self.hud_uniform, 0, bytemuck::bytes_of(&hu));

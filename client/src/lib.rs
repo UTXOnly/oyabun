@@ -11,10 +11,11 @@ mod input;
 mod loadout;
 mod mesh;
 mod net;
+mod npc;
 mod render;
 
-use boss::{BossState, RivalState};
 use game::GameState;
+use npc::NpcManager;
 use input::InputState;
 use loadout::{Loadout, WEAPONS};
 use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
@@ -31,7 +32,7 @@ fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
 fn yaw_face_cam_xz(foot: Vec3, cam: Vec3) -> f32 {
     let dx = cam.x - foot.x;
     let dz = cam.z - foot.z;
-    dx.atan2(-dz)
+    (-dz).atan2(dx)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -114,7 +115,16 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
     let bounds = cpu.bounds();
     let spawn = cpu.spawn;
     let yaw = cpu.spawn_yaw;
-    let (boss, rival) = mesh::npc_placements(spawn, yaw);
+    let (boss, rival) = mesh::npc_placements(spawn, yaw, &bounds);
+    // Override spawn yaw to face toward NPCs (midpoint of boss & rival)
+    let mid = (boss + rival) * 0.5;
+    let to_dx = mid.x - spawn.x;
+    let to_dz = mid.z - spawn.z;
+    let yaw = if to_dx.abs() + to_dz.abs() > 0.1 {
+        to_dx.atan2(-to_dz)
+    } else {
+        yaw
+    };
     let mural_z = mesh::mural_z_plane(&bounds, spawn);
     let mut arena = mesh::empty_arena();
     let mut solids = cpu.solids.clone();
@@ -159,7 +169,9 @@ async fn load_game_init() -> GameInit {
 
         let mut fetch_failed = false;
         let mut fetch_parse_err: Option<String> = None;
-        if let Some(bytes) = fetch_bytes("./levels/tokyo_alley.glb").await {
+        let ts = js_sys::Date::now() as u64;
+        let level_url = format!("./levels/tokyo_alley.glb?v={ts}");
+        if let Some(bytes) = fetch_bytes(&level_url).await {
             match gltf_level::parse_glb(&bytes) {
                 Ok(cpu) => {
                     return game_init_from_gltf(cpu);
@@ -217,8 +229,8 @@ async fn load_game_init() -> GameInit {
     GameInit {
         boot: LevelBoot {
             spawn,
-            boss_foot: BossState::new().foot(),
-            rival_foot: RivalState::new().foot(),
+            boss_foot: Vec3::new(11.85, 0.0, -11.85),
+            rival_foot: Vec3::new(-10.2, 0.0, -9.4),
             spawn_yaw: 0.0,
             level_bounds,
             mural_z,
@@ -238,8 +250,7 @@ pub struct OyabaunApp {
     input: InputState,
     net: NetController,
     loadout: Loadout,
-    boss: BossState,
-    rival: RivalState,
+    npcs: NpcManager,
     last_ms: f64,
     clear: Vec3,
     level_bounds: mesh::Aabb,
@@ -274,8 +285,8 @@ impl OyabaunApp {
 
     #[wasm_bindgen(js_name = bootDebugJson)]
     pub fn boot_debug_json(&self) -> String {
-        let bf = self.boss.foot();
-        let rf = self.rival.foot();
+        let bf = self.npcs.boss().foot;
+        let rf = self.npcs.rival().foot;
         json!({
             "level_label": self.level_label,
             "vert_count": self.vert_count,
@@ -287,9 +298,11 @@ impl OyabaunApp {
             "characters_3d_loaded": self.gpu.characters_loaded(),
             "boss_foot": [bf.x, bf.y, bf.z],
             "rival_foot": [rf.x, rf.y, rf.z],
-            "boss_alive": self.boss.alive(),
-            "rival_alive": self.rival.alive(),
+            "boss_alive": self.npcs.boss().alive(),
+            "rival_alive": self.npcs.rival().alive(),
             "walk_surface_y": self.game.walk_surface_y,
+            "player_yaw": self.game.yaw,
+            "player_pos": [self.game.pos.x, self.game.pos.y, self.game.pos.z],
         })
         .to_string()
     }
@@ -304,13 +317,13 @@ impl OyabaunApp {
             let mut s = self.net.status.clone();
             s.push_str(" · ");
             s.push_str(&self.level_label);
-            if self.boss.alive() {
-                s.push_str(&format!(" · BOSS {:.0}%", self.boss.hp_frac() * 100.0));
+            if self.npcs.boss().alive() {
+                s.push_str(&format!(" · BOSS {:.0}%", self.npcs.boss().hp_frac() * 100.0));
             } else {
                 s.push_str(" · BOSS DEFEATED");
             }
-            if self.rival.alive() {
-                s.push_str(&format!(" · RIVAL {:.0}%", self.rival.hp_frac() * 100.0));
+            if self.npcs.rival().alive() {
+                s.push_str(&format!(" · RIVAL {:.0}%", self.npcs.rival().hp_frac() * 100.0));
             } else {
                 s.push_str(" · RIVAL DOWN");
             }
@@ -382,8 +395,7 @@ impl OyabaunApp {
         }
         if shot_fired {
             let wi = self.loadout.current_idx();
-            self.boss.register_shot(&self.game, wi);
-            self.rival.register_shot(&self.game, wi);
+            self.npcs.register_shot(&self.game, wi);
         }
     }
 
@@ -417,26 +429,18 @@ impl OyabaunApp {
         let mut character_models: Vec<Mat4> = Vec::new();
         let you = self.net.entity_id;
         if self.gpu.characters_loaded() {
-            if self.boss.alive() {
-                let f = self.boss.foot();
+            for npc in &self.npcs.npcs {
+                if !npc.alive() {
+                    continue;
+                }
+                let f = npc.foot;
                 let gy = self.game.ground_y_at(f.x, f.z);
-                let foot_y = f.y.max(gy);
+                let foot_y = gy.max(f.y);
                 let y = yaw_face_cam_xz(Vec3::new(f.x, 0.0, f.z), Vec3::new(cam.x, 0.0, cam.z));
                 character_models.push(character_model(
                     Vec3::new(f.x, foot_y, f.z),
                     y,
-                    0.72 * self.boss.scale(),
-                ));
-            }
-            if self.rival.alive() {
-                let f = self.rival.foot();
-                let gy = self.game.ground_y_at(f.x, f.z);
-                let foot_y = f.y.max(gy);
-                let y = yaw_face_cam_xz(Vec3::new(f.x, 0.0, f.z), Vec3::new(cam.x, 0.0, cam.z));
-                character_models.push(character_model(
-                    Vec3::new(f.x, foot_y, f.z),
-                    y,
-                    0.68 * self.rival.scale(),
+                    0.72 * npc.scale(),
                 ));
             }
             if self.net.joined {
@@ -448,46 +452,70 @@ impl OyabaunApp {
                         continue;
                     }
                     let gy = self.game.ground_y_at(p.x, p.z);
-                    let foot_y = (p.y as f32).max(gy);
+                    let foot_y = gy.max(p.y);
                     let sc = 0.66 + (p.id % 3) as f32 * 0.04;
+                    let face_yaw = yaw_face_cam_xz(
+                        Vec3::new(p.x, 0.0, p.z),
+                        Vec3::new(cam.x, 0.0, cam.z),
+                    );
                     character_models.push(character_model(
                         Vec3::new(p.x, foot_y, p.z),
-                        p.yaw,
+                        face_yaw,
                         sc,
                     ));
                 }
             } else {
-                let t = self.last_ms as f32 * 0.0007;
-                let base = self.game.pos;
-                let yaw = self.game.yaw;
-                let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
-                let right = Vec3::new(-yaw.cos(), 0.0, -yaw.sin());
+                // Offline demo: place characters at fixed world positions
+                // (midway between boss and rival, plus two flanking spots)
+                let bf = self.npcs.boss().foot;
+                let rf = self.npcs.rival().foot;
+                let mid = (bf + rf) * 0.5;
                 let spots = [
-                    base + fwd * 5.0 + right * 2.0,
-                    base + fwd * 8.0,
-                    base + fwd * 4.5 - right * 2.5,
+                    Vec3::new(mid.x + 2.0, 0.0, mid.z),
+                    Vec3::new(mid.x - 2.5, 0.0, mid.z - 3.0),
+                    Vec3::new(mid.x + 0.5, 0.0, mid.z + 4.0),
                 ];
-                for (i, pos) in spots.iter().enumerate() {
+                for pos in &spots {
                     let gy = self.game.ground_y_at(pos.x, pos.z);
-                    let ph = i as f32 * 1.2;
+                    let face_yaw = yaw_face_cam_xz(
+                        Vec3::new(pos.x, 0.0, pos.z),
+                        Vec3::new(cam.x, 0.0, cam.z),
+                    );
                     character_models.push(character_model(
                         Vec3::new(pos.x, gy, pos.z),
-                        t + ph,
+                        face_yaw,
                         0.88,
                     ));
                 }
+            }
+            // Offline: show your own body with the same GLB/atlas (first-person otherwise has no mesh).
+            if !self.net.joined {
+                let gp = self.game.pos;
+                let ggy = self.game.ground_y_at(gp.x, gp.z).max(gp.y);
+                let face = yaw_face_cam_xz(
+                    Vec3::new(gp.x, 0.0, gp.z),
+                    Vec3::new(cam.x, 0.0, cam.z),
+                );
+                character_models.push(character_model(
+                    Vec3::new(gp.x, ggy, gp.z),
+                    face,
+                    0.64,
+                ));
             }
         }
         let weapon_hud = WeaponHudParams {
             weapon_id: self.loadout.current_idx() as u32,
             bob: self.last_ms as f32 * 0.0028,
             flash: self.loadout.muzzle_flash,
+            recoil: self.loadout.recoil,
+            reload: self.loadout.reload_anim,
         };
         self.gpu.draw_world(
             vp,
             self.clear,
             cam,
             &character_models,
+            (self.last_ms as f32) * 0.001,
             weapon_hud,
             &self.level_bounds,
             self.mural_z,
@@ -506,7 +534,8 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
     let character_cpu = {
         const EMB_CHAR: &[u8] = include_bytes!("../characters/oyabaun_player.glb");
         let mut c = gltf_level::parse_character_glb(EMB_CHAR).ok();
-        if let Some(bytes) = fetch_bytes("./characters/oyabaun_player.glb").await {
+        let char_url = format!("./characters/oyabaun_player.glb?v={}", js_sys::Date::now() as u64);
+        if let Some(bytes) = fetch_bytes(&char_url).await {
             if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
                 c = Some(x);
             }
@@ -540,8 +569,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         input: InputState::default(),
         net,
         loadout: Loadout::new(),
-        boss: BossState::with_foot(boot.boss_foot),
-        rival: RivalState::with_foot(boot.rival_foot),
+        npcs: NpcManager::new(boot.boss_foot, boot.rival_foot),
         last_ms: 0.0,
         clear: Vec3::new(0.045, 0.038, 0.072),
         level_bounds: boot.level_bounds,
