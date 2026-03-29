@@ -137,6 +137,17 @@ def cmd_create8(args: argparse.Namespace) -> None:
     print(json.dumps(r, indent=2))
 
 
+def cmd_create4(args: argparse.Namespace) -> None:
+    """When create8 fails with bone_scaling, 4-dir creation often still works."""
+    body = {
+        "description": args.description,
+        "image_size": {"width": args.size, "height": args.size},
+        "view": args.view,
+    }
+    r = request_json("POST", "/create-character-with-4-directions", body)
+    print(json.dumps(r, indent=2))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -166,6 +177,15 @@ def main() -> None:
     cp.add_argument("--size", type=int, default=112)
     cp.add_argument("--view", default="low top-down")
     cp.set_defaults(func=cmd_create8)
+
+    c4 = sub.add_parser(
+        "create4",
+        help="POST /create-character-with-4-directions (workaround if create8 fails)",
+    )
+    c4.add_argument("description")
+    c4.add_argument("--size", type=int, default=112)
+    c4.add_argument("--view", default="low top-down")
+    c4.set_defaults(func=cmd_create4)
 
     zp = sub.add_parser("zip", help="GET /characters/{id}/zip")
     zp.add_argument("character_id")
