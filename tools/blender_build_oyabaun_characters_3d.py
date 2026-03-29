@@ -23,7 +23,7 @@ Output:
 After regenerating GLBs, rebuild WASM:
   cd client && wasm-pack build --target web --no-typescript
 
-Optional: OYABAUN_CHAR_DECIMATE=0.42 (higher = smoother body, more verts; default 0.38).
+Optional: OYABAUN_CHAR_DECIMATE=0.42 (higher = smoother body, more verts; default 0.46).
 
 Blender version: 5.1
 glTF export: export_yup=True, export_materials='EXPORT', no animations
@@ -141,10 +141,10 @@ def build_skin_body(name, joints, edges_def, radii):
         sv.radius = radii.get(jname, (0.04, 0.04))
     mesh.skin_vertices[""].data[vert_list.index('pelvis')].use_root = True
 
-    # Subdivision for smoothness
+    # Subdivision: level 1 keeps limbs readable (level 2 + decimate reads Mii/blobby).
     sub = obj.modifiers.new("Subsurf", 'SUBSURF')
-    sub.levels = 2
-    sub.render_levels = 2
+    sub.levels = 1
+    sub.render_levels = 1
 
     # Apply modifiers
     bpy.ops.object.modifier_apply(modifier="Skin")
@@ -154,9 +154,9 @@ def build_skin_body(name, joints, edges_def, radii):
     # Decimate for game performance (ratio = fraction of faces *kept*)
     dec = obj.modifiers.new("Decimate", 'DECIMATE')
     try:
-        dec.ratio = float(os.environ.get("OYABAUN_CHAR_DECIMATE", "0.38"))
+        dec.ratio = float(os.environ.get("OYABAUN_CHAR_DECIMATE", "0.46"))
     except ValueError:
-        dec.ratio = 0.38
+        dec.ratio = 0.46
     dec.ratio = max(0.18, min(0.52, dec.ratio))
     bpy.ops.object.modifier_apply(modifier="Decimate")
     bpy.ops.object.shade_smooth()
@@ -316,31 +316,31 @@ def build_boss():
         'waist':       (0.13, 0.10),
         'chest':       (0.16, 0.12),
         'upper_chest': (0.18, 0.12),  # broad shoulders
-        'neck':        (0.06, 0.06),
+        'neck':        (0.072, 0.07),
         'head':        (0.10, 0.11),
         'head_top':    (0.08, 0.09),
-        'l_shoulder':  (0.06, 0.06),
-        'l_upper_arm': (0.055, 0.055),
-        'l_elbow':     (0.045, 0.045),
-        'l_forearm':   (0.04, 0.04),
-        'l_wrist':     (0.035, 0.03),
-        'l_hand':      (0.035, 0.04),
-        'r_shoulder':  (0.06, 0.06),
-        'r_upper_arm': (0.055, 0.055),
-        'r_elbow':     (0.045, 0.045),
-        'r_forearm':   (0.04, 0.04),
-        'r_wrist':     (0.035, 0.03),
-        'r_hand':      (0.035, 0.04),
-        'l_hip':       (0.08, 0.08),
-        'l_knee':      (0.055, 0.06),
-        'l_ankle':     (0.04, 0.04),
-        'l_foot':      (0.04, 0.08),
-        'l_toe':       (0.03, 0.04),
-        'r_hip':       (0.08, 0.08),
-        'r_knee':      (0.055, 0.06),
-        'r_ankle':     (0.04, 0.04),
-        'r_foot':      (0.04, 0.08),
-        'r_toe':       (0.03, 0.04),
+        'l_shoulder':  (0.068, 0.065),
+        'l_upper_arm': (0.068, 0.068),
+        'l_elbow':     (0.054, 0.054),
+        'l_forearm':   (0.048, 0.048),
+        'l_wrist':     (0.04, 0.036),
+        'l_hand':      (0.04, 0.045),
+        'r_shoulder':  (0.068, 0.065),
+        'r_upper_arm': (0.068, 0.068),
+        'r_elbow':     (0.054, 0.054),
+        'r_forearm':   (0.048, 0.048),
+        'r_wrist':     (0.04, 0.036),
+        'r_hand':      (0.04, 0.045),
+        'l_hip':       (0.088, 0.085),
+        'l_knee':      (0.062, 0.065),
+        'l_ankle':     (0.045, 0.045),
+        'l_foot':      (0.045, 0.085),
+        'l_toe':       (0.034, 0.045),
+        'r_hip':       (0.088, 0.085),
+        'r_knee':      (0.062, 0.065),
+        'r_ankle':     (0.045, 0.045),
+        'r_foot':      (0.045, 0.085),
+        'r_toe':       (0.034, 0.045),
     }
 
     obj = build_skin_body("Boss", joints, SKELETON_EDGES, radii)
@@ -350,7 +350,7 @@ def build_boss():
     mat_skin = make_material("Boss_Skin", (0.72, 0.55, 0.42), roughness=0.85)
     mat_hair = make_material("Boss_Hair", (0.02, 0.02, 0.02), roughness=0.35)
     mat_shoe = make_material("Boss_Shoe", (0.02, 0.02, 0.02), metallic=0.3, roughness=0.25)
-    mat_shirt = make_material("Boss_Shirt", (0.12, 0.01, 0.01), roughness=0.5)
+    mat_shirt = make_material("Boss_Shirt", (0.90, 0.86, 0.80), roughness=0.55)
 
     def boss_zone(x, y, z):
         if z < 0.10:
@@ -570,31 +570,31 @@ def build_rival():
         'waist':       (0.11, 0.09),
         'chest':       (0.14, 0.10),
         'upper_chest': (0.16, 0.10),
-        'neck':        (0.05, 0.05),
+        'neck':        (0.058, 0.056),
         'head':        (0.09, 0.10),
         'head_top':    (0.07, 0.08),
-        'l_shoulder':  (0.055, 0.055),
-        'l_upper_arm': (0.048, 0.048),
-        'l_elbow':     (0.04, 0.04),
-        'l_forearm':   (0.035, 0.035),
-        'l_wrist':     (0.03, 0.028),
-        'l_hand':      (0.03, 0.035),
-        'r_shoulder':  (0.055, 0.055),
-        'r_upper_arm': (0.048, 0.048),
-        'r_elbow':     (0.04, 0.04),
-        'r_forearm':   (0.035, 0.035),
-        'r_wrist':     (0.03, 0.028),
-        'r_hand':      (0.03, 0.035),
-        'l_hip':       (0.07, 0.07),
-        'l_knee':      (0.05, 0.055),
-        'l_ankle':     (0.035, 0.035),
-        'l_foot':      (0.035, 0.07),
-        'l_toe':       (0.028, 0.035),
-        'r_hip':       (0.07, 0.07),
-        'r_knee':      (0.05, 0.055),
-        'r_ankle':     (0.035, 0.035),
-        'r_foot':      (0.035, 0.07),
-        'r_toe':       (0.028, 0.035),
+        'l_shoulder':  (0.062, 0.06),
+        'l_upper_arm': (0.058, 0.058),
+        'l_elbow':     (0.048, 0.048),
+        'l_forearm':   (0.042, 0.042),
+        'l_wrist':     (0.036, 0.034),
+        'l_hand':      (0.036, 0.042),
+        'r_shoulder':  (0.062, 0.06),
+        'r_upper_arm': (0.058, 0.058),
+        'r_elbow':     (0.048, 0.048),
+        'r_forearm':   (0.042, 0.042),
+        'r_wrist':     (0.036, 0.034),
+        'r_hand':      (0.036, 0.042),
+        'l_hip':       (0.078, 0.076),
+        'l_knee':      (0.056, 0.06),
+        'l_ankle':     (0.04, 0.04),
+        'l_foot':      (0.04, 0.075),
+        'l_toe':       (0.032, 0.04),
+        'r_hip':       (0.078, 0.076),
+        'r_knee':      (0.056, 0.06),
+        'r_ankle':     (0.04, 0.04),
+        'r_foot':      (0.04, 0.075),
+        'r_toe':       (0.032, 0.04),
     }
 
     obj = build_skin_body("Rival", joints, SKELETON_EDGES, radii)

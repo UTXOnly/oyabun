@@ -636,7 +636,7 @@ impl OyabaunApp {
                 let mut ch = make_character(
                     Vec3::new(f.x, foot_y, f.z),
                     facing_yaw,
-                    0.72 * npc.scale() * death_scale,
+                    0.78 * npc.scale() * death_scale,
                     skin,
                 );
                 // Pass hit flash through anim_frame (>100 signals flash to shader)
@@ -652,7 +652,7 @@ impl OyabaunApp {
                         continue;
                     }
                     let foot_y = self.game.feet_draw_y(p.x, p.z);
-                    let sc = 0.66 + (p.id % 3) as f32 * 0.04;
+                    let sc = 0.72 + (p.id % 3) as f32 * 0.04;
                     let mesh_yaw = yaw_face_cam_xz(
                         Vec3::new(p.x, 0.0, p.z),
                         Vec3::new(cam.x, 0.0, cam.z),

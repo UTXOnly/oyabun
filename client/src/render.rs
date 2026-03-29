@@ -316,7 +316,7 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let vd2 = dot(to_cam, to_cam);
     let view_dir = select(normalize(to_cam), vec3<f32>(0.0, 0.0, 1.0), vd2 < 1e-8);
 
-    // Strong side key + fill like pixel-ref alley light; 5-step cel + 4×4 Bayer.
+    // Side key + fill; extra cel steps so limbs read less "tube Wii".
     let key_dir = normalize(vec3<f32>(-0.88, 0.35, 0.32));
     let fill_dir = normalize(vec3<f32>(0.45, 0.12, -0.42));
     let ndk = dot(n, key_dir);
@@ -326,8 +326,8 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let px = vec2<i32>(i.clip.xy);
     let b4 = char_bayer4(px);
     let d4 = (b4 + 0.5) / 16.0 - 0.5;
-    let n_cel = 5.0;
-    let scaled = shade_raw * (n_cel - 1.0) + d4 * 0.78;
+    let n_cel = 6.0;
+    let scaled = shade_raw * (n_cel - 1.0) + d4 * 0.68;
     let band = clamp(floor(scaled + 0.5), 0.0, n_cel - 1.0) / (n_cel - 1.0);
 
     let wp = i.world_pos;
@@ -351,14 +351,21 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let half_dir = select(normalize(half_v), key_dir, h_len2 < 1e-8);
     let spec = pow(max(dot(n, half_dir), 0.0), 36.0);
     let spec_step = select(0.0, 0.32, spec > 0.40);
-    let lit = lit_char + vec3<f32>(spec_step);
+    var lit = lit_char + vec3<f32>(spec_step);
 
-    // --- Pixel-ref pass: luma quantize with 8×8 dither, then neo-noir palette (navy→wine→cream). ---
+    // Pink/magenta rim from alley backlight (ref art), distinct from silhouette ink.
+    let back_lit = max(-dot(n, key_dir), 0.0);
+    let fres = pow(1.0 - max(dot(n, view_dir), 0.0), 2.4);
+    let rim = smoothstep(0.12, 0.95, fres) * smoothstep(0.05, 0.72, back_lit);
+    let rim_col = vec3<f32>(0.98, 0.22, 0.42) * rim * 0.62;
+    lit = lit + rim_col;
+
+    // --- Luma quantize + neo-noir palette; softer dither than heavy stipple (less plastic). ---
     let y_raw = dot(lit, vec3<f32>(0.299, 0.587, 0.114));
     let b8 = char_bayer8(px);
     let t8 = (b8 + 0.5) / 64.0 - 0.5;
-    let n_y = 7.0;
-    let y_adj = clamp(y_raw * (n_y - 1.0) + t8 * 1.1, 0.0, n_y - 1.0);
+    let n_y = 10.0;
+    let y_adj = clamp(y_raw * (n_y - 1.0) + t8 * 0.82, 0.0, n_y - 1.0);
     let y_q = floor(y_adj + 0.5) / (n_y - 1.0);
 
     let p0 = vec3<f32>(0.022, 0.032, 0.095);
@@ -369,27 +376,27 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let p5 = vec3<f32>(0.88, 0.36, 0.14);
     let p6 = vec3<f32>(0.97, 0.84, 0.52);
     var pal = p0;
-    pal = select(pal, p1, y_q > 0.11);
-    pal = select(pal, p2, y_q > 0.25);
-    pal = select(pal, p3, y_q > 0.39);
-    pal = select(pal, p4, y_q > 0.53);
-    pal = select(pal, p5, y_q > 0.67);
-    pal = select(pal, p6, y_q > 0.81);
+    pal = select(pal, p1, y_q > 0.09);
+    pal = select(pal, p2, y_q > 0.20);
+    pal = select(pal, p3, y_q > 0.32);
+    pal = select(pal, p4, y_q > 0.45);
+    pal = select(pal, p5, y_q > 0.58);
+    pal = select(pal, p6, y_q > 0.72);
 
     let chrom = max(al, vec3<f32>(0.045));
     let cn = normalize(chrom);
     var out_c = clamp(pal * (0.34 + 0.66 * cn) * vec3<f32>(1.06, 1.0, 0.97), vec3<f32>(0.0), vec3<f32>(1.0));
 
     let edge = 1.0 - max(dot(n, view_dir), 0.0);
-    let ink = smoothstep(0.68, 0.96, edge);
-    out_c = mix(out_c, vec3<f32>(0.012, 0.018, 0.055), ink * 0.52);
+    let ink = smoothstep(0.72, 0.97, edge);
+    out_c = mix(out_c, vec3<f32>(0.012, 0.018, 0.055), ink * 0.34);
 
-    // Stippled snap (per channel): visible dither bands like hand-painted pixels.
+    // Light per-channel snap + dither (arcade grain without crushing detail).
     let b8b = char_bayer8(px + vec2<i32>(2, 5));
     let thr = (b8b + 0.5) / 64.0 - 0.5;
-    let lv = 8.0;
+    let lv = 14.0;
     out_c = clamp(
-        (floor(out_c * (lv - 1.0) + thr * 0.7 + vec3<f32>(0.5))) / (lv - 1.0),
+        (floor(out_c * (lv - 1.0) + thr * 0.45 + vec3<f32>(0.5))) / (lv - 1.0),
         vec3<f32>(0.0),
         vec3<f32>(1.0)
     );

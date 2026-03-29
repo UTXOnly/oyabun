@@ -46,7 +46,7 @@ Blender Python (skin modifier + detail meshes)
 ### Shader (SHADER_CHAR_TEX in render.rs)
 
 - Vertex: `world_pos = model * vec4(v.pos, 1.0)` — standard 3D transform
-- Fragment: albedo × tint, **5-step dithered cel** (4×4 Bayer) + **luma palette** (navy→wine→cream) with **8×8 Bayer** quantize + per-channel stipple; **ink** on grazing angles (silhouette)
+- Fragment: albedo × tint, **6-step dithered cel** + **luma palette** (10 bands, 8×8 Bayer) + per-channel snap; **magenta/pink rim** (back-lit edges); lighter **ink** on silhouette
 - Height ambient + neon spill + fog cap aligned with the alley pass; hit flash unchanged
 - Style target: `example_images/ref-pixel-yakuza.png` (ordered dither, limited palette); 3D mesh will not match 2D art without textures/model work
 - Depth write ON, solid alpha (no transparency)
