@@ -672,14 +672,29 @@ impl OyabaunApp {
             let impact_opt = self.npcs.register_shot(&self.game, wi);
             if let Some(impact) = impact_opt {
                 self.last_hit = true;
-                const MAX_SPLATS: usize = 14;
-                if self.blood_splats.len() >= MAX_SPLATS {
+                const MAX_SPLATS: usize = 30;
+                while self.blood_splats.len() + 3 > MAX_SPLATS {
                     self.blood_splats.remove(0);
                 }
-                self.blood_splats.push(BloodSplat {
-                    pos: impact,
-                    life: 1.0,
-                });
+                let t = self.game_time;
+                let frac = |n: f32| -> f32 {
+                    ((t * 19.17 + n).sin() * 8341.37).fract().abs()
+                };
+                for k in 0u32..3 {
+                    let yaw = frac(k as f32 * 4.13 + 1.1) * std::f32::consts::TAU;
+                    let scale = 0.5 + frac(k as f32 * 11.9) * 0.95;
+                    let j = 0.022 + frac(k as f32 * 6.2) * 0.048;
+                    let a = frac(k as f32 * 8.4) * std::f32::consts::TAU;
+                    let ox = a.cos() * j;
+                    let oz = a.sin() * j;
+                    let oy = (frac(k as f32 * 3.7) - 0.5) * 0.04;
+                    self.blood_splats.push(BloodSplat {
+                        pos: impact + Vec3::new(ox, oy, oz),
+                        life: 1.0,
+                        yaw,
+                        scale,
+                    });
+                }
             }
             // Check for kills
             for (i, npc) in self.npcs.npcs.iter().enumerate() {

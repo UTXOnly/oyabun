@@ -419,6 +419,14 @@ fn fs_bill(i: Bout) -> @location(0) vec4<f32> {
     let rgb = c.rgb * i.tint.rgb * (1.05 + rim) + vec3<f32>(0.08, 0.02, 0.04) * rim * i.tint.rgb;
     return vec4<f32>(rgb, c.a * i.tint.a);
 }
+
+@fragment
+fn fs_bill_blood(i: Bout) -> @location(0) vec4<f32> {
+    let c = textureSample(tex, samp, i.uv);
+    if (c.a < 0.08) { discard; }
+    let rgb = c.rgb * i.tint.rgb;
+    return vec4<f32>(rgb, c.a * i.tint.a);
+}
 "#;
 
 const MAX_BILL_QUADS: usize = 64;
@@ -632,16 +640,29 @@ fn hud_motion_vfx() -> vec2<f32> {
   return vec2<f32>(bx + recoil_x, by + recoil_y + reload_y);
 }
 
+// Barrel tip in weapon HUD UV (same space as hud quad: u 0–1 left→right, v 0–1 bottom→top).
+fn weapon_barrel_uv(weapon: u32) -> vec2<f32> {
+  if (weapon == 1u) { return vec2<f32>(0.91, 0.58); }
+  if (weapon == 2u) { return vec2<f32>(0.89, 0.55); }
+  if (weapon == 3u) { return vec2<f32>(0.84, 0.62); }
+  return vec2<f32>(0.87, 0.56);
+}
+
+fn muzzle_quad_scale(weapon: u32) -> f32 {
+  if (weapon == 1u) { return 0.10; }
+  if (weapon == 2u) { return 0.095; }
+  if (weapon == 3u) { return 0.088; }
+  return 0.098;
+}
+
 @vertex
 fn vs_muzzle(v: HIn) -> HOut {
   let inv_aspect = 1.0 / max(hu.aspect, 0.5);
-  var ox = 0.505;
-  var oy = -0.362;
-  var sc = 0.188;
-  if (hu.weapon == 1u) { ox = 0.418; oy = -0.322; sc = 0.205; }
-  else if (hu.weapon == 2u) { ox = 0.535; oy = -0.378; sc = 0.175; }
-  else if (hu.weapon == 3u) { ox = 0.475; oy = -0.352; sc = 0.182; }
-  var p = v.pos * vec2<f32>(sc, sc) + vec2<f32>(ox, oy);
+  let uv_tip = weapon_barrel_uv(hu.weapon);
+  let ax = -0.5 + uv_tip.x;
+  let ay = -1.05 + uv_tip.y * 1.1;
+  let sc = muzzle_quad_scale(hu.weapon);
+  var p = v.pos * vec2<f32>(sc, sc) + vec2<f32>(ax, ay);
   p.x = p.x * inv_aspect + 0.12 * inv_aspect;
   var o: HOut;
   o.clip = vec4<f32>(p + hud_motion_vfx(), 0.0, 1.0);
@@ -843,11 +864,13 @@ pub struct WeaponHudParams {
     pub anim_t: f32,
 }
 
-/// World-space blood splat (PixelLab texture on a small camera-facing billboard).
+/// World-space blood splat (camera-facing billboard; `yaw` rotates in XZ, `scale` sizes the quad).
 #[derive(Clone, Copy)]
 pub struct BloodSplat {
     pub pos: Vec3,
     pub life: f32,
+    pub yaw: f32,
+    pub scale: f32,
 }
 
 /// Ejected brass in first-person HUD space (same units as weapon quad `vs_hud` input `pos`).
@@ -906,6 +929,7 @@ pub struct Gpu {
     bind_group: wgpu::BindGroup,
     /// Mural / reference backdrop (and later: world-placed signage textures).
     bill_pipeline: wgpu::RenderPipeline,
+    bill_blood_pipeline: wgpu::RenderPipeline,
     bill_tex: wgpu::Texture,
     bill_view: wgpu::TextureView,
     bill_sampler: wgpu::Sampler,
@@ -1179,6 +1203,42 @@ impl Gpu {
             fragment: Some(wgpu::FragmentState {
                 module: &shader_bill,
                 entry_point: Some("fs_bill"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let bill_blood_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("bill-blood"),
+            layout: Some(&bill_pl),
+            vertex: wgpu::VertexState {
+                module: &shader_bill,
+                entry_point: Some("vs_bill"),
+                buffers: &[BillVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader_bill,
+                entry_point: Some("fs_bill_blood"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -1505,6 +1565,7 @@ impl Gpu {
             uniform,
             bind_group,
             bill_pipeline,
+            bill_blood_pipeline,
             bill_tex,
             bill_view,
             bill_sampler,
@@ -2809,20 +2870,32 @@ impl Gpu {
             let to_cam = cam_pos - center;
             let to_cam_xz = Vec3::new(to_cam.x, 0.0, to_cam.z);
             let len_xz = to_cam_xz.length();
-            let right = if len_xz > 0.001 {
+            let mut right = if len_xz > 0.001 {
                 Vec3::new(-to_cam_xz.z, 0.0, to_cam_xz.x) / len_xz
             } else {
                 Vec3::new(1.0, 0.0, 0.0)
             };
+            let cy = s.yaw.cos();
+            let sy = s.yaw.sin();
+            let rx = right.x * cy - right.z * sy;
+            let rz = right.x * sy + right.z * cy;
+            right = Vec3::new(rx, 0.0, rz);
+            let rlen = (right.x * right.x + right.z * right.z).sqrt();
+            if rlen > 0.001 {
+                right.x /= rlen;
+                right.z /= rlen;
+            }
             let up = Vec3::new(0.0, 1.0, 0.0);
-            let sz = 0.12_f32 * (0.4 + 0.6 * s.life.clamp(0.0, 1.0));
+            let sz = 0.14_f32
+                * s.scale
+                * (0.35 + 0.65 * s.life.clamp(0.0, 1.0));
             let half = sz * 0.5;
             let bl = center - right * half - up * half;
             let br = center + right * half - up * half;
             let tr = center + right * half + up * half;
             let tl = center - right * half + up * half;
             let lf = s.life.clamp(0.0, 1.0);
-            let tt = [1.55_f32 * lf, 0.35 * lf, 0.35 * lf, (0.88 * lf).min(1.0)];
+            let tt = [1.15_f32 * lf, 0.22 * lf, 0.18 * lf, (0.92 * lf).min(1.0)];
             let uvs = [
                 [0.0_f32, 1.0],
                 [1.0, 1.0],
@@ -3023,8 +3096,10 @@ impl Gpu {
             }
             if splat_idx_count > 0 {
                 if let Some(ref bg) = self.vfx_blood_bg {
+                    pass.set_pipeline(&self.bill_blood_pipeline);
                     pass.set_bind_group(1, bg, &[]);
                     pass.draw_indexed(splat_idx_start..splat_idx_start + splat_idx_count, 0, 0..1);
+                    pass.set_pipeline(&self.bill_pipeline);
                 }
             }
         };
