@@ -133,6 +133,7 @@ def resize_pixels(
 
 def default_ref_path() -> str | None:
     for pattern in (
+        os.path.join(ROOT, "example_images", "oyabaun_style_target.png"),
         os.path.join(ROOT, "example_images", "ref-pixel-yakuza.png"),
         os.path.join(ROOT, "example_images", "ref-image.png"),
     ):

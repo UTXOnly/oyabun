@@ -150,21 +150,19 @@ def _clamp01(v: float) -> float:
 
 
 def _rgba_boss_suit(x: int, y: int) -> tuple[float, float, float, float]:
-    # Vertical suiting folds (Virtua / Model 2 read), not chessboard Bayer at UV scale.
+    # Near-flat navy silhouette (in-game ref): slow vertical read only, micro noise.
     nx = x / 95.0
     ny = y / 95.0
-    fold = (0.55 + 0.45 * math.sin(nx * math.pi * 2.8)) * (0.62 + 0.38 * ny)
-    c_lo = (0.038, 0.042, 0.10)
-    c_hi = (0.10, 0.078, 0.19)
-    r = c_lo[0] + (c_hi[0] - c_lo[0]) * fold
-    g = c_lo[1] + (c_hi[1] - c_lo[1]) * fold
-    b = c_lo[2] + (c_hi[2] - c_lo[2]) * fold
+    fold = 0.78 + 0.22 * (0.5 + 0.5 * math.sin(nx * math.pi * 1.1)) * (0.55 + 0.45 * ny)
+    base = (0.028, 0.032, 0.088)
+    hi = (0.048, 0.052, 0.12)
+    r = base[0] + (hi[0] - base[0]) * fold
+    g = base[1] + (hi[1] - base[1]) * fold
+    b = base[2] + (hi[2] - base[2]) * fold
     h = _hash01(x, y)
-    r += (h - 0.5) * 0.024
-    g += (h - 0.5) * 0.016
-    b += (h - 0.5) * 0.030
-    if (x * 163 + y * 127) % 61 == 0:
-        r, g, b = 0.44, 0.10, 0.22
+    r += (h - 0.5) * 0.008
+    g += (h - 0.5) * 0.006
+    b += (h - 0.5) * 0.010
     return (_clamp01(r), _clamp01(g), _clamp01(b), 1.0)
 
 
@@ -184,15 +182,16 @@ def _rgba_boss_skin(x: int, y: int) -> tuple[float, float, float, float]:
 
 
 def _rgba_boss_shirt(x: int, y: int) -> tuple[float, float, float, float]:
-    ny = y / 31.0
-    band = math.sin(ny * math.pi * 7.0) * 0.028
-    r = 0.90 + band
-    g = 0.86 + band
-    b = 0.80 + band * 0.92
+    # Clean white bib + sparse teal “icon” chips (HUD ref on chest).
+    r = 0.93
+    g = 0.91
+    b = 0.86
     h = _hash01(x, y)
-    r += (h - 0.5) * 0.014
-    g += (h - 0.5) * 0.014
-    b += (h - 0.5) * 0.011
+    r += (h - 0.5) * 0.006
+    g += (h - 0.5) * 0.006
+    b += (h - 0.5) * 0.005
+    if (x // 3 + y // 3) % 9 == 0 and h > 0.55:
+        return (0.15, 0.72, 0.78, 1.0)
     return (_clamp01(r), _clamp01(g), _clamp01(b), 1.0)
 
 
@@ -219,20 +218,19 @@ def _rgba_boss_tie(x: int, y: int) -> tuple[float, float, float, float]:
 
 
 def _rgba_rival_suit(x: int, y: int) -> tuple[float, float, float, float]:
+    # Bronze / copper monotone (slender enemy in ref), vertical tone drift.
     nx = x / 95.0
     ny = y / 95.0
-    fold = (0.52 + 0.48 * math.sin(nx * math.pi * 3.2)) * (0.58 + 0.42 * ny)
-    c0 = (0.66, 0.62, 0.56)
-    c1 = (0.86, 0.82, 0.76)
+    fold = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(nx * math.pi * 1.4)) * (0.4 + 0.6 * ny)
+    c0 = (0.28, 0.14, 0.06)
+    c1 = (0.52, 0.30, 0.12)
     r = c0[0] + (c1[0] - c0[0]) * fold
     g = c0[1] + (c1[1] - c0[1]) * fold
     b = c0[2] + (c1[2] - c0[2]) * fold
-    h = _hash01(x + 7, y)
-    r += (h - 0.5) * 0.02
-    g += (h - 0.5) * 0.018
-    b += (h - 0.5) * 0.022
-    if (x * 151 + y * 97) % 67 == 0:
-        r, g, b = 0.48, 0.40, 0.58
+    h = _hash01(x + 11, y)
+    r += (h - 0.5) * 0.018
+    g += (h - 0.5) * 0.012
+    b += (h - 0.5) * 0.008
     return (_clamp01(r), _clamp01(g), _clamp01(b), 1.0)
 
 
@@ -247,9 +245,10 @@ def _rgba_rival_skin(x: int, y: int) -> tuple[float, float, float, float]:
 
 
 def _rgba_rival_hair(x: int, y: int) -> tuple[float, float, float, float]:
+    # Dark crown read (bronze enemy silhouette in ref), not blonde.
     u = _hash01(x, y) * 0.55 + _bayer01(x, y) * 0.45
-    c0 = (0.72, 0.66, 0.52)
-    c1 = (0.88, 0.82, 0.65)
+    c0 = (0.05, 0.035, 0.032)
+    c1 = (0.12, 0.075, 0.055)
     return (*c1, 1.0) if u > 0.5 else (*c0, 1.0)
 
 

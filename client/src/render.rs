@@ -262,6 +262,12 @@ fn vs_char(v: Vin) -> Vout {
   o.world_n = world_n;
   return o;
 }
+fn char_oya_hash(p: vec2<f32>) -> f32 {
+    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    p3 = p3 + dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
 fn char_bayer4(p: vec2<i32>) -> f32 {
     let xi = u32(p.x & 3);
     let yi = u32(p.y & 3);
@@ -271,23 +277,6 @@ fn char_bayer4(p: vec2<i32>) -> f32 {
         12.0, 4.0, 14.0, 6.0,
         3.0, 11.0, 1.0, 9.0,
         15.0, 7.0, 13.0, 5.0
-    );
-    return m[idx];
-}
-
-fn char_bayer8(p: vec2<i32>) -> f32 {
-    let xi = u32(p.x & 7);
-    let yi = u32(p.y & 7);
-    let idx = yi * 8u + xi;
-    let m = array<f32, 64>(
-        0.0, 32.0, 8.0, 40.0, 2.0, 34.0, 10.0, 42.0,
-        48.0, 16.0, 56.0, 24.0, 50.0, 18.0, 58.0, 26.0,
-        12.0, 44.0, 4.0, 36.0, 14.0, 46.0, 6.0, 38.0,
-        60.0, 28.0, 52.0, 20.0, 62.0, 30.0, 54.0, 22.0,
-        3.0, 35.0, 11.0, 43.0, 1.0, 33.0, 9.0, 41.0,
-        51.0, 19.0, 59.0, 27.0, 49.0, 17.0, 57.0, 25.0,
-        15.0, 47.0, 7.0, 39.0, 13.0, 45.0, 5.0, 37.0,
-        63.0, 31.0, 55.0, 23.0, 61.0, 29.0, 53.0, 21.0
     );
     return m[idx];
 }
@@ -316,93 +305,69 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let vd2 = dot(to_cam, to_cam);
     let view_dir = select(normalize(to_cam), vec3<f32>(0.0, 0.0, 1.0), vd2 < 1e-8);
 
-    // Side key + fill; extra cel steps so limbs read less "tube Wii".
+    // Alley-aligned: soft cel + same posterize as world fs_tex; halftone grain (no dpdx/dpdy).
     let key_dir = normalize(vec3<f32>(-0.88, 0.35, 0.32));
     let fill_dir = normalize(vec3<f32>(0.45, 0.12, -0.42));
     let ndk = dot(n, key_dir);
     let ndf = dot(n, fill_dir);
-    let shade_raw = clamp(ndk * 0.70 + ndf * 0.22 + 0.30, 0.0, 1.0);
+    let shade_raw = clamp(ndk * 0.68 + ndf * 0.24 + 0.32, 0.0, 1.0);
 
     let px = vec2<i32>(i.clip.xy);
     let b4 = char_bayer4(px);
     let d4 = (b4 + 0.5) / 16.0 - 0.5;
-    let n_cel = 6.0;
-    let scaled = shade_raw * (n_cel - 1.0) + d4 * 0.42;
+    let n_cel = 4.0;
+    let scaled = shade_raw * (n_cel - 1.0) + d4 * 0.28;
     let band = clamp(floor(scaled + 0.5), 0.0, n_cel - 1.0) / (n_cel - 1.0);
 
     let wp = i.world_pos;
     let h_norm = clamp((wp.y - 0.0) / 6.0, 0.0, 1.0);
-    let ambient_warm = vec3<f32>(0.32, 0.20, 0.14) * (0.5 + 0.5 * h_norm);
-    let ambient_cool = vec3<f32>(0.10, 0.18, 0.28) * (1.0 - h_norm * 0.5);
+    let ambient_warm = vec3<f32>(0.30, 0.22, 0.16) * (0.5 + 0.5 * h_norm);
+    let ambient_cool = vec3<f32>(0.12, 0.20, 0.26) * (1.0 - h_norm * 0.5);
     let ambient = ambient_warm + ambient_cool;
 
     let neon_phase = wp.x * 0.15 + wp.z * 0.12;
-    let neon_r = 0.12 * max(sin(neon_phase * 2.1 + 1.0), 0.0);
-    let neon_g = 0.05 * max(sin(neon_phase * 1.7 + 3.5), 0.0);
-    let neon_b = 0.14 * max(sin(neon_phase * 2.8 + 5.2), 0.0);
-    let neon_spill = vec3<f32>(neon_r, neon_g, neon_b) * (1.0 - h_norm * 0.35);
+    let neon_r = 0.10 * max(sin(neon_phase * 2.1 + 1.0), 0.0);
+    let neon_g = 0.06 * max(sin(neon_phase * 1.7 + 3.5), 0.0);
+    let neon_b = 0.12 * max(sin(neon_phase * 2.8 + 5.2), 0.0);
+    let neon_spill = vec3<f32>(neon_r, neon_g, neon_b) * (1.0 - h_norm * 0.4);
 
-    let emit_boost = max(lum - 0.32, 0.0) * 1.35;
+    let emit_boost = max(lum - 0.35, 0.0) * 1.25;
     let al = max(a, vec3<f32>(0.03));
-    let lit_char = al * (0.10 + 0.90 * band) + ambient * 0.42 * al + neon_spill * 0.52 + al * emit_boost;
+    let lit_char = al * (0.22 + 0.78 * band) + ambient * 0.52 * al + neon_spill * 0.46 + al * emit_boost * 1.15;
 
     let half_v = key_dir + view_dir;
     let h_len2 = dot(half_v, half_v);
     let half_dir = select(normalize(half_v), key_dir, h_len2 < 1e-8);
-    let spec = pow(max(dot(n, half_dir), 0.0), 36.0);
-    let spec_step = select(0.0, 0.32, spec > 0.40);
+    let spec = pow(max(dot(n, half_dir), 0.0), 40.0);
+    let spec_step = select(0.0, 0.26, spec > 0.42);
     var lit = lit_char + vec3<f32>(spec_step);
 
-    // Pink/magenta rim from alley backlight (ref art), distinct from silhouette ink.
-    let back_lit = max(-dot(n, key_dir), 0.0);
-    let fres = pow(1.0 - max(dot(n, view_dir), 0.0), 2.4);
-    let rim = smoothstep(0.12, 0.95, fres) * smoothstep(0.05, 0.72, back_lit);
-    let rim_col = vec3<f32>(0.98, 0.22, 0.42) * rim * 0.62;
-    lit = lit + rim_col;
-
-    // --- Luma quantize + neo-noir palette; softer dither than heavy stipple (less plastic). ---
-    let y_raw = dot(lit, vec3<f32>(0.299, 0.587, 0.114));
-    let b8 = char_bayer8(px);
-    let t8 = (b8 + 0.5) / 64.0 - 0.5;
-    let n_y = 10.0;
-    let y_adj = clamp(y_raw * (n_y - 1.0) + t8 * 0.82, 0.0, n_y - 1.0);
-    let y_q = floor(y_adj + 0.5) / (n_y - 1.0);
-
-    let p0 = vec3<f32>(0.022, 0.032, 0.095);
-    let p1 = vec3<f32>(0.07, 0.038, 0.125);
-    let p2 = vec3<f32>(0.20, 0.055, 0.11);
-    let p3 = vec3<f32>(0.44, 0.10, 0.12);
-    let p4 = vec3<f32>(0.68, 0.19, 0.11);
-    let p5 = vec3<f32>(0.88, 0.36, 0.14);
-    let p6 = vec3<f32>(0.97, 0.84, 0.52);
-    var pal = p0;
-    pal = select(pal, p1, y_q > 0.09);
-    pal = select(pal, p2, y_q > 0.20);
-    pal = select(pal, p3, y_q > 0.32);
-    pal = select(pal, p4, y_q > 0.45);
-    pal = select(pal, p5, y_q > 0.58);
-    pal = select(pal, p6, y_q > 0.72);
-
-    let chrom = max(al, vec3<f32>(0.045));
-    let cn = normalize(chrom);
-    var out_c = clamp(pal * (0.20 + 0.80 * cn) * vec3<f32>(1.04, 1.0, 0.98), vec3<f32>(0.0), vec3<f32>(1.0));
-
     let edge = 1.0 - max(dot(n, view_dir), 0.0);
-    let ink = smoothstep(0.72, 0.97, edge);
-    out_c = mix(out_c, vec3<f32>(0.012, 0.018, 0.055), ink * 0.26);
+    let fres = pow(edge, 2.35);
+    let back_lit = max(-dot(n, key_dir), 0.0);
+    let rim = smoothstep(0.14, 0.92, fres) * smoothstep(0.06, 0.70, back_lit);
+    let rim_pink = vec3<f32>(0.95, 0.22, 0.52) * rim * 0.62;
+    let rim_cyan = vec3<f32>(0.22, 0.88, 0.98) * fres * smoothstep(0.35, 0.98, edge) * 0.32;
+    lit = lit + rim_pink + rim_cyan;
 
-    // Light per-channel snap + dither (arcade grain without crushing detail).
-    let b8b = char_bayer8(px + vec2<i32>(2, 5));
-    let thr = (b8b + 0.5) / 64.0 - 0.5;
-    let lv = 14.0;
-    out_c = clamp(
-        (floor(out_c * (lv - 1.0) + thr * 0.32 + vec3<f32>(0.5))) / (lv - 1.0),
-        vec3<f32>(0.0),
-        vec3<f32>(1.0)
-    );
+    let lit_boost = clamp(lit * vec3<f32>(1.75, 1.75, 1.75), vec3<f32>(0.0), vec3<f32>(1.0));
+    var q = floor(clamp(lit_boost, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
+
+    let fp = vec2<f32>(f32(px.x), f32(px.y));
+    let hcell = floor(vec2<f32>(fp.x * 0.038, fp.y * 0.072));
+    let h1 = char_oya_hash(hcell);
+    let h2 = char_oya_hash(hcell + vec2<f32>(19.0, 7.0));
+    let yl = dot(q, vec3<f32>(0.299, 0.587, 0.114));
+    let vn = sin(fp.y * 0.095 + h1 * 6.2831853);
+    let vertical_grain = 0.88 + 0.16 * smoothstep(-0.35, 0.35, vn) * (0.55 + yl * 0.35);
+    let dot_mod = mix(0.92, 1.10, h2) * vertical_grain;
+    q = clamp(q * dot_mod, vec3<f32>(0.02), vec3<f32>(1.0));
+
+    let ink = smoothstep(0.68, 0.96, edge);
+    q = mix(q, vec3<f32>(0.024, 0.012, 0.045), ink * 0.30);
 
     let floor_rgb = vec3<f32>(0.035, 0.033, 0.05);
-    let poster_vis = max(out_c, floor_rgb);
+    let poster_vis = max(q, floor_rgb);
 
     let flashed = mix(poster_vis, vec3<f32>(1.0, 0.28, 0.18), hit_mix * 0.62);
 
