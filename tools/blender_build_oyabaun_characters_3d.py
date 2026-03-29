@@ -140,27 +140,42 @@ def make_textured_material(
     return mat
 
 
+def _hash01(x: int, y: int) -> float:
+    u = (x * 374761393 + y * 668265263) & 0xFFFFFFFF
+    return u / 4294967296.0
+
+
+def _clamp01(v: float) -> float:
+    return min(1.0, max(0.0, v))
+
+
 def _rgba_boss_suit(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
-    sx = x / 47.0
-    sheen = 0.32 + 0.38 * math.sin(sx * math.pi * 3.5)
-    c0 = (0.035, 0.038, 0.095)
-    c1 = (0.11, 0.075, 0.175)
-    if (x * 7 + y * 13) % 29 == 0:
-        return (0.52, 0.10, 0.28, 1.0)
-    if (x * 5 + y * 11) % 31 == 0:
-        return (0.18, 0.06, 0.14, 1.0)
-    if t + sheen * 0.38 > 0.51:
-        return (*c1, 1.0)
-    return (*c0, 1.0)
+    # Vertical suiting folds (Virtua / Model 2 read), not chessboard Bayer at UV scale.
+    nx = x / 95.0
+    ny = y / 95.0
+    fold = (0.55 + 0.45 * math.sin(nx * math.pi * 2.8)) * (0.62 + 0.38 * ny)
+    c_lo = (0.038, 0.042, 0.10)
+    c_hi = (0.10, 0.078, 0.19)
+    r = c_lo[0] + (c_hi[0] - c_lo[0]) * fold
+    g = c_lo[1] + (c_hi[1] - c_lo[1]) * fold
+    b = c_lo[2] + (c_hi[2] - c_lo[2]) * fold
+    h = _hash01(x, y)
+    r += (h - 0.5) * 0.024
+    g += (h - 0.5) * 0.016
+    b += (h - 0.5) * 0.030
+    if (x * 163 + y * 127) % 61 == 0:
+        r, g, b = 0.44, 0.10, 0.22
+    return (_clamp01(r), _clamp01(g), _clamp01(b), 1.0)
 
 
 def _rgba_boss_skin(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
+    nx = x / 47.0
+    ny = y / 47.0
+    smooth = 0.40 + 0.42 * ny + 0.10 * math.sin(nx * math.pi * 2.2)
+    u = smooth * 0.88 + _bayer01(x, y) * 0.12
     c0 = (0.48, 0.34, 0.24)
     c1 = (0.76, 0.54, 0.38)
     c2 = (0.62, 0.42, 0.30)
-    u = t + 0.08 * math.sin((x + y) * 0.35)
     if u > 0.58:
         return (*c1, 1.0)
     if u > 0.38:
@@ -169,30 +184,34 @@ def _rgba_boss_skin(x: int, y: int) -> tuple[float, float, float, float]:
 
 
 def _rgba_boss_shirt(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
-    c0 = (0.86, 0.82, 0.76)
-    c1 = (0.94, 0.90, 0.84)
-    if ((x // 2) + (y // 2)) % 2 == 0:
-        return (*c1, 1.0) if t > 0.48 else (*c0, 1.0)
-    return (*c0, 1.0) if t > 0.52 else (*c1, 1.0)
+    ny = y / 31.0
+    band = math.sin(ny * math.pi * 7.0) * 0.028
+    r = 0.90 + band
+    g = 0.86 + band
+    b = 0.80 + band * 0.92
+    h = _hash01(x, y)
+    r += (h - 0.5) * 0.014
+    g += (h - 0.5) * 0.014
+    b += (h - 0.5) * 0.011
+    return (_clamp01(r), _clamp01(g), _clamp01(b), 1.0)
 
 
 def _rgba_boss_hair(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
-    if t > 0.5:
-        return (0.035, 0.035, 0.045, 1.0)
-    return (0.008, 0.008, 0.012, 1.0)
+    u = _hash01(x ^ 31, y ^ 17) * 0.55 + _bayer01(x, y) * 0.45
+    if u > 0.5:
+        return (0.032, 0.032, 0.042, 1.0)
+    return (0.006, 0.006, 0.010, 1.0)
 
 
 def _rgba_boss_shoe(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
+    u = _hash01(x, y * 3) * 0.5 + _bayer01(x, y) * 0.5
     c0 = (0.018, 0.018, 0.025)
     c1 = (0.09, 0.085, 0.10)
-    return (*(c1 if t > 0.5 else c0), 1.0)
+    return (*(c1 if u > 0.5 else c0), 1.0)
 
 
 def _rgba_boss_tie(x: int, y: int) -> tuple[float, float, float, float]:
-    stripe = ((x + y * 2) // 2) % 2
+    stripe = ((x + y * 2) // 5) % 2
     t = _bayer01(x, y)
     if stripe:
         return (0.62, 0.04, 0.06, 1.0) if t > 0.45 else (0.48, 0.02, 0.05, 1.0)
@@ -200,45 +219,56 @@ def _rgba_boss_tie(x: int, y: int) -> tuple[float, float, float, float]:
 
 
 def _rgba_rival_suit(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
-    sx = x / 47.0
-    sheen = 0.28 + 0.36 * math.sin(sx * math.pi * 4.0)
-    c0 = (0.68, 0.64, 0.58)
-    c1 = (0.88, 0.84, 0.78)
-    if (x * 9 + y * 7) % 27 == 0:
-        return (0.45, 0.38, 0.55, 1.0)
-    if t + sheen * 0.32 > 0.5:
-        return (*c1, 1.0)
-    return (*c0, 1.0)
+    nx = x / 95.0
+    ny = y / 95.0
+    fold = (0.52 + 0.48 * math.sin(nx * math.pi * 3.2)) * (0.58 + 0.42 * ny)
+    c0 = (0.66, 0.62, 0.56)
+    c1 = (0.86, 0.82, 0.76)
+    r = c0[0] + (c1[0] - c0[0]) * fold
+    g = c0[1] + (c1[1] - c0[1]) * fold
+    b = c0[2] + (c1[2] - c0[2]) * fold
+    h = _hash01(x + 7, y)
+    r += (h - 0.5) * 0.02
+    g += (h - 0.5) * 0.018
+    b += (h - 0.5) * 0.022
+    if (x * 151 + y * 97) % 67 == 0:
+        r, g, b = 0.48, 0.40, 0.58
+    return (_clamp01(r), _clamp01(g), _clamp01(b), 1.0)
 
 
 def _rgba_rival_skin(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
+    nx = x / 47.0
+    ny = y / 47.0
+    u = 0.38 + 0.40 * ny + 0.12 * math.sin(nx * math.pi * 2.0)
+    u = u * 0.85 + _bayer01(x, y) * 0.15
     c0 = (0.42, 0.30, 0.22)
     c1 = (0.68, 0.46, 0.32)
-    u = t + 0.06 * math.sin((x - y) * 0.4)
     return (*c1, 1.0) if u > 0.52 else (*c0, 1.0)
 
 
 def _rgba_rival_hair(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
+    u = _hash01(x, y) * 0.55 + _bayer01(x, y) * 0.45
     c0 = (0.72, 0.66, 0.52)
     c1 = (0.88, 0.82, 0.65)
-    return (*c1, 1.0) if t > 0.5 else (*c0, 1.0)
+    return (*c1, 1.0) if u > 0.5 else (*c0, 1.0)
 
 
 def _rgba_rival_shoe(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
+    u = _hash01(x * 2, y) * 0.5 + _bayer01(x, y) * 0.5
     c0 = (0.62, 0.60, 0.56)
     c1 = (0.82, 0.78, 0.74)
-    return (*(c1 if t > 0.5 else c0), 1.0)
+    return (*(c1 if u > 0.5 else c0), 1.0)
 
 
 def _rgba_rival_shirt(x: int, y: int) -> tuple[float, float, float, float]:
-    t = _bayer01(x, y)
+    ny = y / 31.0
+    v = 0.5 + 0.5 * math.sin(ny * math.pi * 5.0)
     c0 = (0.05, 0.05, 0.07)
     c1 = (0.14, 0.12, 0.18)
-    return (*(c1 if t > 0.48 else c0), 1.0)
+    h = _hash01(x, y)
+    if v + (h - 0.5) * 0.08 > 0.52:
+        return (*c1, 1.0)
+    return (*c0, 1.0)
 
 
 def make_box(cx, cy, cz, sx, sy, sz):
@@ -515,7 +545,7 @@ def build_boss():
     obj = build_skin_body("Boss", joints, SKELETON_EDGES, radii)
 
     # ── Materials (slot order: 0=suit, 1=skin, 2=hair, 3=shoe, 4=shirt) ──
-    im_suit = make_arcade_image("ArcadeBoss_Suit", 48, 48, _rgba_boss_suit)
+    im_suit = make_arcade_image("ArcadeBoss_Suit", 96, 96, _rgba_boss_suit)
     im_skin = make_arcade_image("ArcadeBoss_Skin", 48, 48, _rgba_boss_skin)
     im_shirt = make_arcade_image("ArcadeBoss_Shirt", 32, 32, _rgba_boss_shirt)
     im_hair = make_arcade_image("ArcadeBoss_Hair", 32, 32, _rgba_boss_hair)
@@ -775,7 +805,7 @@ def build_rival():
     obj = build_skin_body("Rival", joints, SKELETON_EDGES, radii)
 
     # ── Materials (slot order: 0=suit, 1=skin, 2=hair, 3=shoe, 4=shirt) ──
-    im_rs = make_arcade_image("ArcadeRival_Suit", 48, 48, _rgba_rival_suit)
+    im_rs = make_arcade_image("ArcadeRival_Suit", 96, 96, _rgba_rival_suit)
     im_rk = make_arcade_image("ArcadeRival_Skin", 48, 48, _rgba_rival_skin)
     im_rh = make_arcade_image("ArcadeRival_Hair", 32, 32, _rgba_rival_hair)
     im_rf = make_arcade_image("ArcadeRival_Shoe", 32, 32, _rgba_rival_shoe)

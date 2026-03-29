@@ -327,7 +327,7 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let b4 = char_bayer4(px);
     let d4 = (b4 + 0.5) / 16.0 - 0.5;
     let n_cel = 6.0;
-    let scaled = shade_raw * (n_cel - 1.0) + d4 * 0.68;
+    let scaled = shade_raw * (n_cel - 1.0) + d4 * 0.42;
     let band = clamp(floor(scaled + 0.5), 0.0, n_cel - 1.0) / (n_cel - 1.0);
 
     let wp = i.world_pos;
@@ -389,14 +389,14 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
 
     let edge = 1.0 - max(dot(n, view_dir), 0.0);
     let ink = smoothstep(0.72, 0.97, edge);
-    out_c = mix(out_c, vec3<f32>(0.012, 0.018, 0.055), ink * 0.34);
+    out_c = mix(out_c, vec3<f32>(0.012, 0.018, 0.055), ink * 0.26);
 
     // Light per-channel snap + dither (arcade grain without crushing detail).
     let b8b = char_bayer8(px + vec2<i32>(2, 5));
     let thr = (b8b + 0.5) / 64.0 - 0.5;
     let lv = 14.0;
     out_c = clamp(
-        (floor(out_c * (lv - 1.0) + thr * 0.45 + vec3<f32>(0.5))) / (lv - 1.0),
+        (floor(out_c * (lv - 1.0) + thr * 0.32 + vec3<f32>(0.5))) / (lv - 1.0),
         vec3<f32>(0.0),
         vec3<f32>(1.0)
     );

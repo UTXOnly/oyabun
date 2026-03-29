@@ -9,13 +9,35 @@ Characters are built in Blender using Python scripting with the **skin modifier*
 ```
 tools/blender_build_oyabaun_characters_3d.py (OYABAUN_VARIANT=boss|rival|all)
 Skin modifier skeleton (joints + edges + radii)
-    → Subdivision level 2
-    → Decimate (default ~38% faces kept; OYABAUN_CHAR_DECIMATE)
+    → Subdivision level 1
+    → Decimate (default ~46% faces kept; OYABAUN_CHAR_DECIMATE)
     → Assign materials by face center position
+    → Packed 32–96px arcade albedos (vertical suit folds + hash noise, not chessboard)
     → Detail meshes (glasses, weapons, neon, tie, hair, lapels, …)
     → Join → smart UV → export GLB export_yup=True
     → client/characters/oyabaun_player.glb | oyabaun_rival.glb
 ```
+
+### Style audit (reference vs render)
+
+**No Pillow required** — stdlib PNG reader.
+
+```bash
+# Renders boss GLB with Blender, compares to ref, writes report:
+python3 tools/character_style_audit.py --ref example_images/ref-image.png
+
+# Your in-game screenshot as candidate:
+python3 tools/character_style_audit.py --ref example_images/ref-pixel-yakuza.png \
+  --candidate ~/Desktop/oyabaun_ingame.png
+
+# Re-run every 30s while iterating (12 passes):
+python3 tools/character_style_audit.py --ref example_images/ref-image.png --loop 12
+```
+
+Outputs **`tools/_audit_out/LAST_AUDIT_REPORT.txt`** with concrete next steps (checkerboard, saturation, palette, warmth).  
+Headless render: **`tools/blender_character_capture.py`** (invoked by the audit).
+
+Set **`OYABAUN_BLENDER`** if Blender is not at `/Applications/Blender.app/...` or on `PATH`.
 
 ### Conventions
 
@@ -23,50 +45,31 @@ Skin modifier skeleton (joints + edges + radii)
 - Feet at Z=0
 - glTF export flips to Y-up (export_yup=True)
 - `character_model()` in lib.rs adds PI to yaw for the Blender→game facing conversion
-- Materials: Principled BSDF with base color (no textures). Emissive for neon glow.
+- Materials: Principled + **packed pixel albedos** (nearest); solids + emission for metal/glass/neon
 
 ### Current Characters
 
-**Boss** (oyabaun_player.glb):
-- Dark suit, broad shoulders, slicked hair
-- Sunglasses, red tie, pistol in right hand
-- Cyan neon accents (lapels, pocket, belt, cuffs)
-- ~1.5k+ verts joined, up to 13 draw materials (under engine budget)
-
-**Rival** (oyabaun_rival.glb):
-- White/cream suit, lean athletic build, bleached spiky hair
-- Purple glasses, facial scar, katana in left hand
-- Purple neon accents (lapels, collar, belt, katana edge)
-- ~1.6k verts joined, 11 materials
+**Boss** (oyabaun_player.glb): dark suit, broad shoulders, slicked hair, sunglasses, red tie, pistol, cyan neon.  
+**Rival** (oyabaun_rival.glb): white suit, lean build, spiky blonde hair, purple glasses, katana, purple neon.
 
 ### Shader
 
-`SHADER_CHAR_TEX` in `render.rs`:
-- Standard 3D model transform (NOT billboard)
-- Material tint from GLB material base color
-- Directional lighting + cyberpunk ambient
-- Hit flash (anim_frame > 100 encodes flash intensity)
-- Distance fog
+`SHADER_CHAR_TEX` in `client/src/render.rs`: model transform, nearest albedo, cel + dithered palette, magenta rim, fog. Tuned so texture detail is not crushed by stipple.
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `client/src/render.rs` | Character shader, pipeline, uniform struct |
-| `client/src/lib.rs` | character_model(), make_character(), NPC render loop |
-| `client/src/gltf_level.rs` | parse_character_glb() — loads GLB |
-| `client/src/npc.rs` | NPC AI, hitboxes, wave spawning |
-| `client/characters/*.glb` | Character model files |
-
-### Tooling in repo
-
-- **`tools/blender_build_oyabaun_characters_3d.py`** — canonical regenerator (skin + details + GLB).
-- `tools/blender_make_oyabaun_character.py` — stub; `OYABAUN_LEGACY_SPRITE=1` = old atlas quad only.
-- **`docs/CHARACTER_PIPELINE_HANDOFF.md`** — material tables, `example_images/`, maintenance log.
+| `client/src/render.rs` | Character shader, pipeline |
+| `client/src/lib.rs` | character_model(), make_character() |
+| `client/src/gltf_level.rs` | parse_character_glb() |
+| `tools/blender_build_oyabaun_characters_3d.py` | Canonical regenerator |
+| `tools/character_style_audit.py` | Ref vs render metrics + instructions |
+| `tools/blender_character_capture.py` | Headless EEVEE capture for audit |
 
 ### DEPRECATED — Do NOT Use
 
-- PixelLab MCP tools for character sprites
+- PixelLab MCP for character sprites
 - Billboard/atlas shaders in production
-- Stacked box “procedural” characters (regressed art; not the intended look)
-- Atlas UV selection, ATLAS_ROWS, direction indices (except legacy sprite experiment)
+- Stacked box “procedural” characters
+- Atlas UV selection for 3D bodies

@@ -61,6 +61,13 @@ Cyberpunk yakuza — stylized low-poly with:
 - Weapons (pistol/katana)
 - Neon glow accents (emissive materials)
 
+### Style audit (ref vs render)
+
+```bash
+python3 tools/character_style_audit.py --ref example_images/ref-image.png
+# Writes tools/_audit_out/LAST_AUDIT_REPORT.txt (no extra Python deps)
+```
+
 ### Build & Test
 
 ```bash
