@@ -271,7 +271,7 @@ def cmd_apply_tokyo_shop_textures(ns: argparse.Namespace) -> None:
         check=True,
     )
     print(
-        "apply-tokyo-shop-textures: done (run export-world with --enhance to bake GLB)",
+        "apply-tokyo-shop-textures: done (run export-world --force-all to repack + GLB)",
         flush=True,
     )
 

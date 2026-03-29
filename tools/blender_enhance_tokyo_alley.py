@@ -31,7 +31,7 @@ import bpy
 
 MARK_SKIP = "OyabaunPx_"
 COL_TRASH = "OyabaunTokyoDetail"
-TEX_SIZE = 96
+TEX_SIZE = 128
 
 # When the blend stores (1,1,1) after failed procedural export, use neo-Tokyo defaults.
 _FALLBACK_RGB: dict[str, tuple[float, float, float]] = {
@@ -44,7 +44,7 @@ _FALLBACK_RGB: dict[str, tuple[float, float, float]] = {
     "OYA_Awning": (0.28, 0.24, 0.32),
     "OYA_AwningB": (0.16, 0.20, 0.34),
     "OYA_AwningC": (0.36, 0.14, 0.16),
-    "OYA_Recess": (0.10, 0.09, 0.13),
+    "OYA_Recess": (0.14, 0.12, 0.17),
     "OYA_ACUnit": (0.48, 0.48, 0.50),
     "OYA_NeonCrimson": (0.95, 0.15, 0.35),
     "OYA_NeonGold": (0.98, 0.82, 0.25),
@@ -243,14 +243,15 @@ def _pix_awning(r0: float, g0: float, b0: float, w: int, h: int, seed: int = 0) 
 
 def _pix_recess_wall(r0: float, g0: float, b0: float, w: int, h: int) -> list[float]:
     """Dark stucco behind shop opening — tile grout + water streaks (reads as interior wall)."""
+    r0, g0, b0 = r0 * 1.18, g0 * 1.15, b0 * 1.12
     out: list[float] = []
     for y in range(h):
         for x in range(w):
             tx = x % 10
             ty = y % 8
             grout = 0.88 if (tx < 1 or ty < 1) else 1.0
-            streak = 1.0 - 0.12 * max(0.0, math.sin(x * 0.08 + y * 0.04))
-            wash = 1.0 - (y / max(h, 1)) * 0.25
+            streak = 1.0 - 0.1 * max(0.0, math.sin(x * 0.08 + y * 0.04))
+            wash = 1.0 - (y / max(h, 1)) * 0.18
             n = _hash12(x // 2, y // 2) * 0.06
             rr = min(1.0, r0 * grout * streak * wash + n)
             gg = min(1.0, g0 * grout * streak * wash + n * 0.95)

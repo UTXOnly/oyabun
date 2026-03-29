@@ -84,14 +84,8 @@ def _load_image(tex_dir: Path, fname: str) -> bpy.types.Image | None:
 def _ensure_material(safe: str, img: bpy.types.Image) -> bpy.types.Material:
     mat_name = f"OYA_ShopFace_{safe}"
     mat = bpy.data.materials.get(mat_name)
-    if mat and mat.use_nodes and mat.node_tree:
-        for node in mat.node_tree.nodes:
-            if node.type == "TEX_IMAGE" and node.image:
-                node.image = img
-                node.interpolation = "Closest"
-        return mat
-
-    mat = bpy.data.materials.new(mat_name)
+    if not mat:
+        mat = bpy.data.materials.new(mat_name)
     mat.use_nodes = True
     mat.blend_method = "BLEND"
     nt = mat.node_tree
@@ -106,7 +100,9 @@ def _ensure_material(safe: str, img: bpy.types.Image) -> bpy.types.Material:
     nt.links.new(uv.outputs["UV"], tex.inputs["Vector"])
     nt.links.new(tex.outputs["Color"], pr.inputs["Base Color"])
     nt.links.new(tex.outputs["Alpha"], pr.inputs["Alpha"])
-    pr.inputs["Roughness"].default_value = 0.86
+    nt.links.new(tex.outputs["Color"], pr.inputs["Emission Color"])
+    pr.inputs["Emission Strength"].default_value = 0.2
+    pr.inputs["Roughness"].default_value = 0.82
     pr.inputs["Metallic"].default_value = 0.0
     nt.links.new(pr.outputs["BSDF"], out.inputs["Surface"])
     out.location = (300, 0)
@@ -191,7 +187,7 @@ def main() -> None:
             back_center = loc_r + axis_x * half.x
             normal = -axis_x
 
-        offset = normal * 0.048
+        offset = normal * 0.034
         pw = max(0.15, ob.dimensions[1])
         ph = max(0.15, ob.dimensions[2])
 
