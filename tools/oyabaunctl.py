@@ -282,6 +282,11 @@ def cmd_import_glb(ns: argparse.Namespace) -> None:
 
 def cmd_export_world(ns: argparse.Namespace) -> None:
     """Run Blender headless to write client/levels/tokyo_alley.glb and/or tokyo_street.json."""
+    if ns.force_all:
+        ns.enhance = True
+        ns.repack = True
+        print("export-world: --force-all → enhance + repack + export", flush=True)
+
     blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
     if not blend.is_file():
         sys.stderr.write(f"export-world: blend file not found: {blend}\n")
@@ -313,16 +318,36 @@ def cmd_export_world(ns: argparse.Namespace) -> None:
     if ns.fmt in ("glb", "both"):
         env = os.environ.copy()
         env["OYABAUN_GLB_OUT"] = str(out_glb)
-        print(f"export-world: glTF -> {out_glb}")
+        print(f"export-world: glTF -> {out_glb}", flush=True)
         subprocess.run([*base_cmd, "--python", str(glb_script)], cwd=ROOT, env=env, check=True)
 
     if ns.fmt in ("json", "both"):
         env = os.environ.copy()
         env["OYABAUN_OUT"] = str(out_json)
-        print(f"export-world: JSON  -> {out_json}")
+        print(f"export-world: JSON  -> {out_json}", flush=True)
         subprocess.run([*base_cmd, "--python", str(json_script)], cwd=ROOT, env=env, check=True)
 
-    print("export-world: done (serve from client/; see docs/BLENDER_GLTF.md)")
+    print("export-world: done (serve from client/; see docs/BLENDER_GLTF.md)", flush=True)
+
+
+def cmd_rebuild_level(ns: argparse.Namespace) -> None:
+    """Full Tokyo level pipeline: repack all albedos, export GLB + JSON, optional wasm-pack."""
+    print("rebuild-level: full refresh (repack → glTF → JSON" + (" → wasm" if ns.wasm else "") + ")", flush=True)
+    cmd_export_world(
+        argparse.Namespace(
+            blend=ns.blend,
+            enhance=True,
+            repack=True,
+            force_all=False,
+            fmt=ns.fmt,
+            blender=ns.blender,
+            output_glb=ns.output_glb,
+            output_json=ns.output_json,
+        )
+    )
+    if ns.wasm:
+        cmd_rebuild(argparse.Namespace(wasm=True, relay=False))
+    print("rebuild-level: done", flush=True)
 
 
 def cmd_rebuild(ns: argparse.Namespace) -> None:
@@ -507,6 +532,12 @@ def main() -> None:
         help="with --enhance: set OYABAUN_REPACK_ALBEDOS (rebuild every OyabaunPx_ texture)",
     )
     sp.add_argument(
+        "--force-all",
+        action="store_true",
+        dest="force_all",
+        help="shorthand for --enhance --repack (full albedo rebuild then GLB/JSON export)",
+    )
+    sp.add_argument(
         "--format",
         dest="fmt",
         choices=("glb", "json", "both"),
@@ -528,7 +559,33 @@ def main() -> None:
         default=None,
         help="output JSON path (default: <repo>/client/levels/tokyo_street.json)",
     )
-    sp.set_defaults(func=cmd_export_world, enhance=False, repack=False)
+    sp.set_defaults(func=cmd_export_world, enhance=False, repack=False, force_all=False)
+
+    sp = sub.add_parser(
+        "rebuild-level",
+        help="Tokyo alley: repack every packed albedo, export .glb + legacy JSON (optional wasm-pack)",
+    )
+    sp.add_argument(
+        "--blend",
+        default=None,
+        help="path to Blender .blend (default: client/levels/tokyo_alley.blend)",
+    )
+    sp.add_argument(
+        "--wasm",
+        action="store_true",
+        help="run wasm-pack after export (refresh include_bytes! embedded GLB in the bundle)",
+    )
+    sp.add_argument(
+        "--format",
+        dest="fmt",
+        choices=("glb", "json", "both"),
+        default="both",
+        help="same as export-world (default: both)",
+    )
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.add_argument("--output-glb", default=None, help="output .glb path (default: client/levels/tokyo_alley.glb)")
+    sp.add_argument("--output-json", default=None, help="output JSON path (default: client/levels/tokyo_street.json)")
+    sp.set_defaults(func=cmd_rebuild_level, wasm=False)
 
     sp = sub.add_parser(
         "enhance-tokyo-alley",

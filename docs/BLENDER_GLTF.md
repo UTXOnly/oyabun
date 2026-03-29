@@ -16,8 +16,13 @@ python3 tools/oyabaunctl.py export-world --blend /path/to/your_scene.blend
 # Regenerate packed albedos, then export (Tokyo alley)
 python3 tools/oyabaunctl.py export-world --enhance
 
-# Rebuild every packed texture (slow); then export
-python3 tools/oyabaunctl.py export-world --enhance --repack
+# Rebuild every packed texture, then export (full level asset refresh)
+python3 tools/oyabaunctl.py export-world --force-all
+# equivalent: export-world --enhance --repack
+
+# One-shot: same as --force-all; add --wasm to run wasm-pack after (embedded GLB in bundle)
+python3 tools/oyabaunctl.py rebuild-level
+python3 tools/oyabaunctl.py rebuild-level --wasm
 
 # Albedos only (no GLB write)
 python3 tools/oyabaunctl.py enhance-tokyo-alley
