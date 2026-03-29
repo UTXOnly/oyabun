@@ -61,13 +61,11 @@ python3 tools/oyabaunctl.py enhance-tokyo-alley --repack
 
 ### Playable character bodies (`oyabaun_player.glb`, `oyabaun_rival.glb`)
 
-NPCs use **procedural 3D** meshes (multi-material, no image textures — tints in-game). Regenerate both from the repo with:
+NPCs use **authored 3D** meshes (skin-modifier style humanoids, multi-material, no image textures). The Blender Python that builds them is **not** in this repo yet — see **`docs/CHARACTER_PIPELINE_HANDOFF.md`** to recover it from the original author.
 
-```bash
-OYABAUN_VARIANT=all /path/to/Blender --background --python tools/blender_make_oyabaun_character.py
-```
+`tools/blender_make_oyabaun_character.py` **does not** overwrite these GLBs by default (prevents accidental blocky placeholder exports). Legacy atlas billboard: `OYABAUN_LEGACY_SPRITE=1` with Blender.
 
-Optional: `OYABAUN_VARIANT=boss` or `=rival` and `OYABAUN_OUT=...` for a single file. Then `wasm-pack build` from `client/` so `include_bytes!` picks up the new GLBs.
+After replacing either GLB, run **`wasm-pack build`** from `client/` so `include_bytes!` matches.
 
 The alley export still **removes** legacy **`Boss_*`**, **`Rival_*`**, and **`ACBody*`** blocky meshes so they are not confused with real characters. Set **`OYABAUN_KEEP_PLACEHOLDER_NPCS=1`** if you need those dummies back in Blender for layout only.
 

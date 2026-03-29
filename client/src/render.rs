@@ -965,7 +965,7 @@ impl Gpu {
 
         #[cfg(target_arch = "wasm32")]
         if character_level.is_none() {
-            warn_str("oyabaun: no oyabaun_player.glb parsed — Blender: tools/blender_make_oyabaun_character.py (OYABAUN_VARIANT=all), then wasm-pack build");
+            warn_str("oyabaun: no oyabaun_player.glb parsed — see docs/CHARACTER_PIPELINE_HANDOFF.md; wasm-pack build after fixing GLB");
         }
         let character = character_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_player.glb"));
 

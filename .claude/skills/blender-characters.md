@@ -59,9 +59,14 @@ Skin modifier skeleton (joints + edges + radii)
 | `client/src/npc.rs` | NPC AI, hitboxes, wave spawning |
 | `client/characters/*.glb` | Character model files |
 
+### Tooling in repo
+
+- `tools/blender_make_oyabaun_character.py` — **does not regenerate** skin meshes by default (avoids overwriting good GLBs). Optional `OYABAUN_LEGACY_SPRITE=1` rebuilds the old atlas quad only.
+- **`docs/CHARACTER_PIPELINE_HANDOFF.md`** — use to recover the **full skin-modifier Python** from the session that produced commits `4437bd8` / `54b228e`.
+
 ### DEPRECATED — Do NOT Use
 
 - PixelLab MCP tools for character sprites
-- Billboard/atlas shaders
-- `tools/blender_make_oyabaun_character.py` (old sprite→quad pipeline)
-- Atlas UV selection, ATLAS_ROWS, direction indices
+- Billboard/atlas shaders in production
+- Stacked box “procedural” characters (regressed art; not the intended look)
+- Atlas UV selection, ATLAS_ROWS, direction indices (except legacy sprite experiment)

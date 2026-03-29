@@ -1,6 +1,6 @@
 # Character Improvement Task Doc
 
-## Status: IN PROGRESS (3D generator: `tools/blender_make_oyabaun_character.py`, `OYABAUN_VARIANT=all`)
+## Status: IN PROGRESS — **canonical GLBs restored** from git `54b228e`; generator script TBD (`docs/CHARACTER_PIPELINE_HANDOFF.md`)
 
 ## Goal
 
@@ -65,7 +65,8 @@ fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
 | `client/src/npc.rs` | NPC AI, hitboxes, wave spawning, smooth_turn |
 | `client/characters/oyabaun_player.glb` | Boss character model |
 | `client/characters/oyabaun_rival.glb` | Rival character model |
-| `tools/blender_make_oyabaun_character.py` | Procedural 3D boss/rival (`OYABAUN_VARIANT=boss\|rival\|all`) |
+| `tools/blender_make_oyabaun_character.py` | Safe stub (does not overwrite GLBs); optional `OYABAUN_LEGACY_SPRITE=1` atlas quad |
+| `docs/CHARACTER_PIPELINE_HANDOFF.md` | Questions + checklist to recover skin-modifier Python from Claude |
 
 ## What Needs Improvement
 
