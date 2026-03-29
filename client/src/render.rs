@@ -417,6 +417,9 @@ const BILL_VERTS: usize = MAX_BILL_QUADS * 4;
 const BILL_IDX: usize = MAX_BILL_QUADS * 6;
 /// Boss + rival + remotes + offline demos (see draw_world batching).
 const MAX_CHARACTER_INSTANCES: usize = 32;
+/// PixelLab atlas cells often have transparent padding under the soles; lower the quad so feet sit on `foot.y`.
+const CHAR_BILLBOARD_FEET_DROP: f32 = 0.40;
+const CHAR_BILLBOARD_ATLAS_COLS: u32 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -706,6 +709,8 @@ pub struct Gpu {
     // Character sprite atlas billboard rendering
     char_sprite_bg: Option<wgpu::BindGroup>,
     _char_sprite_tex: Option<wgpu::Texture>,
+    /// Row count in the embedded atlas (idle + walk frames); 0 if no sprite atlas.
+    char_sprite_atlas_rows: u32,
     diag_last_surface_ok: bool,
     diag_last_surface_error: String,
     diag_frames_submitted: u64,
@@ -1119,12 +1124,19 @@ impl Gpu {
 
         // Load character sprite atlas for billboard rendering
         const BOSS_ATLAS_RGBA: &[u8] = include_bytes!("../characters/boss_v3_atlas.rgba");
+        let mut char_sprite_atlas_rows: u32 = 0;
         let (char_sprite_bg, _char_sprite_tex) = if BOSS_ATLAS_RGBA.len() > 8 {
             let atlas_w = u32::from_le_bytes([BOSS_ATLAS_RGBA[0], BOSS_ATLAS_RGBA[1], BOSS_ATLAS_RGBA[2], BOSS_ATLAS_RGBA[3]]);
             let atlas_h = u32::from_le_bytes([BOSS_ATLAS_RGBA[4], BOSS_ATLAS_RGBA[5], BOSS_ATLAS_RGBA[6], BOSS_ATLAS_RGBA[7]]);
             let rgba_data = &BOSS_ATLAS_RGBA[8..];
             let expected = (atlas_w * atlas_h * 4) as usize;
             if rgba_data.len() >= expected {
+                let cell = atlas_w / CHAR_BILLBOARD_ATLAS_COLS;
+                char_sprite_atlas_rows = if cell > 0 && atlas_h % cell == 0 {
+                    atlas_h / cell
+                } else {
+                    1
+                };
                 let tex = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("char-sprite-atlas"),
                     size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
@@ -1207,6 +1219,7 @@ impl Gpu {
             character_rival,
             char_sprite_bg,
             _char_sprite_tex,
+            char_sprite_atlas_rows,
             diag_last_surface_ok: true,
             diag_last_surface_error: String::new(),
             diag_frames_submitted: 0,
@@ -2158,7 +2171,8 @@ impl Gpu {
                 // Character sprite billboard: camera-facing quad
                 let char_h = 2.0_f32; // world-space height
                 let char_w = 2.0_f32; // world-space width (square cells)
-                let center = foot + Vec3::new(0.0, char_h * 0.5, 0.0);
+                let foot_vis = foot - Vec3::new(0.0, CHAR_BILLBOARD_FEET_DROP, 0.0);
+                let center = foot_vis + Vec3::new(0.0, char_h * 0.5, 0.0);
 
                 // Camera-facing right/up vectors (billboard)
                 let to_cam = cam_pos - center;
@@ -2180,7 +2194,7 @@ impl Gpu {
 
                 // Compute direction column from relative angle
                 // Bearing FROM character TO camera (matches yaw convention: yaw=0 is -Z)
-                let cam_bearing = (cam_pos.x - foot.x).atan2(-(cam_pos.z - foot.z));
+                let cam_bearing = (cam_pos.x - foot_vis.x).atan2(-(cam_pos.z - foot_vis.z));
                 let char_yaw = ci.mesh_yaw;
                 let rel = cam_bearing - char_yaw;
                 // Normalize to [0, 2pi)
@@ -2195,11 +2209,11 @@ impl Gpu {
                     0u32 // idle
                 };
 
-                // Atlas UV: 8 cols x 7 rows
-                let u0 = col as f32 / 8.0;
-                let u1 = (col as f32 + 1.0) / 8.0;
-                let v0 = row as f32 / 7.0;
-                let v1 = (row as f32 + 1.0) / 7.0;
+                let rows = self.char_sprite_atlas_rows.max(1) as f32;
+                let u0 = col as f32 / CHAR_BILLBOARD_ATLAS_COLS as f32;
+                let u1 = (col as f32 + 1.0) / CHAR_BILLBOARD_ATLAS_COLS as f32;
+                let v0 = row as f32 / rows;
+                let v1 = (row as f32 + 1.0) / rows;
 
                 let corners = [bl, br, tr, tl];
                 let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];

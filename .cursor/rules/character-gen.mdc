@@ -17,16 +17,22 @@ The 3D procedural character approach is **fully deprecated** (2026-03-29). Do NO
 ## Current Pipeline: PixelLab Pro Mode → Sprite Atlas → Billboard
 
 ```
-PixelLab MCP (pro mode, 64px, 8 dirs)
+PixelLab MCP (pro mode, canvas typically 104–128px, 8 dirs)
     → animate (walk/attack/idle templates)
     → download ZIP → extract
-    → build_game_atlas.py → atlas PNG (8 cols × N rows)
-    → convert to .rgba binary (8-byte header + raw RGBA)
+    → build_game_atlas.py → atlas PNG (8 cols × N rows, square cells)
+    → tools/export_character_atlas_to_rgba.py (or PIL one-liner) → .rgba
     → client/characters/<name>_atlas.rgba
     → include_bytes!() in render.rs
     → camera-facing billboard quads in draw_world()
     → SHADER_BILL: alpha discard, nearest sampling
 ```
+
+### Art direction (Oyabaun)
+
+- **Tone**: Adult neo-Tokyo **yakuza / gangster** crime — not cartoon teens, not ninja fantasy.
+- **Weapons**: Default to a **visible firearm** (pistol, compact SMG) in the sprite; optional katana as secondary for specific roles. Bake weapons into the character — no separate weapon billboards.
+- **Feet / ground**: Atlas cells often have transparent padding under the feet; `CHAR_BILLBOARD_FEET_DROP` in `render.rs` nudges the quad down so soles meet terrain. Re-tune if a new atlas pivots differently.
 
 ### PixelLab Characters (v3 pro mode, active)
 

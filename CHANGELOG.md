@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-29 — Sprite billboard ground alignment + atlas UV rows
+
+- **Client**: Character billboards use `CHAR_BILLBOARD_FEET_DROP` so feet sit on terrain despite transparent padding in atlas cells; atlas **row count** for UVs is derived from embedded width/height (8 columns).
+- **Tooling**: `tools/export_character_atlas_to_rgba.py` embeds PNG atlases as `.rgba` for `include_bytes!`.
+- **Docs / rules**: Character art direction (yakuza + guns), canvas sizes, and export path updated in `character-gen` rule and `docs/CURSOR_CHARACTER_IMPROVEMENT.md`.
+
 ## 2026-03-29 — Pixel art sprite billboards replace 3D models (PixelLab v3 pro)
 
 ### Reverted: 3D Blender skin-modifier characters → PixelLab pixel art sprites

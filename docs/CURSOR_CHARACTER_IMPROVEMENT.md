@@ -20,12 +20,13 @@ The 3D Blender skin-modifier character pipeline **FAILED** to match the neo-noir
 ### Pipeline
 
 ```
-PixelLab MCP (pro mode, 64px canvas, 8 directions)
+PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
     → animate_character (walk, shoot, etc.)
     → download ZIP → extract frames
     → oyabaun-characters/tools/build_game_atlas.py
         → 8 cols (directions) × N rows (idle + anim frames) atlas PNG
-    → convert PNG to raw RGBA binary (.rgba file with 8-byte header)
+    → python3 tools/export_character_atlas_to_rgba.py <atlas.png> -o client/characters/<name>_atlas.rgba
+        (or PIL one-liner — 8-byte LE width/height + RGBA)
     → client/characters/<name>_atlas.rgba
     → include_bytes!() in render.rs
     → billboard quads in draw_world() with atlas UV selection
@@ -41,6 +42,8 @@ PixelLab MCP (pro mode, 64px canvas, 8 directions)
   - Animation row from `anim_frame` (0 = idle, 1-6 = walk)
 - `SHADER_BILL`: simple texture sample + alpha discard + rim
 - 3D GLB path preserved but bypassed when `char_sprite_bg.is_some()`
+- **Ground alignment**: `CHAR_BILLBOARD_FEET_DROP` in `render.rs` lowers the quad — atlas cells have transparent padding under the feet; increase/decrease if sprites float or sink.
+- **Atlas rows**: Row count for UVs is derived from embedded atlas width/height (8 columns, square cells); no hardcoded row count.
 
 ### Key Files
 
@@ -80,11 +83,15 @@ PixelLab MCP (pro mode, 64px canvas, 8 directions)
 
 ### Priority 1: Characters with weapons baked in
 
-The current boss sprite has no visible weapon — the pistol needs to be part of the character sprite, NOT a separate floating billboard. **Regenerate characters with weapons visible in their sprites.**
+Oyabaun is a **yakuza gangster** shooter: adults in suits or street-luxury, firearms first; katanas optional for specific roles — **not** cartoon teens or ninja archetypes.
 
-- [ ] **Boss with pistol**: Create new PixelLab character (pro mode) — "Japanese yakuza boss holding pistol in right hand, dark suit, sunglasses, cigarette, menacing stance"
-- [ ] **Rival with katana**: Create new PixelLab character (pro mode) — "Young yakuza enforcer holding katana, leather jacket, spiky platinum hair, purple sunglasses, aggressive stance"
-- [ ] **Player with weapon**: Create new PixelLab character (pro mode) — "Street ronin holding katana behind back, dark hoodie, face mask, tactical gear"
+The in-game boss atlas should show a **visible gun** in-frame. **Regenerate** with prompts like:
+
+- [ ] **Boss / oyabun**: Pro mode, 8 dirs — e.g. *middle-aged Japanese yakuza boss, dark pinstripe suit, sunglasses, cigarette, gold ring, holding semi-automatic pistol in two-hand forward stance, stern scarred face, neo-noir crime drama, low top-down pixel art*
+- [ ] **Rival / wakashu**: Pro mode — *young adult yakuza enforcer, leather or loud suit, visible pistol or submachine gun, bleached or dyed hair, aggressive stance, same noir tone*
+- [ ] **Player**: Pro mode — *hardened street operator in dark coat or tactical jacket, face partially obscured, **firearm clearly visible**, urban yakuza-adjacent look, not ninja*
+
+- [ ] **Rival with katana** (optional variant): only if you want a blade-heavy role — still reads as **gangster**, not samurai fantasy.
 
 ### Priority 2: Shooting/attack animations
 
@@ -165,14 +172,8 @@ unzip raw/sprites/boss_v3/boss_v3.zip -d raw/sprites/boss_v3/extracted
 python tools/build_game_atlas.py raw/sprites/boss_v3/extracted --out export/atlases/boss_v3_atlas.png
 
 # 3. Convert to raw RGBA for embedding
-python3 -c "
-from PIL import Image; import struct
-img = Image.open('export/atlases/boss_v3_atlas.png').convert('RGBA')
-w, h = img.size
-with open('../oyabaun/client/characters/boss_v3_atlas.rgba', 'wb') as f:
-    f.write(struct.pack('<II', w, h))
-    f.write(img.tobytes())
-"
+python3 ../oyabaun/tools/export_character_atlas_to_rgba.py export/atlases/boss_v3_atlas.png \\
+    -o ../oyabaun/client/characters/boss_v3_atlas.rgba
 
 # 4. Rebuild WASM
 cd ../oyabaun/client && wasm-pack build --target web --no-typescript

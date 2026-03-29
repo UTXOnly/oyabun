@@ -43,3 +43,9 @@ description: >-
 
 - Protocol changes: update `docs/PROTOCOL.md` and `protocol/schemas/` together.
 - Keep cheat resistance assumptions documented in `docs/ARCHITECTURE.md` when adding features.
+
+## Characters (sprite billboards)
+
+- In-world characters are **PixelLab pro** pixel art → atlas `.rgba` → billboards in `client/src/render.rs` (see `.cursor/rules/character-gen.mdc`).
+- After changing `client/characters/*_atlas.rgba` or billboard code, run `wasm-pack build` from `client/`.
+- Quick export: `python3 tools/export_character_atlas_to_rgba.py path/to/atlas.png -o client/characters/name_atlas.rgba`.
