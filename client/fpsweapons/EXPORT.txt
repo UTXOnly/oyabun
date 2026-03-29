@@ -1,5 +1,15 @@
-Weapon HUD art here is **Blender-rendered FP sprites** committed in git (`git show 112c497:client/fpsweapons/pistol.png` etc.). Do not replace with procedural PIL shapes.
+Baked weapon HUD sprites (512×512 RGBA PNG) come from:
+  ~/Downloads/fpsweapons/sprites/
 
-Optional swap: CC BY-SA 3.0 pack — see LICENSE.txt; source folder was `~/Downloads/fpsweapons/sprites/` (m9_pistol, mossberg_500, scar, maglite).
+Mapping into this folder:
+  pistol.png   ← m9_pistol.png
+  shotgun.png  ← mossberg_500.png
+  smg.png      ← scar.png
+  plasma.png   ← maglite.png   (stand-in “exotic” slot; swap for another sprite if you prefer)
 
-arms.png — first-person arms overlay; add manually if desired.
+arms.png — first-person arms overlay (same source folder); drawn above the weapon quad in the HUD.
+
+Also in Downloads/sprites (not wired to slots yet): usp.png, m4_carbine.png, m9_bayonet.png —
+copy/rename over the four weapon files above to change loadout art.
+
+Original FPSWeapons pack: CC BY-SA 3.0 — see LICENSE.txt.
