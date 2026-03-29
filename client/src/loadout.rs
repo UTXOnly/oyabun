@@ -49,7 +49,7 @@ impl Loadout {
     }
 
     pub fn tick(&mut self, dt: f32) {
-        self.muzzle_flash = (self.muzzle_flash - dt * 2.6).max(0.0);
+        self.muzzle_flash = (self.muzzle_flash - dt * 2.05).max(0.0);
         self.recoil = (self.recoil - dt * 4.2).max(0.0);
 
         if self.reload_pending || self.is_reloading() {

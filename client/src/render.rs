@@ -635,12 +635,12 @@ fn hud_motion_vfx() -> vec2<f32> {
 @vertex
 fn vs_muzzle(v: HIn) -> HOut {
   let inv_aspect = 1.0 / max(hu.aspect, 0.5);
-  var ox = 0.498;
-  var oy = -0.355;
-  var sc = 0.155;
-  if (hu.weapon == 1u) { ox = 0.412; oy = -0.318; sc = 0.178; }
-  else if (hu.weapon == 2u) { ox = 0.528; oy = -0.372; sc = 0.148; }
-  else if (hu.weapon == 3u) { ox = 0.468; oy = -0.348; sc = 0.152; }
+  var ox = 0.505;
+  var oy = -0.362;
+  var sc = 0.188;
+  if (hu.weapon == 1u) { ox = 0.418; oy = -0.322; sc = 0.205; }
+  else if (hu.weapon == 2u) { ox = 0.535; oy = -0.378; sc = 0.175; }
+  else if (hu.weapon == 3u) { ox = 0.475; oy = -0.352; sc = 0.182; }
   var p = v.pos * vec2<f32>(sc, sc) + vec2<f32>(ox, oy);
   p.x = p.x * inv_aspect + 0.12 * inv_aspect;
   var o: HOut;
@@ -653,9 +653,9 @@ fn vs_muzzle(v: HIn) -> HOut {
 fn fs_muzzle(i: HOut) -> @location(0) vec4<f32> {
   let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
   let t = textureSample(vtex, vsamp, uv_tex);
-  let flicker = 1.0 + 0.42 * sin(hu.anim_t * 38.0);
-  let pulse = 1.0 + 0.55 * hu.flash;
-  let k = hu.flash * (2.35 + flicker) * pulse;
+  let flicker = 1.0 + 0.5 * sin(hu.anim_t * 42.0);
+  let pulse = 1.0 + 0.7 * hu.flash;
+  let k = hu.flash * (2.85 + flicker) * pulse;
   let a = t.a * k;
   if (a < 0.02) { discard; }
   return vec4<f32>(t.rgb * k, a);
@@ -2819,14 +2819,14 @@ impl Gpu {
                 Vec3::new(1.0, 0.0, 0.0)
             };
             let up = Vec3::new(0.0, 1.0, 0.0);
-            let sz = 0.09_f32 * (0.35 + 0.65 * s.life.clamp(0.0, 1.0));
+            let sz = 0.12_f32 * (0.4 + 0.6 * s.life.clamp(0.0, 1.0));
             let half = sz * 0.5;
             let bl = center - right * half - up * half;
             let br = center + right * half - up * half;
             let tr = center + right * half + up * half;
             let tl = center - right * half + up * half;
             let lf = s.life.clamp(0.0, 1.0);
-            let tt = [1.35_f32 * lf, 0.9 * lf, 0.9 * lf, lf];
+            let tt = [1.55_f32 * lf, 0.35 * lf, 0.35 * lf, (0.88 * lf).min(1.0)];
             let uvs = [
                 [0.0_f32, 1.0],
                 [1.0, 1.0],
@@ -2850,13 +2850,8 @@ impl Gpu {
         let char_rival_idx_start = (char_rival_quad_vert_start / 4 * 6) as u32;
         let char_rival_idx_count =
             ((char_rival_quad_vert_end - char_rival_quad_vert_start) / 4 * 6) as u32;
-        let char_idx_count = char_boss_idx_count + char_rival_idx_count;
 
         let bill_idx_count: u32 = (bill_cpu.len() / 4 * 6) as u32;
-        let gun_idx_count = bill_idx_count
-            .saturating_sub(mural_idx_count)
-            .saturating_sub(char_idx_count)
-            .saturating_sub(splat_idx_count);
 
         if !bill_cpu.is_empty() {
             self.queue
@@ -3009,12 +3004,6 @@ impl Gpu {
             if mural_idx_count > 0 && self.sprite_ready {
                 pass.set_bind_group(1, &self.bill_bind_group, &[]);
                 pass.draw_indexed(0..mural_idx_count, 0, 0..1);
-            }
-            if gun_idx_count > 0 && self.character.is_some() {
-                if let Some(bg) = self.weapon_bind_groups.get(0) {
-                    pass.set_bind_group(1, bg, &[]);
-                    pass.draw_indexed(mural_idx_count..mural_idx_count + gun_idx_count, 0, 0..1);
-                }
             }
             if char_boss_idx_count > 0 {
                 if let Some(ref bg) = self.char_sprite_bg {

@@ -1,9 +1,8 @@
-Pixel-art HUD VFX (128×128 RGBA PNG, transparent), generated via PixelLab map-object API.
+Regenerate (PixelLab map-object, transparent PNG):
 
-Regenerate:
-  python3 tools/pixellab_v2.py map-object "pixel art muzzle flash … transparent" client/vfx/muzzle_flash.png
-  python3 tools/pixellab_v2.py map-object "pixel art blood splatter … transparent" client/vfx/blood_overlay.png
+  python3 tools/pixellab_v2.py map-object "…muzzle flash arcade…" client/vfx/muzzle_flash.png
+  python3 tools/pixellab_v2.py map-object "…blood splatter arcade…" client/vfx/blood_overlay.png
 
-shell_brass.png — HUD ejected brass (alpha). Regenerate: `python3 tools/gen_fps_assets.py` or PixelLab map-object.
+shell_brass.png — `tools/gen_fps_assets.py` or map-object.
 
-Game: nearest-filtered; muzzle = additive HUD quad at barrel (anim_t flicker in shader); blood = world billboard at hit; shells = alpha HUD quads parented to weapon motion.
+Game: muzzle = additive HUD at barrel tip; blood = small world billboard on hit (bill pass); shells = HUD alpha.
