@@ -390,8 +390,3 @@ fn fill_cell(out: &mut [u8], stride: usize, cw: usize, ch: usize, ox: usize, oy:
         }
     }
 }
-</think>
-
-
-<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>
-StrReplace
