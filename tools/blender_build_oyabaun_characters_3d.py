@@ -1,10 +1,10 @@
 """
-Oyabaun 3D Character Generator — Skin Modifier Pipeline
+Oyabaun 3D Character Generator — Faceted arcade body + detail meshes
 
-Builds boss and rival characters as organic humanoid meshes using Blender's
-skin modifier technique. Each character is a skeleton of joints + edges with
-per-joint radii, subdivided for smooth organic shapes, decimated for game
-performance, then dressed with detail meshes (glasses, weapons, neon accents).
+Bodies use Blender's Skin modifier **without** Subdivision — flat-shaded,
+edge-split prisms (Virtua / Model 2–style silhouettes), not smoothed blobs.
+
+Detail props (glasses, weapons, lapels) are separate box meshes, also flat.
 
 Usage:
   # Build both characters
@@ -23,7 +23,9 @@ Output:
 After regenerating GLBs, rebuild WASM:
   cd client && wasm-pack build --target web --no-typescript
 
-Optional: OYABAUN_CHAR_DECIMATE=0.42 (higher = smoother body, more verts; default 0.46).
+Optional:
+  OYABAUN_CHAR_DECIMATE=0.85  (fraction of faces kept; default 1.0 = off for crisp facets)
+  OYABAUN_CHAR_LEGACY_SMOOTH=1  (subsurf+smooth+heavy decimate — old “organic” look)
 
 Body materials use embedded 32–48px "arcade" albedos (ordered dither, nearest sampling) so the
 GLB carries pixel-era texture; client samples with nearest filtering.
@@ -307,15 +309,12 @@ def add_detail(name, verts, faces, material):
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.shade_smooth()
+    bpy.ops.object.shade_flat()
     return obj
 
 
 def build_skin_body(name, joints, edges_def, radii):
-    """Build an organic body mesh from skeleton joints using skin modifier.
-
-    Returns the Blender object after skin+subsurf+decimate are applied.
-    """
+    """Build body from skin skeleton: faceted (default) or legacy smooth blob."""
     mesh = bpy.data.meshes.new(f"{name}Skeleton")
     obj = bpy.data.objects.new(f"{name}Body", mesh)
     bpy.context.collection.objects.link(obj)
@@ -332,32 +331,46 @@ def build_skin_body(name, joints, edges_def, radii):
     bm.to_mesh(mesh)
     bm.free()
 
-    # Skin modifier
     obj.modifiers.new("Skin", 'SKIN')
     for i, jname in enumerate(vert_list):
         sv = mesh.skin_vertices[""].data[i]
         sv.radius = radii.get(jname, (0.04, 0.04))
     mesh.skin_vertices[""].data[vert_list.index('pelvis')].use_root = True
 
-    # Subdivision: level 1 keeps limbs readable (level 2 + decimate reads Mii/blobby).
-    sub = obj.modifiers.new("Subsurf", 'SUBSURF')
-    sub.levels = 1
-    sub.render_levels = 1
+    legacy = os.environ.get("OYABAUN_CHAR_LEGACY_SMOOTH", "").strip() in (
+        "1", "true", "yes", "on",
+    )
 
-    # Apply modifiers
-    bpy.ops.object.modifier_apply(modifier="Skin")
-    bpy.ops.object.modifier_apply(modifier="Subsurf")
-    bpy.ops.object.shade_smooth()
-
-    # Decimate for game performance (ratio = fraction of faces *kept*)
-    dec = obj.modifiers.new("Decimate", 'DECIMATE')
-    try:
-        dec.ratio = float(os.environ.get("OYABAUN_CHAR_DECIMATE", "0.46"))
-    except ValueError:
-        dec.ratio = 0.46
-    dec.ratio = max(0.18, min(0.52, dec.ratio))
-    bpy.ops.object.modifier_apply(modifier="Decimate")
-    bpy.ops.object.shade_smooth()
+    if legacy:
+        sub = obj.modifiers.new("Subsurf", 'SUBSURF')
+        sub.levels = 1
+        sub.render_levels = 1
+        bpy.ops.object.modifier_apply(modifier="Skin")
+        bpy.ops.object.modifier_apply(modifier="Subsurf")
+        bpy.ops.object.shade_smooth()
+        dec = obj.modifiers.new("Decimate", 'DECIMATE')
+        try:
+            dec.ratio = float(os.environ.get("OYABAUN_CHAR_DECIMATE", "0.46"))
+        except ValueError:
+            dec.ratio = 0.46
+        dec.ratio = max(0.18, min(0.52, dec.ratio))
+        bpy.ops.object.modifier_apply(modifier="Decimate")
+        bpy.ops.object.shade_smooth()
+    else:
+        bpy.ops.object.modifier_apply(modifier="Skin")
+        try:
+            dr = float(os.environ.get("OYABAUN_CHAR_DECIMATE", "1.0"))
+        except ValueError:
+            dr = 1.0
+        dr = max(0.35, min(1.0, dr))
+        if dr < 0.995:
+            dec = obj.modifiers.new("Decimate", 'DECIMATE')
+            dec.ratio = dr
+            bpy.ops.object.modifier_apply(modifier="Decimate")
+        es = obj.modifiers.new("EdgeSplit", 'EDGE_SPLIT')
+        es.split_angle = math.radians(32.0)
+        bpy.ops.object.modifier_apply(modifier="EdgeSplit")
+        bpy.ops.object.shade_flat()
 
     vcount = len(obj.data.vertices)
     fcount = len(obj.data.polygons)
@@ -468,77 +481,72 @@ SKELETON_EDGES = [
 # ============================================================
 
 def build_boss():
-    """Build the Boss (oyabaun_player) — dark suit, broad shoulders, pistol."""
+    """Build the Boss (oyabaun_player) — dark suit, long limbs, visor read, pistol."""
     print("Building Boss character...")
 
-    # ── Joint positions (Z-up, feet at Z=0, total height ~1.85m) ──
+    # ── Joint positions: ref silhouette — long thin limbs, shallow boxy head, stiff stance ──
     joints = {
-        'pelvis':      (0, 0, 0.90),
-        'waist':       (0, 0, 1.00),
-        'chest':       (0, 0, 1.20),
-        'upper_chest': (0, 0, 1.38),
-        'neck':        (0, 0, 1.50),
-        'head':        (0, 0, 1.65),
-        'head_top':    (0, 0, 1.82),
-        # Left arm (relaxed at side)
-        'l_shoulder':  (-0.22, 0, 1.42),
-        'l_upper_arm': (-0.32, 0, 1.35),
-        'l_elbow':     (-0.42, 0, 1.18),
-        'l_forearm':   (-0.46, -0.02, 1.05),
-        'l_wrist':     (-0.48, -0.04, 0.92),
-        'l_hand':      (-0.48, -0.06, 0.82),
-        # Right arm (gun arm — slightly forward)
-        'r_shoulder':  (0.22, 0, 1.42),
-        'r_upper_arm': (0.32, 0, 1.35),
-        'r_elbow':     (0.38, -0.08, 1.22),
-        'r_forearm':   (0.36, -0.18, 1.18),
-        'r_wrist':     (0.34, -0.28, 1.16),
-        'r_hand':      (0.33, -0.34, 1.16),
-        # Left leg
-        'l_hip':       (-0.10, 0, 0.88),
-        'l_knee':      (-0.11, 0.02, 0.48),
-        'l_ankle':     (-0.11, 0, 0.08),
-        'l_foot':      (-0.11, -0.08, 0.02),
-        'l_toe':       (-0.11, -0.16, 0.02),
-        # Right leg
-        'r_hip':       (0.10, 0, 0.88),
-        'r_knee':      (0.11, 0.02, 0.48),
-        'r_ankle':     (0.11, 0, 0.08),
-        'r_foot':      (0.11, -0.08, 0.02),
-        'r_toe':       (0.11, -0.16, 0.02),
+        'pelvis':      (0, 0, 0.91),
+        'waist':       (0, 0, 1.02),
+        'chest':       (0, 0, 1.17),
+        'upper_chest': (0, 0, 1.30),
+        'neck':        (0, 0, 1.38),
+        'head':        (0, 0, 1.46),
+        'head_top':    (0, 0, 1.62),
+        'l_shoulder':  (-0.27, 0, 1.32),
+        'l_upper_arm': (-0.41, 0.01, 1.26),
+        'l_elbow':     (-0.52, 0.02, 1.05),
+        'l_forearm':   (-0.56, 0.01, 0.85),
+        'l_wrist':     (-0.57, -0.03, 0.66),
+        'l_hand':      (-0.57, -0.07, 0.56),
+        'r_shoulder':  (0.27, 0, 1.32),
+        'r_upper_arm': (0.41, 0.01, 1.26),
+        'r_elbow':     (0.49, -0.05, 1.08),
+        'r_forearm':   (0.51, -0.12, 0.94),
+        'r_wrist':     (0.47, -0.20, 0.82),
+        'r_hand':      (0.43, -0.27, 0.76),
+        'l_hip':       (-0.095, 0, 0.89),
+        'l_knee':      (-0.10, 0.02, 0.48),
+        'l_ankle':     (-0.10, 0, 0.08),
+        'l_foot':      (-0.10, -0.08, 0.02),
+        'l_toe':       (-0.10, -0.16, 0.02),
+        'r_hip':       (0.095, 0, 0.89),
+        'r_knee':      (0.10, 0.02, 0.48),
+        'r_ankle':     (0.10, 0, 0.08),
+        'r_foot':      (0.10, -0.08, 0.02),
+        'r_toe':       (0.10, -0.16, 0.02),
     }
 
-    # ── Per-joint radii (rx=left/right width, ry=front/back depth) ──
     radii = {
-        'pelvis':      (0.14, 0.10),
-        'waist':       (0.13, 0.10),
-        'chest':       (0.16, 0.12),
-        'upper_chest': (0.18, 0.12),  # broad shoulders
-        'neck':        (0.072, 0.07),
-        'head':        (0.10, 0.11),
-        'head_top':    (0.08, 0.09),
-        'l_shoulder':  (0.068, 0.065),
-        'l_upper_arm': (0.068, 0.068),
-        'l_elbow':     (0.054, 0.054),
-        'l_forearm':   (0.048, 0.048),
-        'l_wrist':     (0.04, 0.036),
-        'l_hand':      (0.04, 0.045),
-        'r_shoulder':  (0.068, 0.065),
-        'r_upper_arm': (0.068, 0.068),
-        'r_elbow':     (0.054, 0.054),
-        'r_forearm':   (0.048, 0.048),
-        'r_wrist':     (0.04, 0.036),
-        'r_hand':      (0.04, 0.045),
-        'l_hip':       (0.088, 0.085),
-        'l_knee':      (0.062, 0.065),
-        'l_ankle':     (0.045, 0.045),
-        'l_foot':      (0.045, 0.085),
-        'l_toe':       (0.034, 0.045),
-        'r_hip':       (0.088, 0.085),
-        'r_knee':      (0.062, 0.065),
-        'r_ankle':     (0.045, 0.045),
-        'r_foot':      (0.045, 0.085),
-        'r_toe':       (0.034, 0.045),
+        'pelvis':      (0.118, 0.086),
+        'waist':       (0.108, 0.082),
+        'chest':       (0.132, 0.095),
+        'upper_chest': (0.152, 0.090),
+        'neck':        (0.048, 0.048),
+        'head':        (0.10, 0.078),
+        'head_top':    (0.088, 0.058),
+        'l_shoulder':  (0.042, 0.042),
+        'l_upper_arm': (0.042, 0.042),
+        'l_elbow':     (0.036, 0.036),
+        'l_forearm':   (0.032, 0.032),
+        'l_wrist':     (0.028, 0.026),
+        'l_hand':      (0.028, 0.032),
+        'r_shoulder':  (0.042, 0.042),
+        'r_upper_arm': (0.042, 0.042),
+        'r_elbow':     (0.036, 0.036),
+        'r_forearm':   (0.032, 0.032),
+        'r_wrist':     (0.028, 0.026),
+        'r_hand':      (0.028, 0.032),
+        'l_hip':       (0.076, 0.074),
+        'l_knee':      (0.054, 0.056),
+        'l_ankle':     (0.040, 0.040),
+        'l_foot':      (0.040, 0.078),
+        'l_toe':       (0.030, 0.040),
+        'r_hip':       (0.076, 0.074),
+        'r_knee':      (0.054, 0.056),
+        'r_ankle':     (0.040, 0.040),
+        'r_foot':      (0.040, 0.078),
+        'r_toe':       (0.030, 0.040),
     }
 
     obj = build_skin_body("Boss", joints, SKELETON_EDGES, radii)
@@ -557,22 +565,22 @@ def build_boss():
 
     def boss_zone(x, y, z):
         if z < 0.10:
-            return 3   # shoe
+            return 3
         elif z < 0.88:
-            return 0   # suit pants
-        elif z < 1.50:
-            if x > 0.30 and z < 1.20:
-                return 1   # skin (forearms/hands)
-            elif x < 0.08 and z > 1.30 and y < -0.04:
-                return 4   # shirt (visible at collar V)
+            return 0
+        elif z < 1.36:
+            if x > 0.44 and z < 1.08:
+                return 1
+            elif x < 0.085 and z > 1.20 and y < -0.04:
+                return 4
             else:
-                return 0   # suit jacket
-        elif z < 1.55:
-            return 1   # skin (neck)
-        elif z < 1.72:
-            return 1   # skin (head)
+                return 0
+        elif z < 1.42:
+            return 1
+        elif z < 1.58:
+            return 1
         else:
-            return 2   # hair
+            return 2
 
     assign_materials_by_position(
         obj, [mat_suit, mat_skin, mat_hair, mat_shoe, mat_shirt], boss_zone)
@@ -590,34 +598,29 @@ def build_boss():
                              emission=(0.0, 0.8, 1.0), emission_strength=3.0)
     im_tie = make_arcade_image("ArcadeBoss_Tie", 32, 32, _rgba_boss_tie)
     mat_tie = make_textured_material("Boss_Tie", im_tie, roughness=0.45)
-    mat_cig = make_material("Boss_Cigarette", (0.75, 0.72, 0.68), roughness=0.7)
-    mat_cig_tip = make_material("Boss_CigaretteTip", (0.9, 0.4, 0.1),
-                                emission=(0.9, 0.4, 0.1), emission_strength=2.0)
 
-    # ── Sunglasses ──
-    v, f = make_box(-0.05, -0.11, 1.64, 0.035, 0.008, 0.018)
+    # ── Visor / block glasses (ref: dark head + glowing read) ──
+    v, f = make_box(-0.05, -0.11, 1.52, 0.035, 0.008, 0.018)
     add_detail("Boss_LensL", v, f, mat_glasses)
-    v, f = make_box(0.05, -0.11, 1.64, 0.035, 0.008, 0.018)
+    v, f = make_box(0.05, -0.11, 1.52, 0.035, 0.008, 0.018)
     add_detail("Boss_LensR", v, f, mat_glasses)
-    v, f = make_box(0, -0.115, 1.64, 0.015, 0.005, 0.008)
+    v, f = make_box(0, -0.115, 1.52, 0.015, 0.005, 0.008)
     add_detail("Boss_Bridge", v, f, mat_frames)
-    v, f = make_box(-0.085, -0.05, 1.64, 0.005, 0.065, 0.005)
+    v, f = make_box(-0.085, -0.05, 1.52, 0.005, 0.065, 0.005)
     add_detail("Boss_TempleL", v, f, mat_frames)
-    v, f = make_box(0.085, -0.05, 1.64, 0.005, 0.065, 0.005)
+    v, f = make_box(0.085, -0.05, 1.52, 0.005, 0.065, 0.005)
     add_detail("Boss_TempleR", v, f, mat_frames)
 
-    # ── Tie ──
     tv = [
-        (-0.02, -0.115, 1.40), (0.02, -0.115, 1.40),
-        (0.025, -0.12, 1.25), (-0.025, -0.12, 1.25),
-        (-0.018, -0.11, 1.08), (0.018, -0.11, 1.08),
-        (0.015, -0.105, 0.95), (-0.015, -0.105, 0.95),
+        (-0.02, -0.115, 1.32), (0.02, -0.115, 1.32),
+        (0.025, -0.12, 1.17), (-0.025, -0.12, 1.17),
+        (-0.018, -0.11, 1.02), (0.018, -0.11, 1.02),
+        (0.015, -0.105, 0.90), (-0.015, -0.105, 0.90),
     ]
     tf = [(0, 1, 2, 3), (3, 2, 5, 4), (4, 5, 6, 7)]
     add_detail("Boss_Tie", tv, tf, mat_tie)
 
-    # ── Pistol in right hand ──
-    rx, ry, rz = 0.33, -0.38, 1.16
+    rx, ry, rz = 0.43, -0.31, 0.76
     v, f = make_box(rx, ry, rz, 0.015, 0.08, 0.022)
     add_detail("Boss_GunSlide", v, f, mat_gun)
     v, f = make_box(rx, ry - 0.06, rz + 0.008, 0.008, 0.04, 0.008)
@@ -627,95 +630,53 @@ def build_boss():
     v, f = make_box(rx, ry - 0.005, rz - 0.015, 0.004, 0.018, 0.004)
     add_detail("Boss_GunTrig", v, f, mat_gun)
 
-    # ── Neon accents (cyan) ──
-    v, f = make_box(-0.06, -0.12, 1.30, 0.012, 0.004, 0.08)
+    v, f = make_box(-0.06, -0.12, 1.22, 0.012, 0.004, 0.08)
     add_detail("Boss_NeonLapelL", v, f, mat_neon)
-    v, f = make_box(0.06, -0.12, 1.30, 0.012, 0.004, 0.08)
+    v, f = make_box(0.06, -0.12, 1.22, 0.012, 0.004, 0.08)
     add_detail("Boss_NeonLapelR", v, f, mat_neon)
-    v, f = make_box(-0.10, -0.12, 1.32, 0.018, 0.004, 0.012)
+    v, f = make_box(-0.10, -0.12, 1.24, 0.018, 0.004, 0.012)
     add_detail("Boss_PocketNeon", v, f, mat_neon)
     v, f = make_box(0, -0.10, 0.88, 0.025, 0.005, 0.015)
     add_detail("Boss_BeltNeon", v, f, mat_neon)
 
-    # ── Facial features ──
-    # Nose (wedge protruding forward)
-    nv = [
-        (-0.015, -0.12, 1.62), (0.015, -0.12, 1.62),
-        (0.008, -0.15, 1.60), (-0.008, -0.15, 1.60),
-        (-0.012, -0.12, 1.58), (0.012, -0.12, 1.58),
-    ]
-    nf = [(0, 1, 2, 3), (0, 4, 5, 1), (3, 2, 5, 4), (0, 3, 4), (1, 5, 2)]
-    add_detail("Boss_Nose", nv, nf, mat_skin)
-
-    # Ears
-    v, f = make_box(-0.11, -0.01, 1.63, 0.012, 0.008, 0.018)
-    add_detail("Boss_EarL", v, f, mat_skin)
-    v, f = make_box(0.11, -0.01, 1.63, 0.012, 0.008, 0.018)
-    add_detail("Boss_EarR", v, f, mat_skin)
-
-    # Eyebrow ridges
-    v, f = make_box(-0.04, -0.115, 1.67, 0.025, 0.006, 0.006)
-    add_detail("Boss_BrowL", v, f, mat_skin)
-    v, f = make_box(0.04, -0.115, 1.67, 0.025, 0.006, 0.006)
-    add_detail("Boss_BrowR", v, f, mat_skin)
-
-    # Chin/jaw
-    v, f = make_tapered_box(0, -0.10, 1.54, 0.03, 0.025, 0.025, 0.02, 0.03)
-    add_detail("Boss_Chin", v, f, mat_skin)
-
-    # Cigarette
-    v, f = make_box(0.02, -0.15, 1.57, 0.004, 0.03, 0.004)
-    add_detail("Boss_Cigarette", v, f, mat_cig)
-    v, f = make_box(0.02, -0.18, 1.57, 0.005, 0.005, 0.005)
-    add_detail("Boss_CigTip", v, f, mat_cig_tip)
-
-    # ── Suit details ──
-    # Collar points
-    v, f = make_box(-0.04, -0.11, 1.46, 0.02, 0.006, 0.015)
+    v, f = make_box(-0.04, -0.11, 1.38, 0.02, 0.006, 0.015)
     add_detail("Boss_CollarL", v, f, mat_suit)
-    v, f = make_box(0.04, -0.11, 1.46, 0.02, 0.006, 0.015)
+    v, f = make_box(0.04, -0.11, 1.38, 0.02, 0.006, 0.015)
     add_detail("Boss_CollarR", v, f, mat_suit)
 
-    # Shoulder pads
-    v, f = make_tapered_box(-0.22, 0, 1.43, 0.04, 0.04, 0.03, 0.03, 0.02)
+    v, f = make_tapered_box(-0.26, 0, 1.35, 0.038, 0.038, 0.028, 0.028, 0.02)
     add_detail("Boss_ShoulderL", v, f, mat_suit)
-    v, f = make_tapered_box(0.22, 0, 1.43, 0.04, 0.04, 0.03, 0.03, 0.02)
+    v, f = make_tapered_box(0.26, 0, 1.35, 0.038, 0.038, 0.028, 0.028, 0.02)
     add_detail("Boss_ShoulderR", v, f, mat_suit)
 
-    # Slicked hair volume (+Y = back of head; front is -Y)
-    v, f = make_box(0, 0.07, 1.76, 0.10, 0.035, 0.028)
+    v, f = make_box(0, 0.07, 1.64, 0.10, 0.032, 0.026)
     add_detail("Boss_HairBack", v, f, mat_hair)
-    v, f = make_tapered_box(-0.05, 0.05, 1.75, 0.05, 0.03, 0.03, 0.012, 0.045)
+    v, f = make_tapered_box(-0.05, 0.05, 1.63, 0.05, 0.03, 0.03, 0.012, 0.042)
     add_detail("Boss_HairSideL", v, f, mat_hair)
-    v, f = make_tapered_box(0.05, 0.05, 1.75, 0.05, 0.03, 0.03, 0.012, 0.045)
+    v, f = make_tapered_box(0.05, 0.05, 1.63, 0.05, 0.03, 0.03, 0.012, 0.042)
     add_detail("Boss_HairSideR", v, f, mat_hair)
 
-    # Lapel flaps (read as V from front)
-    v, f = make_box(-0.095, -0.108, 1.20, 0.028, 0.004, 0.11)
+    v, f = make_box(-0.095, -0.108, 1.12, 0.028, 0.004, 0.10)
     add_detail("Boss_LapelFlapL", v, f, mat_suit)
-    v, f = make_box(0.095, -0.108, 1.20, 0.028, 0.004, 0.11)
+    v, f = make_box(0.095, -0.108, 1.12, 0.028, 0.004, 0.10)
     add_detail("Boss_LapelFlapR", v, f, mat_suit)
 
-    # Breast pocket + sleeve cuff hints
-    v, f = make_box(-0.14, -0.10, 1.05, 0.04, 0.006, 0.05)
+    v, f = make_box(-0.14, -0.10, 0.98, 0.04, 0.006, 0.05)
     add_detail("Boss_Pocket", v, f, mat_suit)
-    v, f = make_box(-0.48, -0.05, 0.88, 0.022, 0.006, 0.035)
+    v, f = make_box(-0.56, -0.05, 0.62, 0.022, 0.006, 0.035)
     add_detail("Boss_CuffL", v, f, mat_suit)
 
-    # Shoe soles / toe cap
-    v, f = make_box(-0.11, -0.11, 0.012, 0.055, 0.11, 0.008)
+    v, f = make_box(-0.10, -0.11, 0.012, 0.052, 0.10, 0.008)
     add_detail("Boss_SoleL", v, f, mat_shoe)
-    v, f = make_box(0.11, -0.11, 0.012, 0.055, 0.11, 0.008)
+    v, f = make_box(0.10, -0.11, 0.012, 0.052, 0.10, 0.008)
     add_detail("Boss_SoleR", v, f, mat_shoe)
 
-    # Pistol magazine + slide serrations (extra metal)
     v, f = make_box(rx, ry + 0.045, rz - 0.018, 0.011, 0.028, 0.038)
     add_detail("Boss_GunMag", v, f, mat_gun)
     v, f = make_box(rx, ry - 0.03, rz + 0.006, 0.016, 0.022, 0.006)
     add_detail("Boss_GunSerration", v, f, mat_gun)
 
-    # Signet ring (right hand)
-    v, f = make_box(0.30, -0.33, 1.135, 0.014, 0.01, 0.008)
+    v, f = make_box(0.40, -0.26, 0.74, 0.014, 0.01, 0.008)
     add_detail("Boss_Signet", v, f, mat_frames)
 
     # ── Join and export ──
@@ -729,76 +690,71 @@ def build_boss():
 # ============================================================
 
 def build_rival():
-    """Build the Rival (oyabaun_rival) — white suit, lean build, katana."""
+    """Build the Rival (oyabaun_rival) — tall bronze arcade silhouette, crown, katana."""
     print("Building Rival character...")
 
-    # ── Joint positions (slightly shorter, leaner) ──
     joints = {
-        'pelvis':      (0, 0, 0.88),
-        'waist':       (0, 0, 0.98),
-        'chest':       (0, 0, 1.18),
-        'upper_chest': (0, 0, 1.35),
-        'neck':        (0, 0, 1.46),
+        'pelvis':      (0, 0, 0.94),
+        'waist':       (0, 0, 1.06),
+        'chest':       (0, 0, 1.24),
+        'upper_chest': (0, 0, 1.40),
+        'neck':        (0, 0, 1.50),
         'head':        (0, 0, 1.60),
-        'head_top':    (0, 0, 1.78),
-        # Left arm — katana arm, extended forward
-        'l_shoulder':  (-0.20, 0, 1.38),
-        'l_upper_arm': (-0.28, -0.05, 1.30),
-        'l_elbow':     (-0.34, -0.15, 1.20),
-        'l_forearm':   (-0.32, -0.25, 1.16),
-        'l_wrist':     (-0.30, -0.32, 1.14),
-        'l_hand':      (-0.28, -0.36, 1.12),
-        # Right arm — relaxed at side
-        'r_shoulder':  (0.20, 0, 1.38),
-        'r_upper_arm': (0.28, 0, 1.30),
-        'r_elbow':     (0.38, 0, 1.15),
-        'r_forearm':   (0.42, 0, 1.02),
-        'r_wrist':     (0.42, -0.02, 0.90),
-        'r_hand':      (0.42, -0.04, 0.82),
-        # Legs
-        'l_hip':       (-0.09, 0, 0.86),
-        'l_knee':      (-0.10, 0.02, 0.46),
-        'l_ankle':     (-0.10, 0, 0.07),
-        'l_foot':      (-0.10, -0.08, 0.02),
-        'l_toe':       (-0.10, -0.15, 0.02),
-        'r_hip':       (0.09, 0, 0.86),
-        'r_knee':      (0.10, 0.02, 0.46),
-        'r_ankle':     (0.10, 0, 0.07),
-        'r_foot':      (0.10, -0.08, 0.02),
-        'r_toe':       (0.10, -0.15, 0.02),
+        'head_top':    (0, 0, 1.86),
+        'l_shoulder':  (-0.17, 0, 1.42),
+        'l_upper_arm': (-0.24, -0.06, 1.32),
+        'l_elbow':     (-0.30, -0.16, 1.18),
+        'l_forearm':   (-0.28, -0.26, 1.12),
+        'l_wrist':     (-0.26, -0.32, 1.08),
+        'l_hand':      (-0.24, -0.36, 1.05),
+        'r_shoulder':  (0.17, 0, 1.42),
+        'r_upper_arm': (0.24, 0, 1.32),
+        'r_elbow':     (0.34, 0, 1.14),
+        'r_forearm':   (0.38, 0, 0.98),
+        'r_wrist':     (0.38, -0.02, 0.86),
+        'r_hand':      (0.38, -0.04, 0.78),
+        'l_hip':       (-0.075, 0, 0.92),
+        'l_knee':      (-0.08, 0.02, 0.50),
+        'l_ankle':     (-0.08, 0, 0.09),
+        'l_foot':      (-0.08, -0.08, 0.02),
+        'l_toe':       (-0.08, -0.15, 0.02),
+        'r_hip':       (0.075, 0, 0.92),
+        'r_knee':      (0.08, 0.02, 0.50),
+        'r_ankle':     (0.08, 0, 0.09),
+        'r_foot':      (0.08, -0.08, 0.02),
+        'r_toe':       (0.08, -0.15, 0.02),
     }
 
-    # ── Slimmer proportions than boss ──
     radii = {
-        'pelvis':      (0.12, 0.09),
-        'waist':       (0.11, 0.09),
-        'chest':       (0.14, 0.10),
-        'upper_chest': (0.16, 0.10),
-        'neck':        (0.058, 0.056),
-        'head':        (0.09, 0.10),
-        'head_top':    (0.07, 0.08),
-        'l_shoulder':  (0.062, 0.06),
-        'l_upper_arm': (0.058, 0.058),
-        'l_elbow':     (0.048, 0.048),
-        'l_forearm':   (0.042, 0.042),
-        'l_wrist':     (0.036, 0.034),
-        'l_hand':      (0.036, 0.042),
-        'r_shoulder':  (0.062, 0.06),
-        'r_upper_arm': (0.058, 0.058),
-        'r_elbow':     (0.048, 0.048),
-        'r_forearm':   (0.042, 0.042),
-        'r_wrist':     (0.036, 0.034),
-        'r_hand':      (0.036, 0.042),
-        'l_hip':       (0.078, 0.076),
-        'l_knee':      (0.056, 0.06),
-        'l_ankle':     (0.04, 0.04),
-        'l_foot':      (0.04, 0.075),
-        'l_toe':       (0.032, 0.04),
-        'r_hip':       (0.078, 0.076),
-        'r_knee':      (0.056, 0.06),
-        'r_ankle':     (0.04, 0.04),
-        'r_foot':      (0.04, 0.075),
-        'r_toe':       (0.032, 0.04),
+        'pelvis':      (0.10, 0.078),
+        'waist':       (0.092, 0.074),
+        'chest':       (0.118, 0.084),
+        'upper_chest': (0.132, 0.084),
+        'neck':        (0.044, 0.044),
+        'head':        (0.078, 0.072),
+        'head_top':    (0.062, 0.056),
+        'l_shoulder':  (0.048, 0.046),
+        'l_upper_arm': (0.044, 0.044),
+        'l_elbow':     (0.036, 0.036),
+        'l_forearm':   (0.032, 0.032),
+        'l_wrist':     (0.028, 0.026),
+        'l_hand':      (0.028, 0.032),
+        'r_shoulder':  (0.048, 0.046),
+        'r_upper_arm': (0.044, 0.044),
+        'r_elbow':     (0.036, 0.036),
+        'r_forearm':   (0.032, 0.032),
+        'r_wrist':     (0.028, 0.026),
+        'r_hand':      (0.028, 0.032),
+        'l_hip':       (0.064, 0.062),
+        'l_knee':      (0.046, 0.048),
+        'l_ankle':     (0.032, 0.032),
+        'l_foot':      (0.032, 0.065),
+        'l_toe':       (0.026, 0.032),
+        'r_hip':       (0.064, 0.062),
+        'r_knee':      (0.046, 0.048),
+        'r_ankle':     (0.032, 0.032),
+        'r_foot':      (0.032, 0.065),
+        'r_toe':       (0.026, 0.032),
     }
 
     obj = build_skin_body("Rival", joints, SKELETON_EDGES, radii)
@@ -817,22 +773,22 @@ def build_rival():
 
     def rival_zone(x, y, z):
         if z < 0.09:
-            return 3   # shoe
-        elif z < 0.86:
-            return 0   # suit pants
-        elif z < 1.46:
-            if x > 0.28 and z < 1.15:
-                return 1   # skin (forearms)
-            elif x < 0.07 and z > 1.28 and y < -0.04:
-                return 4   # shirt
+            return 3
+        elif z < 0.90:
+            return 0
+        elif z < 1.48:
+            if x > 0.26 and z < 1.12:
+                return 1
+            elif x < 0.065 and z > 1.32 and y < -0.04:
+                return 4
             else:
-                return 0   # suit
-        elif z < 1.52:
-            return 1   # skin (neck)
-        elif z < 1.68:
-            return 1   # skin (head)
+                return 0
+        elif z < 1.54:
+            return 1
+        elif z < 1.78:
+            return 1
         else:
-            return 2   # hair
+            return 2
 
     assign_materials_by_position(
         obj, [r_suit, r_skin, r_hair, r_shoe, r_shirt], rival_zone)
@@ -848,25 +804,25 @@ def build_rival():
     mat_neon = make_material("Rival_Neon", (0.8, 0.0, 1.0),
                              emission=(0.8, 0.0, 1.0), emission_strength=3.0)
     mat_scar = make_material("Rival_Scar", (0.85, 0.35, 0.3), roughness=0.9)
+    mat_crown = make_material(
+        "Rival_Crown", (0.48, 0.32, 0.10), metallic=0.9, roughness=0.22,
+        emission=(0.42, 0.28, 0.08), emission_strength=0.65)
 
-    # ── Sunglasses (purple lenses) ──
-    v, f = make_box(-0.045, -0.11, 1.60, 0.032, 0.007, 0.016)
+    v, f = make_box(-0.042, -0.11, 1.62, 0.030, 0.007, 0.015)
     add_detail("Rival_LensL", v, f, mat_glasses)
-    v, f = make_box(0.045, -0.11, 1.60, 0.032, 0.007, 0.016)
+    v, f = make_box(0.042, -0.11, 1.62, 0.030, 0.007, 0.015)
     add_detail("Rival_LensR", v, f, mat_glasses)
-    v, f = make_box(0, -0.115, 1.60, 0.012, 0.004, 0.006)
+    v, f = make_box(0, -0.115, 1.62, 0.011, 0.004, 0.006)
     add_detail("Rival_Bridge", v, f, mat_frames)
-    v, f = make_box(-0.078, -0.05, 1.60, 0.004, 0.06, 0.004)
+    v, f = make_box(-0.074, -0.05, 1.62, 0.004, 0.058, 0.004)
     add_detail("Rival_TempleL", v, f, mat_frames)
-    v, f = make_box(0.078, -0.05, 1.60, 0.004, 0.06, 0.004)
+    v, f = make_box(0.074, -0.05, 1.62, 0.004, 0.058, 0.004)
     add_detail("Rival_TempleR", v, f, mat_frames)
 
-    # ── Facial scar ──
-    v, f = make_box(-0.085, -0.06, 1.58, 0.004, 0.025, 0.004)
+    v, f = make_box(-0.082, -0.06, 1.60, 0.004, 0.024, 0.004)
     add_detail("Rival_Scar", v, f, mat_scar)
 
-    # ── Katana in left hand ──
-    lx, ly, lz = -0.28, -0.36, 1.12
+    lx, ly, lz = -0.24, -0.36, 1.05
     v, f = make_box(lx, ly, lz - 0.10, 0.010, 0.010, 0.12)
     add_detail("Rival_KatanaHandle", v, f, mat_wrap)
     v, f = make_box(lx, ly, lz + 0.02, 0.022, 0.022, 0.004)
@@ -880,66 +836,66 @@ def build_rival():
     v, f = make_box(lx + 0.018, ly, lz + 0.08, 0.006, 0.14, 0.003)
     add_detail("Rival_BladeRidge", v, f, mat_blade)
 
-    # Silver chain at open collar (uses frame metal)
-    v, f = make_box(0, -0.075, 1.295, 0.095, 0.018, 0.022)
+    v, f = make_box(0, -0.075, 1.34, 0.092, 0.018, 0.022)
     add_detail("Rival_NeckChain", v, f, mat_frames)
 
-    # ── Neon accents (purple) ──
-    v, f = make_box(-0.05, -0.10, 1.26, 0.010, 0.004, 0.07)
+    v, f = make_box(-0.048, -0.10, 1.30, 0.010, 0.004, 0.07)
     add_detail("Rival_NeonLapelL", v, f, mat_neon)
-    v, f = make_box(0.05, -0.10, 1.26, 0.010, 0.004, 0.07)
+    v, f = make_box(0.048, -0.10, 1.30, 0.010, 0.004, 0.07)
     add_detail("Rival_NeonLapelR", v, f, mat_neon)
-    v, f = make_box(0, -0.10, 1.44, 0.05, 0.004, 0.006)
+    v, f = make_box(0, -0.10, 1.48, 0.048, 0.004, 0.006)
     add_detail("Rival_CollarNeon", v, f, mat_neon)
-    v, f = make_box(0, -0.09, 0.87, 0.022, 0.004, 0.012)
+    v, f = make_box(0, -0.09, 0.91, 0.022, 0.004, 0.012)
     add_detail("Rival_BeltNeon", v, f, mat_neon)
-    v, f = make_box(-0.10, -0.11, 0.014, 0.048, 0.09, 0.007)
+    v, f = make_box(-0.08, -0.11, 0.014, 0.046, 0.088, 0.007)
     add_detail("Rival_SoleL", v, f, r_shoe)
-    v, f = make_box(0.10, -0.11, 0.014, 0.048, 0.09, 0.007)
+    v, f = make_box(0.08, -0.11, 0.014, 0.046, 0.088, 0.007)
     add_detail("Rival_SoleR", v, f, r_shoe)
 
     # ── Facial features ──
     # Nose
     nv = [
-        (-0.012, -0.11, 1.58), (0.012, -0.11, 1.58),
-        (0.006, -0.14, 1.56), (-0.006, -0.14, 1.56),
-        (-0.010, -0.11, 1.54), (0.010, -0.11, 1.54),
+        (-0.012, -0.11, 1.60), (0.012, -0.11, 1.60),
+        (0.006, -0.14, 1.58), (-0.006, -0.14, 1.58),
+        (-0.010, -0.11, 1.56), (0.010, -0.11, 1.56),
     ]
     nf = [(0, 1, 2, 3), (0, 4, 5, 1), (3, 2, 5, 4), (0, 3, 4), (1, 5, 2)]
     add_detail("Rival_Nose", nv, nf, r_skin)
 
     # Ears
-    v, f = make_box(-0.10, -0.01, 1.59, 0.010, 0.007, 0.016)
+    v, f = make_box(-0.088, -0.01, 1.61, 0.009, 0.007, 0.015)
     add_detail("Rival_EarL", v, f, r_skin)
-    v, f = make_box(0.10, -0.01, 1.59, 0.010, 0.007, 0.016)
+    v, f = make_box(0.088, -0.01, 1.61, 0.009, 0.007, 0.015)
     add_detail("Rival_EarR", v, f, r_skin)
 
-    # Eyebrow ridges
-    v, f = make_box(-0.035, -0.11, 1.63, 0.022, 0.005, 0.005)
+    v, f = make_box(-0.032, -0.11, 1.65, 0.020, 0.005, 0.005)
     add_detail("Rival_BrowL", v, f, r_skin)
-    v, f = make_box(0.035, -0.11, 1.63, 0.022, 0.005, 0.005)
+    v, f = make_box(0.032, -0.11, 1.65, 0.020, 0.005, 0.005)
     add_detail("Rival_BrowR", v, f, r_skin)
 
-    # Spiky hair (5 main spikes + smaller ones)
-    spike_mat = r_hair
-    spikes = [
-        (0, -0.02, 1.78, 0.02, 0.02, 0.005, 0.005, 0.10),
-        (-0.04, -0.01, 1.77, 0.015, 0.015, 0.004, 0.004, 0.08),
-        (0.04, -0.01, 1.77, 0.015, 0.015, 0.004, 0.004, 0.08),
-        (-0.02, -0.04, 1.77, 0.012, 0.012, 0.003, 0.003, 0.07),
-        (0.02, -0.04, 1.77, 0.012, 0.012, 0.003, 0.003, 0.07),
-        (0, 0.03, 1.76, 0.014, 0.02, 0.004, 0.008, 0.06),
-        (-0.06, 0.01, 1.76, 0.012, 0.014, 0.003, 0.004, 0.065),
-        (0.06, 0.01, 1.76, 0.012, 0.014, 0.003, 0.004, 0.065),
+    crown_spikes = [
+        (0, -0.02, 1.86, 0.018, 0.018, 0.004, 0.004, 0.14),
+        (-0.045, -0.015, 1.85, 0.014, 0.014, 0.003, 0.003, 0.11),
+        (0.045, -0.015, 1.85, 0.014, 0.014, 0.003, 0.003, 0.11),
+        (-0.024, -0.045, 1.84, 0.011, 0.011, 0.002, 0.002, 0.095),
+        (0.024, -0.045, 1.84, 0.011, 0.011, 0.002, 0.002, 0.095),
     ]
-    for i, (cx, cy, cz, sxb, syb, sxt, syt, h) in enumerate(spikes):
+    for i, (cx, cy, cz, sxb, syb, sxt, syt, h) in enumerate(crown_spikes):
         v, f = make_tapered_box(cx, cy, cz, sxb, syb, sxt, syt, h)
-        add_detail(f"Rival_Spike{i}", v, f, spike_mat)
+        add_detail(f"Rival_Crown{i}", v, f, mat_crown)
 
-    # Collar points
-    v, f = make_box(-0.035, -0.10, 1.43, 0.018, 0.005, 0.013)
+    hair_fill = [
+        (0, 0.03, 1.84, 0.012, 0.018, 0.003, 0.007, 0.055),
+        (-0.055, 0.008, 1.83, 0.010, 0.012, 0.003, 0.003, 0.05),
+        (0.055, 0.008, 1.83, 0.010, 0.012, 0.003, 0.003, 0.05),
+    ]
+    for i, (cx, cy, cz, sxb, syb, sxt, syt, h) in enumerate(hair_fill):
+        v, f = make_tapered_box(cx, cy, cz, sxb, syb, sxt, syt, h)
+        add_detail(f"Rival_HairFill{i}", v, f, r_hair)
+
+    v, f = make_box(-0.032, -0.10, 1.46, 0.016, 0.005, 0.012)
     add_detail("Rival_CollarL", v, f, r_suit)
-    v, f = make_box(0.035, -0.10, 1.43, 0.018, 0.005, 0.013)
+    v, f = make_box(0.032, -0.10, 1.46, 0.016, 0.005, 0.012)
     add_detail("Rival_CollarR", v, f, r_suit)
 
     # ── Join and export ──
