@@ -69,6 +69,13 @@ impl GameState {
         }
     }
 
+    pub fn feet_draw_y(&self, x: f32, z: f32) -> f32 {
+        let g = self.ground_y_at(x, z);
+        let lo = (self.walk_surface_y - 0.9).max(self.y_min + 0.02);
+        let hi = self.walk_surface_y + 2.5;
+        g.clamp(lo, hi)
+    }
+
     pub fn set_online(&mut self, v: bool) {
         self.online = v;
     }
