@@ -208,4 +208,4 @@ Neon accents should stay **emissive-only** (Principled BSDF with `Emission Color
 
 ## Runtime lighting (client)
 
-Characters use **`CharacterVertex`** (`pos`, `uv`, **`nrm`**) loaded from glTF normals (or smooth normals computed per primitive if missing). The fragment shader applies **per-vertex** lighting (wrap + stepped “toon” bands + rim toward camera), not a single global normal — without this, meshes read as flat floating masks regardless of Blender detail.
+Characters use **`CharacterVertex`** (`pos`, `uv`, **`nrm`**) loaded from glTF normals (or smooth normals computed per primitive if missing). The fragment shader uses **chiaroscuro**: strong lateral key, **pow**-crushed N·L, **5-stop neon-noir color ramp** (navy → red → orange → yellow), **4×4 Bayer dither** before banding, warm **rim** on the shadow silhouette, then **posterized** output — aimed at the pixel-noir reference rather than soft gradient shading.

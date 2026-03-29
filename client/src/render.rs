@@ -254,8 +254,21 @@ fn vs_char(v: Vin) -> Vout {
   o.world_n = world_n;
   return o;
 }
+fn char_bayer4(p: vec2<i32>) -> f32 {
+    let x = p.x & 3;
+    let y = p.y & 3;
+    let row0 = array<f32, 4>(0.0, 8.0, 2.0, 10.0);
+    let row1 = array<f32, 4>(12.0, 4.0, 14.0, 6.0);
+    let row2 = array<f32, 4>(3.0, 11.0, 1.0, 9.0);
+    let row3 = array<f32, 4>(15.0, 7.0, 13.0, 5.0);
+    if (y == 0) { return row0[x]; }
+    if (y == 1) { return row1[x]; }
+    if (y == 2) { return row2[x]; }
+    return row3[x];
+}
+
 @fragment
-fn fs_char(i: Vout) -> @location(0) vec4<f32> {
+fn fs_char(i: Vout, @builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let anim_row = cu.char_params.w;
 
     var hit_mix = 0.0;
@@ -264,23 +277,50 @@ fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     }
 
     let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
+    let a = t.rgb;
 
     let n = normalize(i.world_n);
-    let light_dir = normalize(vec3<f32>(0.32, 0.85, -0.42));
-    let nd = max(dot(n, light_dir), 0.0);
-    let wrap = 0.42;
-    let diff_raw = clamp((nd + wrap) / (1.0 + wrap), 0.0, 1.0);
-    let toon = floor(diff_raw * 5.0 + 0.15) / 5.0;
-
     let view_dir = normalize(cu.cam_pos.xyz - i.world_pos);
-    let rim = pow(1.0 - max(dot(n, view_dir), 0.0), 2.2) * 0.38;
-    let rim_tint = vec3<f32>(0.2, 0.35, 0.55);
+    // Strong warm key from the side (neon-alley read); minimal fill — chiaroscuro, not ambient wrap.
+    let light_dir = normalize(vec3<f32>(-0.82, 0.38, 0.42));
+    let nd = dot(n, light_dir);
+    // Symmetric N·L → [0,1], then heavy gamma: large shadow mass, narrow hot highlights (ref).
+    let mu_l = clamp(nd * 0.5 + 0.5, 0.0, 1.0);
+    let hard = pow(mu_l, 3.6);
 
-    let ambient = vec3<f32>(0.22, 0.18, 0.24);
-    let key = vec3<f32>(0.72, 0.68, 0.62);
-    let lit = t.rgb * (ambient + key * toon + rim_tint * rim);
+    let px = vec2<i32>(frag_coord.xy);
+    let b = char_bayer4(px);
+    let d = (b + 0.5) / 16.0 - 0.5;
+    let n_levels = 5.0;
+    let scaled = hard * (n_levels - 1.0) + d * 0.9;
+    let band = clamp(floor(scaled + 0.5), 0.0, n_levels - 1.0) / (n_levels - 1.0);
 
-    let flashed = mix(lit, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
+    // Neon-noir ramp (ref): navy black → blood red → magenta-red → orange → yellow.
+    let r0 = vec3<f32>(0.01, 0.016, 0.052);
+    let r1 = vec3<f32>(0.18, 0.03, 0.08);
+    let r2 = vec3<f32>(0.62, 0.1, 0.22);
+    let r3 = vec3<f32>(0.94, 0.36, 0.11);
+    let r4 = vec3<f32>(1.0, 0.88, 0.42);
+    var ramp = r0;
+    ramp = select(ramp, r1, band > 0.06);
+    ramp = select(ramp, r2, band > 0.28);
+    ramp = select(ramp, r3, band > 0.52);
+    ramp = select(ramp, r4, band > 0.76);
+    // Albedo tints the ramp (texture detail) without washing out contrast.
+    let al = max(a, vec3<f32>(0.04));
+    let lit_base = ramp * (0.22 + 0.78 * al);
+
+    // Warm rim on silhouette, stronger on the light-backed side (ref: red/orange edge line).
+    let rim_edge = 1.0 - max(dot(n, view_dir), 0.0);
+    let rim_mask = smoothstep(0.38, 0.96, rim_edge) * smoothstep(0.2, -0.35, nd);
+    let rim_col = vec3<f32>(1.0, 0.32, 0.12) * rim_mask * 1.15;
+
+    var lit = lit_base + rim_col;
+
+    // Snap to a tight palette (pixel-poster), then light per-channel quantize like world_tex.
+    let poster = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 12.0) / 12.0;
+
+    let flashed = mix(poster, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
 
     let wp = i.world_pos;
     let dist = length(wp - cu.cam_pos.xyz);
