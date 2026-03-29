@@ -1,6 +1,6 @@
 # Character Improvement Task Doc
 
-## Status: IN PROGRESS — **canonical GLBs restored** from git `54b228e`; generator script TBD (`docs/CHARACTER_PIPELINE_HANDOFF.md`)
+## Status: IN PROGRESS — generator: `tools/blender_build_oyabaun_characters_3d.py`; refs: `example_images/` + `docs/CHARACTER_PIPELINE_HANDOFF.md`
 
 ## Goal
 
@@ -65,8 +65,9 @@ fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
 | `client/src/npc.rs` | NPC AI, hitboxes, wave spawning, smooth_turn |
 | `client/characters/oyabaun_player.glb` | Boss character model |
 | `client/characters/oyabaun_rival.glb` | Rival character model |
-| `tools/blender_make_oyabaun_character.py` | Safe stub (does not overwrite GLBs); optional `OYABAUN_LEGACY_SPRITE=1` atlas quad |
-| `docs/CHARACTER_PIPELINE_HANDOFF.md` | Questions + checklist to recover skin-modifier Python from Claude |
+| `tools/blender_build_oyabaun_characters_3d.py` | Skin-modifier boss/rival (`OYABAUN_VARIANT`, optional `OYABAUN_CHAR_DECIMATE`) |
+| `tools/blender_make_oyabaun_character.py` | Stub / legacy sprite quad only (`OYABAUN_LEGACY_SPRITE=1`) |
+| `docs/CHARACTER_PIPELINE_HANDOFF.md` | Pipeline answers, material tables, `example_images` list |
 
 ## What Needs Improvement
 

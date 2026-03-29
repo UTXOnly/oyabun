@@ -7,15 +7,14 @@ Characters are built in Blender using Python scripting with the **skin modifier*
 ### Pipeline
 
 ```
+tools/blender_build_oyabaun_characters_3d.py (OYABAUN_VARIANT=boss|rival|all)
 Skin modifier skeleton (joints + edges + radii)
-    → Subdivision level 2 (smooth organic shape)
-    → Decimate to ~30% (~1000 faces)
+    → Subdivision level 2
+    → Decimate (default ~38% faces kept; OYABAUN_CHAR_DECIMATE)
     → Assign materials by face center position
-    → Add detail meshes (glasses, weapons, neon, tie, etc.)
-    → Join all into single mesh
-    → Export GLB with export_yup=True
-    → client/characters/oyabaun_player.glb (boss)
-    → client/characters/oyabaun_rival.glb (rival)
+    → Detail meshes (glasses, weapons, neon, tie, hair, lapels, …)
+    → Join → smart UV → export GLB export_yup=True
+    → client/characters/oyabaun_player.glb | oyabaun_rival.glb
 ```
 
 ### Conventions
@@ -32,13 +31,13 @@ Skin modifier skeleton (joints + edges + radii)
 - Dark suit, broad shoulders, slicked hair
 - Sunglasses, red tie, pistol in right hand
 - Cyan neon accents (lapels, pocket, belt, cuffs)
-- ~1100 verts, 11 materials
+- ~1.5k+ verts joined, up to 13 draw materials (under engine budget)
 
 **Rival** (oyabaun_rival.glb):
 - White/cream suit, lean athletic build, bleached spiky hair
 - Purple glasses, facial scar, katana in left hand
 - Purple neon accents (lapels, collar, belt, katana edge)
-- ~1186 verts, 11 materials
+- ~1.6k verts joined, 11 materials
 
 ### Shader
 
@@ -61,8 +60,9 @@ Skin modifier skeleton (joints + edges + radii)
 
 ### Tooling in repo
 
-- `tools/blender_make_oyabaun_character.py` — **does not regenerate** skin meshes by default (avoids overwriting good GLBs). Optional `OYABAUN_LEGACY_SPRITE=1` rebuilds the old atlas quad only.
-- **`docs/CHARACTER_PIPELINE_HANDOFF.md`** — use to recover the **full skin-modifier Python** from the session that produced commits `4437bd8` / `54b228e`.
+- **`tools/blender_build_oyabaun_characters_3d.py`** — canonical regenerator (skin + details + GLB).
+- `tools/blender_make_oyabaun_character.py` — stub; `OYABAUN_LEGACY_SPRITE=1` = old atlas quad only.
+- **`docs/CHARACTER_PIPELINE_HANDOFF.md`** — material tables, `example_images/`, maintenance log.
 
 ### DEPRECATED — Do NOT Use
 
