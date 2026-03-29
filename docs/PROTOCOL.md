@@ -24,7 +24,7 @@ There is **no** separate `{ "type": "auth", ... }` envelope for gameplay; the cl
 | **24551** | client → relay | Join room: tag `["room","<room_id>"]` (e.g. `default`). |
 | **20420** | client → relay | Input frame: tags `["room","<id>"]`, `["seq","<u64>"]`; `content` is compact JSON (see below). |
 | **24552** | relay → client | Join accepted: `content` JSON includes `your_entity_id`, `room_id`, `tick_rate`, `relay_pubkey_hex`. |
-| **20421** | relay → client | Snapshot: `content` JSON `{ "tick", "players", "you_id" }` (same fields as before). |
+| **20421** | relay → client | Snapshot: `content` JSON `{ "tick", "players", "you_id" }` — each player entry includes **`x`, `y`, `z`, `yaw`** (and health/score) for authoritative pose; the WASM client uses this to place **3D character meshes** in the world. |
 | **24553** | relay → client | Game notice: `content` JSON e.g. `{ "name":"kill", ... }`. |
 
 Kinds **24550–24553** and **20420–20421** are in or adjacent to the **ephemeral** / experimental bands per [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md); this relay does not persist them to disk (only optional JSONL gameplay logging for ops).

@@ -7,6 +7,7 @@ alwaysApply: false
 # Rust client (`client/`)
 
 - **Rendering**: `wgpu` (WebGPU in browser). Math: `glam`. Serialize protocol with `serde` / `serde_json`.
+- **World mesh**: Primary source is the exported level `.glb` (see project rule: no ad-hoc Rust-side world “dressing” geometry unless explicitly requested).
 - **Targets**: `wasm32-unknown-unknown` (primary) and optional native dev via `winit` when enabled.
 - **WASM**: Use `wasm-bindgen`, `wasm-bindgen-futures`, `web-sys` for canvas/document; `console_error_panic_hook` in debug. Avoid blocking the JS event loop — use `spawn_local` / async for init.
 - **Netcode**: Separate simulation tick from render; document what is predicted vs server-confirmed in code modules (`net`, `game`, `render`).

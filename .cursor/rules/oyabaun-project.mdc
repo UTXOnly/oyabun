@@ -13,5 +13,8 @@ alwaysApply: true
 - **Persistence**: Prefer in-memory relay state for MVP; add Postgres only if a feature truly needs it.
 - **Changes**: Minimal diffs, match existing style, no drive-by refactors or unsolicited markdown files.
 - **Git**: After finishing a coherent set of code or config changes, commit on the current branch with a short, imperative message (present tense, one line when possible) so history stays traceable. Prefer small logical commits over one huge dump.
+- **Level art & world detail**: Build in **Blender** and ship via exported `client/levels/*.glb`. Do **not** add client-side procedural world geometry, runtime “dressing” meshes merged into `GltfLevelCpu`, or similar hacks for storefronts/signage/detail unless the user **explicitly** requests that approach.
+- **Dev commands — agent runs them**: The user’s usual workflow is **only** starting/stopping the stack (`oyabaunctl launch` / `stop`). When a task needs `export-world`, `rebuild-level`, `redesign-tokyo-phase1`, `enhance-tokyo-alley`, `wasm-pack`, or headless Blender, the **agent must execute** those commands in the environment and report results — **do not** hand the user a block of shell commands to run themselves unless they explicitly ask for instructions.
+- **Uncertainty**: If requirements are ambiguous or conflict with the art pipeline (e.g. “more street detail” without a Blender change), **ask** before inventing workarounds. Prefer a short clarification over shipping a clever approximation the user did not want.
 
 When changing wire format, update `docs/PROTOCOL.md` and keep client/relay parsers in sync.

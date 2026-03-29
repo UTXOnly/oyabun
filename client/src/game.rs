@@ -18,20 +18,62 @@ pub struct GameState {
     net_tx: f32,
     net_tz: f32,
     solids: Vec<Aabb>,
+    /// Lowest valid feet height (from level bounds); replaces assuming world floor at y=0.
+    y_min: f32,
+    /// When colliders are only tall chunks, `feet_y_on_solids` finds nothing; use spawn height for NPCs / snaps.
+    pub walk_surface_y: f32,
 }
 
 impl GameState {
-    pub fn new(spawn: Vec3, solids: Vec<Aabb>) -> Self {
+    pub fn new(spawn: Vec3, solids: Vec<Aabb>, spawn_yaw: f32, y_min: f32) -> Self {
         Self {
             pos: spawn,
-            yaw: 0.0,
+            yaw: spawn_yaw,
             pitch: 0.0,
             vel_y: 0.0,
             online: false,
             net_tx: spawn.x,
             net_tz: spawn.z,
             solids,
+            y_min,
+            walk_surface_y: spawn.y,
         }
+    }
+
+    fn feet_y_on_solids(&self, x: f32, z: f32) -> f32 {
+        const MAX_FLOOR_LIKE_H: f32 = 3.2;
+        let mut top = self.y_min;
+        for s in &self.solids {
+            if x + RADIUS <= s.min.x || x - RADIUS >= s.max.x {
+                continue;
+            }
+            if z + RADIUS <= s.min.z || z - RADIUS >= s.max.z {
+                continue;
+            }
+            let h = s.max.y - s.min.y;
+            if h > MAX_FLOOR_LIKE_H {
+                continue;
+            }
+            top = top.max(s.max.y);
+        }
+        top + 0.05
+    }
+
+    /// Walkable height under `(x, z)` for drawing NPCs / remotes (not only thin floor colliders).
+    pub fn ground_y_at(&self, x: f32, z: f32) -> f32 {
+        let thin = self.feet_y_on_solids(x, z);
+        if thin > self.y_min + 0.08 {
+            thin
+        } else {
+            self.walk_surface_y
+        }
+    }
+
+    pub fn feet_draw_y(&self, x: f32, z: f32) -> f32 {
+        let g = self.ground_y_at(x, z);
+        let lo = (self.walk_surface_y - 0.9).max(self.y_min + 0.02);
+        let hi = self.walk_surface_y + 2.5;
+        g.clamp(lo, hi)
     }
 
     pub fn set_online(&mut self, v: bool) {
@@ -56,13 +98,13 @@ impl GameState {
             let k = (dt * 12.0).min(0.92);
             self.pos.x += (self.net_tx - self.pos.x) * k;
             self.pos.z += (self.net_tz - self.pos.z) * k;
-            self.pos.y = 0.0;
             self.vel_y = 0.0;
             self.resolve_xz(true, false);
             self.resolve_xz(false, true);
+            self.pos.y = self.ground_y_at(self.pos.x, self.pos.z);
             self.resolve_y();
-            if self.pos.y < 0.0 {
-                self.pos.y = 0.0;
+            if self.pos.y < self.y_min {
+                self.pos.y = self.y_min;
             }
             return;
         }
@@ -101,15 +143,15 @@ impl GameState {
         }
         self.pos.y += self.vel_y * dt;
         self.resolve_y();
-        if self.pos.y < 0.0 {
-            self.pos.y = 0.0;
+        if self.pos.y < self.y_min {
+            self.pos.y = self.y_min;
             self.vel_y = 0.0;
         }
     }
 
     fn grounded(&self) -> bool {
         const EPS: f32 = 0.07;
-        if self.pos.y <= EPS {
+        if self.pos.y <= self.y_min + EPS {
             return true;
         }
         let px = self.pos.x;
@@ -199,8 +241,8 @@ impl GameState {
         let forward = self.view_forward();
         let eye = self.eye_pos();
         let view = Mat4::look_at_rh(eye, eye + forward, Vec3::Y);
-        let mut proj = Mat4::perspective_rh_gl(70_f32.to_radians(), aspect, 0.08, 120.0);
-        proj.y_axis.y *= -1.0;
+        let far = 220.0_f32;
+        let proj = Mat4::perspective_rh(70_f32.to_radians(), aspect, 0.08, far);
         proj * view
     }
 }

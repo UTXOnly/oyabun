@@ -199,6 +199,190 @@ def cmd_stop(_: argparse.Namespace) -> None:
     print("stopped relay + web (process groups + port sweep)")
 
 
+def _blender_exe(ns: argparse.Namespace | None = None) -> str:
+    if ns is not None and getattr(ns, "blender", None):
+        return ns.blender
+    return os.environ.get("BLENDER", "blender")
+
+
+def _resolve_blender_executable(ns: argparse.Namespace | None) -> str:
+    import shutil
+
+    exe = _blender_exe(ns)
+    ep = Path(exe)
+    if ep.is_file():
+        return str(ep.resolve())
+    w = shutil.which(exe)
+    if not w and sys.platform == "darwin":
+        mac_blender = Path("/Applications/Blender.app/Contents/MacOS/Blender")
+        if mac_blender.is_file():
+            w = str(mac_blender)
+    if not w:
+        sys.stderr.write(
+            f"oyabaunctl: Blender not found ({exe!r}). "
+            "Install Blender, put it on PATH, set BLENDER, or pass --blender /path/to/blender\n"
+        )
+        sys.exit(1)
+    return w
+
+
+def _default_tokyo_blend() -> Path:
+    return (ROOT / "client" / "levels" / "tokyo_alley.blend").resolve()
+
+
+def cmd_redesign_tokyo_phase1(ns: argparse.Namespace) -> None:
+    """Run tools/blender_redesign_tokyo_alley_phase1.py (shop recess + awnings + blade signs)."""
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"redesign-tokyo-phase1: blend not found: {blend}\n")
+        sys.exit(1)
+    script = ROOT / "tools" / "blender_redesign_tokyo_alley_phase1.py"
+    if not script.is_file():
+        sys.stderr.write(f"redesign-tokyo-phase1: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    print(f"redesign-tokyo-phase1: {blend}", flush=True)
+    subprocess.run(
+        [exe, str(blend), "--background", "--python", str(script)],
+        cwd=ROOT,
+        check=True,
+    )
+    print("redesign-tokyo-phase1: done (run export-world --force-all to repack + export)", flush=True)
+    if ns.export_after:
+        cmd_export_world(
+            argparse.Namespace(
+                blend=str(blend),
+                enhance=True,
+                repack=True,
+                force_all=False,
+                fmt="both",
+                blender=ns.blender,
+                output_glb=None,
+                output_json=None,
+            )
+        )
+
+
+def cmd_enhance_tokyo_alley(ns: argparse.Namespace) -> None:
+    """Run tools/blender_enhance_tokyo_alley.py (packed glTF-ready albedos, strip OyabaunTokyoDetail)."""
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"enhance-tokyo-alley: blend not found: {blend}\n")
+        sys.exit(1)
+    script = ROOT / "tools" / "blender_enhance_tokyo_alley.py"
+    if not script.is_file():
+        sys.stderr.write(f"enhance-tokyo-alley: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    env = os.environ.copy()
+    if ns.repack:
+        env["OYABAUN_REPACK_ALBEDOS"] = "1"
+    print(f"enhance-tokyo-alley: {blend}", flush=True)
+    subprocess.run(
+        [exe, str(blend), "--background", "--python", str(script)],
+        cwd=ROOT,
+        env=env,
+        check=True,
+    )
+    print("enhance-tokyo-alley: done", flush=True)
+
+
+def cmd_import_glb(ns: argparse.Namespace) -> None:
+    """Copy a hand-exported .glb into client/levels/tokyo_alley.glb (optional wasm-pack)."""
+    import shutil
+
+    src = Path(ns.glb).expanduser().resolve()
+    if not src.is_file():
+        sys.stderr.write(f"import-glb: file not found: {src}\n")
+        sys.exit(1)
+    if src.suffix.lower() != ".glb":
+        sys.stderr.write("import-glb: expected a .glb file\n")
+        sys.exit(1)
+    dest = ROOT / "client" / "levels" / "tokyo_alley.glb"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    print(f"import-glb: {src} -> {dest}")
+    if ns.rebuild:
+        subprocess.run(
+            ["wasm-pack", "build", "--target", "web", "--out-dir", "pkg"],
+            cwd=ROOT / "client",
+            check=True,
+        )
+        print("wasm client rebuilt -> client/pkg/")
+    else:
+        print("import-glb: run: python3 tools/oyabaunctl.py rebuild --wasm-only")
+
+
+def cmd_export_world(ns: argparse.Namespace) -> None:
+    """Run Blender headless to write client/levels/tokyo_alley.glb and/or tokyo_street.json."""
+    if ns.force_all:
+        ns.enhance = True
+        ns.repack = True
+        print("export-world: --force-all → enhance + repack + export", flush=True)
+
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"export-world: blend file not found: {blend}\n")
+        sys.exit(1)
+
+    if ns.enhance:
+        cmd_enhance_tokyo_alley(
+            argparse.Namespace(blend=str(blend), repack=ns.repack, blender=ns.blender)
+        )
+
+    exe = _resolve_blender_executable(ns)
+
+    levels = ROOT / "client" / "levels"
+    levels.mkdir(parents=True, exist_ok=True)
+    out_glb = Path(ns.output_glb).expanduser().resolve() if ns.output_glb else levels / "tokyo_alley.glb"
+    out_json = Path(ns.output_json).expanduser().resolve() if ns.output_json else levels / "tokyo_street.json"
+
+    glb_script = ROOT / "tools" / "blender_export_gltf_oyabaun.py"
+    json_script = ROOT / "tools" / "blender_export_oyabaun.py"
+    if ns.fmt in ("glb", "both") and not glb_script.is_file():
+        sys.stderr.write(f"export-world: missing {glb_script}\n")
+        sys.exit(1)
+    if ns.fmt in ("json", "both") and not json_script.is_file():
+        sys.stderr.write(f"export-world: missing {json_script}\n")
+        sys.exit(1)
+
+    base_cmd = [exe, str(blend), "--background"]
+
+    if ns.fmt in ("glb", "both"):
+        env = os.environ.copy()
+        env["OYABAUN_GLB_OUT"] = str(out_glb)
+        print(f"export-world: glTF -> {out_glb}", flush=True)
+        subprocess.run([*base_cmd, "--python", str(glb_script)], cwd=ROOT, env=env, check=True)
+
+    if ns.fmt in ("json", "both"):
+        env = os.environ.copy()
+        env["OYABAUN_OUT"] = str(out_json)
+        print(f"export-world: JSON  -> {out_json}", flush=True)
+        subprocess.run([*base_cmd, "--python", str(json_script)], cwd=ROOT, env=env, check=True)
+
+    print("export-world: done (serve from client/; see docs/BLENDER_GLTF.md)", flush=True)
+
+
+def cmd_rebuild_level(ns: argparse.Namespace) -> None:
+    """Full Tokyo level pipeline: repack all albedos, export GLB + JSON, optional wasm-pack."""
+    print("rebuild-level: full refresh (repack → glTF → JSON" + (" → wasm" if ns.wasm else "") + ")", flush=True)
+    cmd_export_world(
+        argparse.Namespace(
+            blend=ns.blend,
+            enhance=True,
+            repack=True,
+            force_all=False,
+            fmt=ns.fmt,
+            blender=ns.blender,
+            output_glb=ns.output_glb,
+            output_json=ns.output_json,
+        )
+    )
+    if ns.wasm:
+        cmd_rebuild(argparse.Namespace(wasm=True, relay=False))
+    print("rebuild-level: done", flush=True)
+
+
 def cmd_rebuild(ns: argparse.Namespace) -> None:
     if ns.wasm:
         subprocess.run(
@@ -360,6 +544,128 @@ def main() -> None:
     sp.add_argument("--wasm-only", action="store_true", dest="wasm", help="only wasm-pack")
     sp.add_argument("--relay-only", action="store_true", dest="relay", help="only go build")
     sp.set_defaults(func=cmd_rebuild, wasm=False, relay=False)
+
+    sp = sub.add_parser(
+        "export-world",
+        help="export a .blend to client/levels (glTF .glb for WASM, optional vertex JSON fallback)",
+    )
+    sp.add_argument(
+        "--blend",
+        default=None,
+        help="path to Blender .blend (default: client/levels/tokyo_alley.blend)",
+    )
+    sp.add_argument(
+        "--enhance",
+        action="store_true",
+        help="run enhance-tokyo-alley first (packed albedos for glTF; use with --repack to rebuild all)",
+    )
+    sp.add_argument(
+        "--repack",
+        action="store_true",
+        help="with --enhance: set OYABAUN_REPACK_ALBEDOS (rebuild every OyabaunPx_ texture)",
+    )
+    sp.add_argument(
+        "--force-all",
+        action="store_true",
+        dest="force_all",
+        help="shorthand for --enhance --repack (full albedo rebuild then GLB/JSON export)",
+    )
+    sp.add_argument(
+        "--format",
+        dest="fmt",
+        choices=("glb", "json", "both"),
+        default="both",
+        help="glb= textured level only, json= legacy vertex export, both= run both (default)",
+    )
+    sp.add_argument(
+        "--blender",
+        default=None,
+        help="Blender executable (default: $BLENDER env or 'blender' on PATH)",
+    )
+    sp.add_argument(
+        "--output-glb",
+        default=None,
+        help="output .glb path (default: <repo>/client/levels/tokyo_alley.glb)",
+    )
+    sp.add_argument(
+        "--output-json",
+        default=None,
+        help="output JSON path (default: <repo>/client/levels/tokyo_street.json)",
+    )
+    sp.set_defaults(func=cmd_export_world, enhance=False, repack=False, force_all=False)
+
+    sp = sub.add_parser(
+        "rebuild-level",
+        help="Tokyo alley: repack every packed albedo, export .glb + legacy JSON (optional wasm-pack)",
+    )
+    sp.add_argument(
+        "--blend",
+        default=None,
+        help="path to Blender .blend (default: client/levels/tokyo_alley.blend)",
+    )
+    sp.add_argument(
+        "--wasm",
+        action="store_true",
+        help="run wasm-pack after export (refresh include_bytes! embedded GLB in the bundle)",
+    )
+    sp.add_argument(
+        "--format",
+        dest="fmt",
+        choices=("glb", "json", "both"),
+        default="both",
+        help="same as export-world (default: both)",
+    )
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.add_argument("--output-glb", default=None, help="output .glb path (default: client/levels/tokyo_alley.glb)")
+    sp.add_argument("--output-json", default=None, help="output JSON path (default: client/levels/tokyo_street.json)")
+    sp.set_defaults(func=cmd_rebuild_level, wasm=False)
+
+    sp = sub.add_parser(
+        "enhance-tokyo-alley",
+        help="pack pixel albedos in Tokyo alley .blend (glTF-safe textures; removes OyabaunTokyoDetail if present)",
+    )
+    sp.add_argument(
+        "--blend",
+        default=None,
+        help="path to .blend (default: client/levels/tokyo_alley.blend)",
+    )
+    sp.add_argument(
+        "--repack",
+        action="store_true",
+        help="rebuild all packed materials (OYABAUN_REPACK_ALBEDOS)",
+    )
+    sp.add_argument(
+        "--blender",
+        default=None,
+        help="Blender executable (default: $BLENDER env or 'blender' on PATH)",
+    )
+    sp.set_defaults(func=cmd_enhance_tokyo_alley, repack=False)
+
+    sp = sub.add_parser(
+        "redesign-tokyo-phase1",
+        help="Tokyo alley CURSOR_LEVEL_REDESIGN phase 1: add shop recesses, awnings, blade signs (see tools/blender_redesign_tokyo_alley_phase1.py)",
+    )
+    sp.add_argument("--blend", default=None, help="path to .blend (default: client/levels/tokyo_alley.blend)")
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.add_argument(
+        "--export-after",
+        action="store_true",
+        dest="export_after",
+        help="run export-world with enhance+repack after (same as rebuild-level content-wise)",
+    )
+    sp.set_defaults(func=cmd_redesign_tokyo_phase1, export_after=False)
+
+    sp = sub.add_parser(
+        "import-glb",
+        help="copy an existing .glb to client/levels/tokyo_alley.glb (then rebuild wasm to refresh embed)",
+    )
+    sp.add_argument("glb", help="path to source .glb (e.g. ~/Desktop/oyabaun-av/oyabaun-level-1.glb)")
+    sp.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="run wasm-pack after copy (needed for include_bytes! embedded level)",
+    )
+    sp.set_defaults(func=cmd_import_glb)
 
     sp = sub.add_parser("launch", help="start relay binary + static client (http.server)")
     sp.add_argument("--docker", action="store_true", help="docker compose relay instead of local binary")

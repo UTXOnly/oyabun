@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta http-equiv="Cache-Control" content="no-cache" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Oyabaun</title>
     <style>
@@ -66,6 +67,51 @@
       }
       #crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
       #crosshair::after { left: 0; top: 6px; width: 14px; height: 2px; }
+      #crosshair.hit::before, #crosshair.hit::after {
+        background: rgba(255, 255, 60, 1.0);
+        box-shadow: 0 0 14px rgba(255, 255, 60, 0.8);
+      }
+      #hitmarker {
+        pointer-events: none;
+        position: fixed;
+        left: 50%; top: 50%;
+        width: 24px; height: 24px;
+        margin: -12px 0 0 -12px;
+        z-index: 4;
+        opacity: 0;
+        transition: opacity 0.08s;
+      }
+      #hitmarker.show { opacity: 1; }
+      #hitmarker::before, #hitmarker::after {
+        content: "";
+        position: absolute;
+        background: rgba(255, 60, 60, 0.95);
+        box-shadow: 0 0 6px rgba(255, 0, 0, 0.6);
+      }
+      /* X-shaped hit marker */
+      #hitmarker::before {
+        left: 3px; top: 3px; width: 18px; height: 2px;
+        transform: rotate(45deg);
+        transform-origin: center;
+      }
+      #hitmarker::after {
+        left: 3px; top: 3px; width: 18px; height: 2px;
+        transform: rotate(-45deg);
+        transform-origin: center;
+      }
+      #kill-text {
+        pointer-events: none;
+        position: fixed;
+        left: 50%; top: 42%;
+        transform: translateX(-50%);
+        font-size: 1.4rem;
+        color: #ff3333;
+        text-shadow: 0 0 8px rgba(255,0,0,0.6);
+        z-index: 5;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+      #kill-text.show { opacity: 1; }
       #hint {
         position: fixed;
         bottom: 4rem;
@@ -166,6 +212,8 @@
       <canvas id="game-canvas" width="1280" height="720" tabindex="0" class="request-pointer"></canvas>
     </div>
     <div id="crosshair" hidden></div>
+    <div id="hitmarker"></div>
+    <div id="kill-text"></div>
     <div id="hint">Relay <code>ws://HOST:8765/ws</code> · <code>1–4</code> weapons · <code>Q</code>/<code>E</code> cycle · <code>R</code> reload</div>
     <div id="doom-bar" aria-label="status">
       <div id="doom-face">◉</div>
@@ -185,7 +233,7 @@
       </div>
     </div>
     <script type="module">
-      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js";
+      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260328e";
 
       function relayWsUrl() {
         const p = location.protocol === "https:" ? "wss" : "ws";
@@ -228,7 +276,7 @@
           try {
             const img = document.createElement("img");
             img.crossOrigin = "anonymous";
-            img.src = "./fpsweapons/" + files[i];
+            img.src = "./fpsweapons/" + files[i] + "?v=" + Date.now();
             await new Promise((res, rej) => {
               img.onload = res;
               img.onerror = rej;
@@ -244,7 +292,7 @@
         try {
           const img = document.createElement("img");
           img.crossOrigin = "anonymous";
-          img.src = "./fpsweapons/arms.png";
+          img.src = "./fpsweapons/arms.png?v=" + Date.now();
           await new Promise((res, rej) => {
             img.onload = res;
             img.onerror = rej;
@@ -252,21 +300,6 @@
           app.uploadArmsSprite(img);
         } catch (e) {
           console.warn("fpsweapons/arms.png", e);
-        }
-      }
-
-      async function loadBossSprite(app) {
-        try {
-          const img = document.createElement("img");
-          img.crossOrigin = "anonymous";
-          img.src = "./boss.png";
-          await new Promise((res, rej) => {
-            img.onload = res;
-            img.onerror = rej;
-          });
-          app.uploadBossSprite(img);
-        } catch (e) {
-          console.warn("boss.png", e);
         }
       }
 
@@ -296,12 +329,41 @@
         }
       }
 
+      function syncCanvasBackingStore(canvas) {
+        const r = canvas.getBoundingClientRect();
+        const w = Math.max(1, Math.floor(r.width * devicePixelRatio));
+        const h = Math.max(1, Math.floor(r.height * devicePixelRatio));
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        return { w, h };
+      }
+
       async function main() {
         await init();
         const canvas = document.getElementById("game-canvas");
         const hud = document.getElementById("hud");
         const cross = document.getElementById("crosshair");
+        await new Promise(requestAnimationFrame);
+        let { w, h } = syncCanvasBackingStore(canvas);
         const app = await createOyabaunApp(canvas);
+        ({ w, h } = syncCanvasBackingStore(canvas));
+        app.resize(w, h);
+        window._oyaApp = app;  // expose for debugging
+
+        let dbg = {};
+        try {
+          dbg = JSON.parse(app.bootDebugJson());
+          console.info("oyabaun boot:", dbg);
+        } catch (_) {}
+        setTimeout(() => {
+          try {
+            console.info("oyabaun renderDebug (call anytime: JSON.parse(window._oyaApp.renderDebugJson()))", JSON.parse(app.renderDebugJson()));
+          } catch (e) {
+            console.warn("renderDebugJson failed", e);
+          }
+        }, 2500);
 
         try {
           await loadSprite(app);
@@ -313,8 +375,11 @@
         } catch (e) {
           console.warn("weapon sprites", e);
         }
-        await loadArmsSprite(app);
-        await loadBossSprite(app);
+        try {
+          await loadArmsSprite(app);
+        } catch (e) {
+          console.warn("arms sprite", e);
+        }
 
         const ws = new WebSocket(relayWsUrl());
         let nostrAuthed = false;
@@ -382,8 +447,19 @@
         document.addEventListener("mousemove", (e) => {
           if (document.pointerLockElement === canvas) app.mouse_accum(e.movementX, e.movementY);
         });
-        canvas.addEventListener("mousedown", (e) => {
-          if (e.button === 0 && document.pointerLockElement === canvas) app.shoot_press();
+        // Shoot on mousedown OR click — covers all browsers and pointer lock modes
+        function tryShoot(e) {
+          if (e.button !== 0) return;
+          if (document.pointerLockElement === canvas) {
+            app.shoot_press();
+          }
+        }
+        document.addEventListener("mousedown", tryShoot);
+        document.addEventListener("click", (e) => {
+          // Fallback: also fire on click if pointer is locked
+          if (document.pointerLockElement === canvas) {
+            app.shoot_press();
+          }
         });
         window.addEventListener("keydown", (e) => {
           if (e.repeat) return;
@@ -424,12 +500,46 @@
           } catch (_) {}
         }
 
+        const hitmarker = document.getElementById("hitmarker");
+        const killText = document.getElementById("kill-text");
+        let hitTimer = 0;
+        let killTimer = 0;
+
         const loop = (t) => {
           drainNet(ws, app);
           app.tick(t);
           app.render_frame();
           hud.textContent = app.hud_text();
           updateDoomBar(app);
+
+          // Hit marker feedback
+          if (app.take_hit()) {
+            hitmarker.classList.add("show");
+            cross.classList.add("hit");
+            hitTimer = 8; // frames
+          }
+          if (hitTimer > 0) {
+            hitTimer--;
+            if (hitTimer <= 0) {
+              hitmarker.classList.remove("show");
+              cross.classList.remove("hit");
+            }
+          }
+
+          // Kill text feedback
+          const kill = app.take_kill();
+          if (kill.length > 0) {
+            killText.textContent = kill + " ELIMINATED";
+            killText.classList.add("show");
+            killTimer = 120; // ~2 seconds
+          }
+          if (killTimer > 0) {
+            killTimer--;
+            if (killTimer <= 0) {
+              killText.classList.remove("show");
+            }
+          }
+
           requestAnimationFrame(loop);
         };
         requestAnimationFrame(loop);

@@ -42,8 +42,9 @@ type Room struct {
 	stopTick chan struct{}
 }
 
+// Match exported Tokyo alley (glTF ~ z −32…+32; main façades near z ≈ −26).
 var spawnXZ = [][2]float64{
-	{0, 9}, {0, -9}, {9, 0}, {-9, 0}, {7, 7}, {-7, -7}, {-7, 7}, {7, -7},
+	{0, -20}, {0, -14}, {2.5, -22}, {-2.5, -22}, {4, -18}, {-4, -18}, {0, -26}, {3, -16},
 }
 
 func NewRoom(id string, hub *Hub) *Room {
@@ -67,7 +68,7 @@ func (r *Room) AddPlayer(s *session) int {
 		ID:     id,
 		Pubkey: s.pubkey,
 		X:      sp[0],
-		Y:      0,
+		Y:      1.0, // glTF alley feet ~ +1 Y; client still snaps to floor under XZ for draw
 		Z:      sp[1],
 		Yaw:    0,
 		Health: 100,
@@ -85,7 +86,7 @@ func (r *Room) RemovePlayer(id int) {
 
 func (r *Room) respawn(p *Player) {
 	sp := spawnXZ[(p.ID-1)%len(spawnXZ)]
-	p.X, p.Y, p.Z = sp[0], 0, sp[1]
+	p.X, p.Y, p.Z = sp[0], 1.0, sp[1]
 	p.Health = 100
 	p.Yaw = 0
 }

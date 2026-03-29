@@ -35,7 +35,8 @@ description: >-
 ## Dev
 
 - Relay: `cd relay && go run ./cmd/oyabaun-relay` (or Docker Compose from repo root).
-- Control script: `tools/oyabaunctl.py` (state under `.oyabaun/`).
+- **Agent runs `oyabaunctl` / Blender / wasm-pack** when level or build work is needed; the user typically only starts/stops the server — do not reply with copy-paste command lists unless asked.
+- Control script: `tools/oyabaunctl.py` (state under `.oyabaun/`). Export levels: `python3 tools/oyabaunctl.py export-world` (default blend `client/levels/tokyo_alley.blend`) → `client/levels/tokyo_alley.glb` (+ JSON). Tokyo packed albedos: `export-world --enhance` or `enhance-tokyo-alley`. Full rebuild (repack + export): `export-world --force-all` or `rebuild-level` (optional `rebuild-level --wasm` for wasm-pack). Redesign Phase 1 (shop recess / awnings / blade signs): `redesign-tokyo-phase1` (optional `--export-after`).
 - Client static: serve `client/pkg/` after wasm-pack, or use `python3 -m http.server` from `client/` with correct headers if needed.
 
 ## Conventions

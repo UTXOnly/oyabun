@@ -11,7 +11,7 @@ Nostr-native multiplayer FPS (MVP): Rust + WebGPU in the browser, specialized Go
 | `protocol/` | Schema stubs + pointers to `docs/PROTOCOL.md` |
 | `docs/` | Architecture and protocol |
 | `infra/` | Docker Compose for the relay |
-| `example_images/` | Reference clips for character / tone — not loaded by the client yet |
+| `example_images/` | Local art-direction refs (e.g. 90s pixel Tokyo vibe: `sokes1.png`, `soke*.mp4`) — not loaded by the client |
 
 ## Dev CLI (`tools/oyabaunctl.py`)
 
@@ -24,6 +24,12 @@ python3 tools/oyabaunctl.py launch               # relay binary + http.server on
 python3 tools/oyabaunctl.py launch --build       # rebuild then launch
 python3 tools/oyabaunctl.py launch --docker      # relay via Docker Compose only
 python3 tools/oyabaunctl.py stop                 # stop tracked local pids or compose down
+python3 tools/oyabaunctl.py export-world             # tokyo_alley.blend → levels/*.glb (+ JSON)
+python3 tools/oyabaunctl.py export-world --enhance     # pack glTF albedos, then export
+python3 tools/oyabaunctl.py export-world --force-all   # repack all albedos + export (full level refresh)
+python3 tools/oyabaunctl.py rebuild-level              # same as --force-all; add --wasm to wasm-pack after
+python3 tools/oyabaunctl.py enhance-tokyo-alley        # albedo pass only (optional --repack)
+python3 tools/oyabaunctl.py redesign-tokyo-phase1     # shop recess + awnings + blade signs (optional --export-after)
 ```
 
 Logs: `.oyabaun/relay.log`, `.oyabaun/http.log`. State: `.oyabaun/state.json`.
