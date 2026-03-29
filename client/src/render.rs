@@ -913,11 +913,11 @@ impl Gpu {
                 }
             };
 
-        let character = character_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_player.glb"));
         #[cfg(target_arch = "wasm32")]
         if character_level.is_none() {
             warn_str("oyabaun: no oyabaun_player.glb parsed — run tools/blender_make_oyabaun_character.py and wasm-pack build");
         }
+        let character = character_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_player.glb"));
 
         let character_rival =
             character_rival_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_rival.glb"));
