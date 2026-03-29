@@ -703,6 +703,9 @@ pub struct Gpu {
     pub arms_ready: bool,
     character: Option<CharacterDraw>,
     character_rival: Option<CharacterDraw>,
+    // Character sprite atlas billboard rendering
+    char_sprite_bg: Option<wgpu::BindGroup>,
+    _char_sprite_tex: Option<wgpu::Texture>,
     diag_last_surface_ok: bool,
     diag_last_surface_error: String,
     diag_frames_submitted: u64,
@@ -1114,6 +1117,60 @@ impl Gpu {
         let character_rival =
             character_rival_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_rival.glb"));
 
+        // Load character sprite atlas for billboard rendering
+        const BOSS_ATLAS_RGBA: &[u8] = include_bytes!("../characters/boss_v3_atlas.rgba");
+        let (char_sprite_bg, _char_sprite_tex) = if BOSS_ATLAS_RGBA.len() > 8 {
+            let atlas_w = u32::from_le_bytes([BOSS_ATLAS_RGBA[0], BOSS_ATLAS_RGBA[1], BOSS_ATLAS_RGBA[2], BOSS_ATLAS_RGBA[3]]);
+            let atlas_h = u32::from_le_bytes([BOSS_ATLAS_RGBA[4], BOSS_ATLAS_RGBA[5], BOSS_ATLAS_RGBA[6], BOSS_ATLAS_RGBA[7]]);
+            let rgba_data = &BOSS_ATLAS_RGBA[8..];
+            let expected = (atlas_w * atlas_h * 4) as usize;
+            if rgba_data.len() >= expected {
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("char-sprite-atlas"),
+                    size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &tex, mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All,
+                    },
+                    &rgba_data[..expected],
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * atlas_w),
+                        rows_per_image: Some(atlas_h),
+                    },
+                    wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
+                );
+                let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                    label: Some("char-sprite-samp"),
+                    mag_filter: wgpu::FilterMode::Nearest,
+                    min_filter: wgpu::FilterMode::Nearest,
+                    ..Default::default()
+                });
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("char-sprite-bg"),
+                    layout: &sprite_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+                    ],
+                });
+                (Some(bg), Some(tex))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
         let (depth, depth_view) = create_depth(&device, width, height);
 
         Ok(Gpu {
@@ -1148,6 +1205,8 @@ impl Gpu {
             arms_ready: false,
             character,
             character_rival,
+            char_sprite_bg,
+            _char_sprite_tex,
             diag_last_surface_ok: true,
             diag_last_surface_error: String::new(),
             diag_frames_submitted: 0,
@@ -2088,8 +2147,76 @@ impl Gpu {
         // Gun billboards removed — they created a distracting floating gun
         // near NPC faces; the character atlas already includes weapon sprites.
         let mural_idx_count: u32 = (mural_vert_count / 4 * 6) as u32;
+
+        // Character sprite billboards
+        let char_quad_start = bill_cpu.len();
+        if self.char_sprite_bg.is_some() {
+            for ci in &capped {
+                let m = ci.model.to_cols_array_2d();
+                let foot = Vec3::new(m[3][0], m[3][1], m[3][2]);
+
+                // Character sprite billboard: camera-facing quad
+                let char_h = 2.0_f32; // world-space height
+                let char_w = 2.0_f32; // world-space width (square cells)
+                let center = foot + Vec3::new(0.0, char_h * 0.5, 0.0);
+
+                // Camera-facing right/up vectors (billboard)
+                let to_cam = cam_pos - center;
+                let to_cam_xz = Vec3::new(to_cam.x, 0.0, to_cam.z);
+                let len_xz = to_cam_xz.length();
+                let right = if len_xz > 0.001 {
+                    Vec3::new(-to_cam_xz.z, 0.0, to_cam_xz.x) / len_xz
+                } else {
+                    Vec3::new(1.0, 0.0, 0.0)
+                };
+                let up = Vec3::new(0.0, 1.0, 0.0);
+
+                let half_w = char_w * 0.5;
+                let half_h = char_h * 0.5;
+                let bl = center - right * half_w - up * half_h;
+                let br = center + right * half_w - up * half_h;
+                let tr = center + right * half_w + up * half_h;
+                let tl = center - right * half_w + up * half_h;
+
+                // Compute direction column from relative angle
+                // Bearing FROM character TO camera (matches yaw convention: yaw=0 is -Z)
+                let cam_bearing = (cam_pos.x - foot.x).atan2(-(cam_pos.z - foot.z));
+                let char_yaw = ci.mesh_yaw;
+                let rel = cam_bearing - char_yaw;
+                // Normalize to [0, 2pi)
+                let rel_norm = ((rel % (2.0 * std::f32::consts::PI)) + 2.0 * std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
+                // Quantize to 8 directions: 0=S, 1=SW, 2=W, 3=NW, 4=N, 5=NE, 6=E, 7=SE
+                let col = ((rel_norm + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as u32 % 8;
+
+                // Compute animation row
+                let row = if ci.anim_frame >= 1.0 && ci.anim_frame <= 6.0 {
+                    ci.anim_frame.floor() as u32
+                } else {
+                    0u32 // idle
+                };
+
+                // Atlas UV: 8 cols x 7 rows
+                let u0 = col as f32 / 8.0;
+                let u1 = (col as f32 + 1.0) / 8.0;
+                let v0 = row as f32 / 7.0;
+                let v1 = (row as f32 + 1.0) / 7.0;
+
+                let corners = [bl, br, tr, tl];
+                let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
+                for j in 0..4 {
+                    bill_cpu.push(BillVertex {
+                        pos: corners[j].to_array(),
+                        uv: uvs[j],
+                    });
+                }
+            }
+        }
+        let char_quad_count = bill_cpu.len() - char_quad_start;
+        let char_idx_start = (char_quad_start / 4 * 6) as u32;
+        let char_idx_count = (char_quad_count / 4 * 6) as u32;
+
         let bill_idx_count: u32 = (bill_cpu.len() / 4 * 6) as u32;
-        let gun_idx_count: u32 = bill_idx_count.saturating_sub(mural_idx_count);
+        let gun_idx_count: u32 = bill_idx_count.saturating_sub(mural_idx_count).saturating_sub(char_idx_count);
 
         if !bill_cpu.is_empty() {
             self.queue
@@ -2188,18 +2315,20 @@ impl Gpu {
         };
 
         let draw_boss_batch = |pass: &mut wgpu::RenderPass<'_>| {
-            if let Some(ref cd) = self.character {
-                if !boss_like.is_empty() {
-                    pass.set_pipeline(&cd.pipeline);
-                    pass.set_vertex_buffer(0, cd.vb.slice(..));
-                    pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
-                    let stride = cd.char_uniform_stride;
-                    for i in 0..boss_like.len() {
-                        pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
-                        for b in &cd.batches {
-                            pass.set_bind_group(1, &b.bind_group, &[]);
-                            let end = b.first_index.saturating_add(b.index_count);
-                            pass.draw_indexed(b.first_index..end, 0, 0..1);
+            if self.char_sprite_bg.is_none() {
+                if let Some(ref cd) = self.character {
+                    if !boss_like.is_empty() {
+                        pass.set_pipeline(&cd.pipeline);
+                        pass.set_vertex_buffer(0, cd.vb.slice(..));
+                        pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
+                        let stride = cd.char_uniform_stride;
+                        for i in 0..boss_like.len() {
+                            pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                            for b in &cd.batches {
+                                pass.set_bind_group(1, &b.bind_group, &[]);
+                                let end = b.first_index.saturating_add(b.index_count);
+                                pass.draw_indexed(b.first_index..end, 0, 0..1);
+                            }
                         }
                     }
                 }
@@ -2207,18 +2336,20 @@ impl Gpu {
         };
 
         let draw_rival_batch = |pass: &mut wgpu::RenderPass<'_>| {
-            if !rivals.is_empty() {
-                if let Some(cd) = self.character_rival.as_ref().or(self.character.as_ref()) {
-                    pass.set_pipeline(&cd.pipeline);
-                    pass.set_vertex_buffer(0, cd.vb.slice(..));
-                    pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
-                    let stride = cd.char_uniform_stride;
-                    for i in 0..rivals.len() {
-                        pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
-                        for b in &cd.batches {
-                            pass.set_bind_group(1, &b.bind_group, &[]);
-                            let end = b.first_index.saturating_add(b.index_count);
-                            pass.draw_indexed(b.first_index..end, 0, 0..1);
+            if self.char_sprite_bg.is_none() {
+                if !rivals.is_empty() {
+                    if let Some(cd) = self.character_rival.as_ref().or(self.character.as_ref()) {
+                        pass.set_pipeline(&cd.pipeline);
+                        pass.set_vertex_buffer(0, cd.vb.slice(..));
+                        pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
+                        let stride = cd.char_uniform_stride;
+                        for i in 0..rivals.len() {
+                            pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                            for b in &cd.batches {
+                                pass.set_bind_group(1, &b.bind_group, &[]);
+                                let end = b.first_index.saturating_add(b.index_count);
+                                pass.draw_indexed(b.first_index..end, 0, 0..1);
+                            }
                         }
                     }
                 }
@@ -2242,7 +2373,13 @@ impl Gpu {
             if gun_idx_count > 0 && self.character.is_some() {
                 if let Some(bg) = self.weapon_bind_groups.get(0) {
                     pass.set_bind_group(1, bg, &[]);
-                    pass.draw_indexed(mural_idx_count..bill_idx_count, 0, 0..1);
+                    pass.draw_indexed(mural_idx_count..mural_idx_count + gun_idx_count, 0, 0..1);
+                }
+            }
+            if char_idx_count > 0 {
+                if let Some(ref bg) = self.char_sprite_bg {
+                    pass.set_bind_group(1, bg, &[]);
+                    pass.draw_indexed(char_idx_start..char_idx_start + char_idx_count, 0, 0..1);
                 }
             }
         };
