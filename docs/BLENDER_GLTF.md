@@ -12,7 +12,7 @@ python3 tools/oyabaunctl.py export-world --blend /path/to/your_scene.blend
 
 ### Optional: Tokyo alley materials (Blender-only)
 
-`tools/blender_enhance_tokyo_alley.py` **removes** legacy collection **`OyabaunTokyoDetail`** (old script-generated street clutter) if present, then adds **procedural texture** to existing façade materials (`OYA_*`, signs, neon, etc.). It does **not** spawn new props in the lane. Re-running is idempotent.
+`tools/blender_enhance_tokyo_alley.py` **removes** legacy collection **`OyabaunTokyoDetail`** (old script-generated street clutter) if present, then assigns **packed 96×96 pixel albedos** (Image Texture → Principled) on materials used by mesh objects so **glTF embeds real textures**. Purely procedural node trees **do not** export to `.glb` (they become white in-game). Re-running skips materials already using **`OyabaunPx_`*** images; set **`OYABAUN_REPACK_ALBEDOS=1`** to rebuild them. Skips **`Gun_*`** / **`FPS_*`** so first-person meshes in the same blend keep their factors. It does **not** spawn new props in the lane.
 
 **Art direction:** compare exports against refs in repo-root **`example_images/`** (e.g. `sokes1.png`, `soke*.mp4`).
 
