@@ -234,7 +234,7 @@ client/
     render.rs                          # SHADER_CHAR_TEX, raster_character_gltf, draw
     gltf_level.rs                      # parse_character_glb
     lib.rs                             # character_models Vec<Mat4> per frame
-    boss.rs / rival.rs                 # Entity state (HP, scale, position)
+    npc.rs (`Npc`, `NpcDef`)            # Entity state (HP, scale, position)
 tools/
   blender_make_oyabaun_character.py    # Atlas quad mesh builder + GLB exporter
 docs/

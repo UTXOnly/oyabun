@@ -16,7 +16,7 @@ Retro 90s-style first-person WASM/WebGPU game set in a Tokyo alley.
 | `client/src/render.rs` | Shaders (SHADER_WORLD_TEX, SHADER_BILL), render pipeline |
 | `client/src/gltf_level.rs` | glTF level parser, spawn extraction, collision |
 | `client/src/mesh.rs` | NPC placement, geometry helpers |
-| `client/src/boss.rs` | Boss/Rival state (HP, scale, hit radius) |
+| `client/src/npc.rs` | NPC state including boss/rival (HP, scale, hit radius) |
 | `client/src/lib.rs` | WASM entry, game loop, debug endpoints |
 | `client/index.html` | Entry point, sprite loading |
 | `client/levels/tokyo_alley.glb` | Level + character geometry |

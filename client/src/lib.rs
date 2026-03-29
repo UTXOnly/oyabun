@@ -4,7 +4,6 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-mod boss;
 mod game;
 mod gltf_level;
 mod input;
@@ -348,8 +347,15 @@ impl OyabaunApp {
         for (i, npc) in self.npcs.npcs.iter().enumerate() {
             let f = npc.foot;
             let aabb = format!(
-                " npc{}[{}] foot=({:.2},{:.2},{:.2}) hp={:.0} alive={}",
-                i, npc.def.label, f.x, f.y, f.z, npc.hp, npc.alive()
+                " npc{}[{}] foot=({:.2},{:.2},{:.2}) hp={:.0} hp%={:.0} alive={}",
+                i,
+                npc.def.label,
+                f.x,
+                f.y,
+                f.z,
+                npc.hp,
+                npc.hp_frac() * 100.0,
+                npc.alive()
             );
             result.push_str(&aabb);
 

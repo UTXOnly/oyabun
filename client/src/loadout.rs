@@ -52,7 +52,7 @@ impl Loadout {
         self.muzzle_flash = (self.muzzle_flash - dt * 4.0).max(0.0);
         self.recoil = (self.recoil - dt * 5.0).max(0.0);
 
-        if self.reload_pending || self.reload_anim > 0.0 {
+        if self.reload_pending || self.is_reloading() {
             self.reload_anim += dt * 2.5; // ~0.8s full cycle
             if self.reload_anim >= 1.0 && self.reload_pending {
                 // At the midpoint, actually reload the ammo
@@ -66,7 +66,7 @@ impl Loadout {
     }
 
     pub fn try_fire(&mut self) -> bool {
-        if self.reload_anim > 0.0 {
+        if self.is_reloading() {
             return false; // can't fire while reloading
         }
         let i = self.current;
@@ -84,7 +84,7 @@ impl Loadout {
     }
 
     pub fn start_reload(&mut self) {
-        if self.reload_anim > 0.0 {
+        if self.is_reloading() {
             return; // already reloading
         }
         let i = self.current;
@@ -106,17 +106,17 @@ impl Loadout {
     }
 
     pub fn cycle_next(&mut self) {
-        if self.reload_anim > 0.0 { return; }
+        if self.is_reloading() { return; }
         self.current = (self.current + 1) % 4;
     }
 
     pub fn cycle_prev(&mut self) {
-        if self.reload_anim > 0.0 { return; }
+        if self.is_reloading() { return; }
         self.current = (self.current + 3) % 4;
     }
 
     pub fn select(&mut self, idx: usize) {
-        if idx < 4 && self.reload_anim <= 0.0 {
+        if idx < 4 && !self.is_reloading() {
             self.current = idx;
         }
     }
