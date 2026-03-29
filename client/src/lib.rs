@@ -94,8 +94,7 @@ fn walk_anim_frame(time: f32, speed: f32) -> f32 {
 const RUN_FRAME_COUNT: f32 = 6.0;
 const RUN_FPS: f32 = 11.0;
 const RUN_SPEED_THRESHOLD: f32 = 2.25;
-const SHOOT_FPS: f32 = 5.0;
-const SHOOT_FRAME_COUNT: f32 = 6.0;
+const SHOOT_FPS: f32 = 4.5;
 
 fn run_anim_frame(time: f32, speed: f32) -> f32 {
     let rate = RUN_FPS * (speed / 3.2).max(0.75);
@@ -103,12 +102,15 @@ fn run_anim_frame(time: f32, speed: f32) -> f32 {
     7.0 + frame.floor()
 }
 
-/// Row where 6-frame shoot cycle starts: full atlas (run+shoot) uses 13; compact (walk+suit sprint) uses 7.
-fn shoot_row_start(atlas_rows: u32) -> Option<f32> {
+/// `(first_shoot_row, frame_count)` from atlas height. Compact: rows 7+ are shoot after 6 walk rows.
+/// Full 19+ row atlas: run rows 7–12, shoot rows 13–18 (6 frames).
+fn shoot_cycle(atlas_rows: u32) -> Option<(f32, f32)> {
     if atlas_rows >= 19 {
-        Some(13.0)
-    } else if atlas_rows >= 13 {
-        Some(7.0)
+        return Some((13.0, 6.0));
+    }
+    let n_shoot = atlas_rows.saturating_sub(7);
+    if n_shoot >= 6 {
+        Some((7.0, n_shoot as f32))
     } else {
         None
     }
@@ -148,11 +150,11 @@ fn npc_billboard_anim_frame(time: f32, npc: &npc::Npc, atlas_rows: u32) -> f32 {
     if !npc.alive() {
         return 0.0;
     }
-    let shoot_base = shoot_row_start(atlas_rows);
+    let shoot = shoot_cycle(atlas_rows);
     let extended_run = atlas_rows >= 19;
     if npc.shooting_at_player() {
-        if let Some(base) = shoot_base {
-            let frame = (npc.shoot_anim_t * SHOOT_FPS) % SHOOT_FRAME_COUNT;
+        if let Some((base, n_frames)) = shoot {
+            let frame = (npc.shoot_anim_t * SHOOT_FPS) % n_frames;
             return base + frame.floor();
         }
         return 0.0;

@@ -888,7 +888,7 @@ pub struct CharacterInstance {
     pub model: Mat4,
     pub mesh_yaw: f32,
     pub skin: CharacterSkin,
-    /// Billboard atlas row index as float: 0 idle; 1–6 walk; 7–12 run or compact shoot (13-row atlas); 13–18 shoot (19+ rows). Hit flash uses `bill_tint`, not row ≥100.
+    /// Billboard atlas row: 0 idle; 1–6 walk; rows 7+ compact shoot (6 or 9 frames); 19+ row atlas has run 7–12 then shoot 13–18. Hit flash: `bill_tint`.
     pub anim_frame: f32,
     /// Sprite billboard RGBA multiplier (injury, hit flash, corpse); `[1,1,1,1]` for remotes / default.
     pub bill_tint: [f32; 4],

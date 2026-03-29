@@ -5,8 +5,8 @@ Build an Oyabaun game atlas (8 dirs × idle + walk + optional extra animations) 
 Column order matches client billboard shader: S, SW, W, NW, N, NE, E, SE.
 
 Row layout (must match client `lib.rs` / `render.rs`): row 0 idle; rows 1–6 walk;
-each `--extra` animation adds 6 rows (e.g. `--extra running-6-frames --extra lead-jab`
-→ rows 7–12 run, 13–18 shoot). Missing frames pad with that direction's idle.
+each `--extra` adds `--extra-frames` rows (default 6; use 9 for PixelLab 9-frame clips).
+Example: walk + one 9-frame extra → 16 rows (shoot rows 7–15).
 
 Missing walk directions (partial PixelLab exports) are filled with that direction's idle rotation.
 `--extra` animations: if PixelLab only exported a few facings (common for custom anims), missing
@@ -51,12 +51,13 @@ def resize_cell(im: Image.Image, cell: int) -> Image.Image:
     return im.resize((cell, cell), Image.Resampling.NEAREST)
 
 
-def load_six_frame_anim(
+def load_n_frame_anim(
     z: zipfile.ZipFile,
     frames_meta: dict,
     anim_key: str,
     cell: int,
     idle_by_dir: dict[str, Image.Image],
+    n: int,
     *,
     clone_missing_dirs_from_donor: bool = False,
 ) -> dict[str, list[Image.Image]]:
@@ -69,13 +70,11 @@ def load_six_frame_anim(
         for rel in paths:
             if rel in z.namelist():
                 loaded.append(resize_cell(load_png(z, rel), cell))
-        while len(loaded) < 6:
+        while len(loaded) < n:
             loaded.append(idle.copy())
-        out[d] = loaded[:6]
+        out[d] = loaded[:n]
 
     if clone_missing_dirs_from_donor:
-        # PixelLab often exports an extra animation only for a few facings; idle-padded
-        # columns look like "no shoot anim". Clone a real strip (prefer south) into gaps.
         donor: list[Image.Image] | None = None
         for pref in (
             "south",
@@ -92,12 +91,12 @@ def load_six_frame_anim(
             if not real:
                 continue
             seq: list[Image.Image] = []
-            for rel in real[:6]:
+            for rel in real[:n]:
                 seq.append(resize_cell(load_png(z, rel), cell))
             idle = idle_by_dir[pref]
-            while len(seq) < 6:
+            while len(seq) < n:
                 seq.append(idle.copy())
-            donor = seq[:6]
+            donor = seq[:n]
             break
         if donor:
             for d in DIR_ORDER:
@@ -105,6 +104,18 @@ def load_six_frame_anim(
                 if not any(rel in z.namelist() for rel in paths):
                     out[d] = [im.copy() for im in donor]
     return out
+
+
+def load_six_frame_anim(
+    z: zipfile.ZipFile,
+    frames_meta: dict,
+    anim_key: str,
+    cell: int,
+    idle_by_dir: dict[str, Image.Image],
+) -> dict[str, list[Image.Image]]:
+    return load_n_frame_anim(
+        z, frames_meta, anim_key, cell, idle_by_dir, 6, clone_missing_dirs_from_donor=False
+    )
 
 
 def main() -> None:
@@ -128,6 +139,13 @@ def main() -> None:
         default=[],
         metavar="KEY",
         help="Additional animation key (repeatable), e.g. running-6-frames, lead-jab",
+    )
+    p.add_argument(
+        "--extra-frames",
+        type=int,
+        default=6,
+        metavar="N",
+        help="Row count per --extra block (default 6; use 9 for full PixelLab exports)",
     )
     args = p.parse_args()
     zpath = args.zip_path.resolve()
@@ -167,20 +185,23 @@ def main() -> None:
 
         walk_frames = load_six_frame_anim(z, frames_meta, anim_key, cell, idle_by_dir)
 
+        nf = max(1, min(args.extra_frames, 16))
         extra_block: list[dict[str, list[Image.Image]]] = []
         for ex in args.extra:
             extra_block.append(
-                load_six_frame_anim(
+                load_n_frame_anim(
                     z,
                     frames_meta,
                     ex,
                     cell,
                     idle_by_dir,
+                    nf,
                     clone_missing_dirs_from_donor=True,
                 )
             )
 
-        nrows = 1 + 6 + 6 * len(extra_block)
+        n_extra_rows = nf * len(extra_block)
+        nrows = 1 + 6 + n_extra_rows
         atlas = Image.new("RGBA", (cell * 8, cell * nrows), (0, 0, 0, 0))
 
         for col, d in enumerate(DIR_ORDER):
@@ -190,9 +211,9 @@ def main() -> None:
                 atlas.paste(walk_frames[d][fi], (col * cell, (1 + fi) * cell))
             row_base = 7
             for blk in extra_block:
-                for fi in range(6):
+                for fi in range(nf):
                     atlas.paste(blk[d][fi], (col * cell, (row_base + fi) * cell))
-                row_base += 6
+                row_base += nf
 
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.suffix.lower() == ".rgba":
