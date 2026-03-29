@@ -12,6 +12,11 @@ fn warn_str(s: &str) {
     web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(s));
 }
 
+/// Exponential fog `1 - exp(-dist * x)`. Lower density keeps mid-distance alleys readable.
+const FOG_DENSITY: f32 = 0.00075;
+/// Slightly lifted from near-black so fog/clear never crush the whole frame to #000.
+const FOG_COLOR_RGBA: [f32; 4] = [0.14, 0.12, 0.20, 1.0];
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
@@ -115,7 +120,7 @@ fn fs_main(i: Vout) -> @location(0) vec4<f32> {
     let base = i.col * (0.90 + 0.10 * i.col.r) + vec3<f32>(0.08, 0.06, 0.10);
     let q = floor(clamp(base, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
     let dist = length(i.world_pos - g.cam_pos.xyz);
-    let fog_amt = 1.0 - exp(-dist * g.fog_params.x);
+    let fog_amt = min(1.0 - exp(-dist * g.fog_params.x), 0.58);
     let fc = g.fog_color.rgb;
     return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), 1.0);
 }
@@ -204,7 +209,7 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
     // Posterize to 24 levels for that arcade CRT look (less crushing than 15)
     let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
     let dist = length(wp - g.cam_pos.xyz);
-    let fog_amt = 1.0 - exp(-dist * g.fog_params.x);
+    let fog_amt = min(1.0 - exp(-dist * g.fog_params.x), 0.58);
     let fc = g.fog_color.rgb;
     return vec4<f32>(mix(q, fc, clamp(fog_amt, 0.0, 1.0)), t.a);
 }
@@ -325,12 +330,15 @@ fn fs_char(@builtin(position) frag_coord: vec4<f32>, i: Vout) -> @location(0) ve
     var lit = lit_base + rim_col;
 
     let poster = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 14.0) / 14.0;
+    let floor_rgb = vec3<f32>(0.09, 0.085, 0.12);
+    let poster_vis = max(poster, floor_rgb);
 
-    let flashed = mix(poster, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
+    let flashed = mix(poster_vis, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
 
     let wp = i.world_pos;
     let dist = length(wp - cu.cam_pos.xyz);
-    let fog_amt = 1.0 - exp(-dist * cu.fog_params.x);
+    let fog_raw = 1.0 - exp(-dist * cu.fog_params.x);
+    let fog_amt = min(fog_raw * 0.38, 0.52);
     let fc = cu.fog_color.rgb;
     return vec4<f32>(mix(flashed, fc, clamp(fog_amt, 0.0, 1.0)), 1.0);
 }
@@ -1911,8 +1919,8 @@ impl Gpu {
         let g = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
-            fog_color: [0.06, 0.04, 0.10, 1.0],
-            fog_params: [0.003, 0.0, 0.0, 0.0],
+            fog_color: FOG_COLOR_RGBA,
+            fog_params: [FOG_DENSITY, 0.0, 0.0, 0.0],
             _pad: [0.0; 8],
         };
         self.queue
@@ -1980,8 +1988,8 @@ impl Gpu {
                     view_proj: view_proj.to_cols_array_2d(),
                     model: m,
                     cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
-                    fog_color: [0.06, 0.04, 0.10, 1.0],
-                    fog_params: [0.003, 0.0, 0.0, 0.0],
+                    fog_color: FOG_COLOR_RGBA,
+                    fog_params: [FOG_DENSITY, 0.0, 0.0, 0.0],
                     char_params: [inst.mesh_yaw, char_x, char_z, inst.anim_frame],
                     _p1: [0.0; 4],
                     _p2: [0.0; 4],
