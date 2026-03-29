@@ -12,6 +12,7 @@ Examples:
   python3 tools/pixellab_v2.py create8 "yakuza with pistol" --size 112
   python3 tools/pixellab_v2.py zip dabe33dd-b9d5-481c-9413-402cd0002747 ./rival.zip
   python3 tools/pixellab_v2.py map-object "pixel art muzzle flash transparent" ./client/vfx/muzzle.png
+  python3 tools/pixellab_v2.py map-object --width 320 --height 384 "side-view Tokyo shop…" ./client/level_textures/tokyo_shops/shop.png
 
 Env: PIXELLAB_API_TOKEN (or PIXELLAB_MCP_TOKEN). If unset, reads Bearer from repo .cursor/mcp.json.
 
@@ -118,7 +119,10 @@ def cmd_map_object(args: argparse.Namespace) -> None:
     """POST /map-objects (async); poll GET /background-jobs/{id}; write PNG from base64."""
     out = Path(args.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
-    r = request_json("POST", "/map-objects", {"description": args.description})
+    body: dict = {"description": args.description}
+    if args.width is not None and args.height is not None:
+        body["image_size"] = {"width": args.width, "height": args.height}
+    r = request_json("POST", "/map-objects", body)
     job_id = r.get("background_job_id")
     if not job_id:
         print(json.dumps(r, indent=2), file=sys.stderr)
@@ -230,6 +234,8 @@ def main() -> None:
     )
     mo.add_argument("description", help="Prompt for the object (transparent map sprite)")
     mo.add_argument("out", type=Path, help="Output .png path")
+    mo.add_argument("--width", type=int, default=None, help="Optional canvas width (with --height)")
+    mo.add_argument("--height", type=int, default=None, help="Optional canvas height (with --width)")
     mo.set_defaults(func=cmd_map_object)
 
     args = p.parse_args()

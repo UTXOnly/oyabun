@@ -1,0 +1,16 @@
+PixelLab map-object batch (side-view alley storefronts, 320×384, transparent PNG).
+
+Files:
+  shop_ramen.png, shop_pachinko.png, shop_konbini.png, shop_shuttered.png
+  shop_izakaya.png, shop_arcade.png, shop_snackbar.png, shop_tattoo.png
+
+Blender (tokyo_alley.blend):
+  1. Image → Open, pick PNG, set Color Space to sRGB.
+  2. Pack image (File → External Data → Pack Resources) before export.
+  3. Apply to shop face planes: UV scale for ~3–5m wide facade; Materials → Principled BSDF
+     Base Color ← Image Texture, Interpolation Nearest (pixel art).
+  4. Emissive on window/neon areas if you split quads or use a second material pass.
+  5. Re-export GLB: tools/blender_export_gltf_oyabaun.py or oyabaunctl export-world; then wasm-pack if embedding.
+
+Regenerate one asset:
+  python3 tools/pixellab_v2.py map-object --width 320 --height 384 "YOUR_PROMPT side-view pixel art Tokyo alley transparent background" client/level_textures/tokyo_shops/shop_name.png

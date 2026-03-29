@@ -640,12 +640,13 @@ fn hud_motion_vfx() -> vec2<f32> {
   return vec2<f32>(bx + recoil_x, by + recoil_y + reload_y);
 }
 
-// Barrel tip in weapon HUD UV (same space as hud quad: u 0–1 left→right, v 0–1 bottom→top).
+// Barrel tip in weapon HUD UV (matches weapon quad verts: u left→right, v bottom→top of sprite).
+// FPS pack art has the muzzle high on the texture; older values sat mid-quad and read as "flash below gun".
 fn weapon_barrel_uv(weapon: u32) -> vec2<f32> {
-  if (weapon == 1u) { return vec2<f32>(0.91, 0.58); }
-  if (weapon == 2u) { return vec2<f32>(0.89, 0.55); }
-  if (weapon == 3u) { return vec2<f32>(0.84, 0.62); }
-  return vec2<f32>(0.87, 0.56);
+  if (weapon == 1u) { return vec2<f32>(0.93, 0.86); }
+  if (weapon == 2u) { return vec2<f32>(0.91, 0.84); }
+  if (weapon == 3u) { return vec2<f32>(0.88, 0.88); }
+  return vec2<f32>(0.91, 0.85);
 }
 
 fn muzzle_quad_scale(weapon: u32) -> f32 {

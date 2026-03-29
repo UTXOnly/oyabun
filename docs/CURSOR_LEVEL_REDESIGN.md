@@ -44,6 +44,8 @@ This is NOT photorealism. Think **Streets of Rage**, **Yakuza (PS2 era)**, **Fin
 
 ### 1. Shop Fronts (HIGHEST PRIORITY)
 
+**PixelLab texture pack (repo):** `client/level_textures/tokyo_shops/` — eight **side-view** 320×384 PNG storefronts (ramen, pachinko, konbini, shuttered, izakaya, arcade, snack bar, tattoo). Generated via `tools/pixellab_v2.py map-object --width 320 --height 384 "…" …`. See `EXPORT.txt` in that folder for Blender import (pack images, Principled + **Nearest**, then GLB export). Use these as **albedo on existing or new wall planes**; geometry (recessed doors, awnings) still belongs in Blender.
+
 The alley walls need to become actual **storefronts** — not just flat surfaces with sign textures. Each shop should have:
 
 **Geometry** (build in Blender):
