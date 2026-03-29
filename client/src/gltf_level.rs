@@ -363,7 +363,10 @@ fn visit_character_node(
                     [r, g, b, raw_tint[3]]
                 }
             } else {
-                raw_tint
+                let r = (raw_tint[0] + emissive[0]).min(1.0);
+                let g = (raw_tint[1] + emissive[1]).min(1.0);
+                let b = (raw_tint[2] + emissive[2]).min(1.0);
+                [r, g, b, raw_tint[3]]
             };
 
             let r_pos = prim.reader(|b| Some(&buffers[b.index()]));
@@ -552,7 +555,10 @@ fn visit_node(
                     [r, g, b, raw_tint[3]]
                 }
             } else {
-                raw_tint
+                let r = (raw_tint[0] + emissive[0]).min(1.0);
+                let g = (raw_tint[1] + emissive[1]).min(1.0);
+                let b = (raw_tint[2] + emissive[2]).min(1.0);
+                [r, g, b, raw_tint[3]]
             };
 
             let r_pos = prim.reader(|b| Some(&buffers[b.index()]));
