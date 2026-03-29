@@ -572,7 +572,6 @@ impl OyabaunApp {
             "armor": 0,
             "weapons": weapons,
             "joined": self.net.joined,
-            "blood_splat": self.blood_splat,
         })
         .to_string()
     }
@@ -680,6 +679,16 @@ impl OyabaunApp {
         self.gpu.upload_arms_sprite(&img)
     }
 
+    #[wasm_bindgen(js_name = uploadVfxMuzzleSprite)]
+    pub fn upload_vfx_muzzle_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
+        self.gpu.upload_vfx_muzzle_sprite(&img)
+    }
+
+    #[wasm_bindgen(js_name = uploadVfxBloodSprite)]
+    pub fn upload_vfx_blood_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
+        self.gpu.upload_vfx_blood_sprite(&img)
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
     }
@@ -758,6 +767,7 @@ impl OyabaunApp {
             flash: self.loadout.muzzle_flash,
             recoil: self.loadout.recoil,
             reload: self.loadout.reload_anim,
+            blood_splat: self.blood_splat,
         };
         self.gpu.draw_world(
             vp,

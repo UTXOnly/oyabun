@@ -11,6 +11,7 @@ Examples:
   python3 tools/pixellab_v2.py animate dabe33dd-b9d5-481c-9413-402cd0002747 walking
   python3 tools/pixellab_v2.py create8 "yakuza with pistol" --size 112
   python3 tools/pixellab_v2.py zip dabe33dd-b9d5-481c-9413-402cd0002747 ./rival.zip
+  python3 tools/pixellab_v2.py map-object "pixel art muzzle flash transparent" ./client/vfx/muzzle.png
 
 Env: PIXELLAB_API_TOKEN (or PIXELLAB_MCP_TOKEN). If unset, reads Bearer from repo .cursor/mcp.json.
 
@@ -23,6 +24,8 @@ import argparse
 import json
 import os
 import sys
+import base64
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -111,6 +114,35 @@ def cmd_animate(args: argparse.Namespace) -> None:
     print(json.dumps(r, indent=2))
 
 
+def cmd_map_object(args: argparse.Namespace) -> None:
+    """POST /map-objects (async); poll GET /background-jobs/{id}; write PNG from base64."""
+    out = Path(args.out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    r = request_json("POST", "/map-objects", {"description": args.description})
+    job_id = r.get("background_job_id")
+    if not job_id:
+        print(json.dumps(r, indent=2), file=sys.stderr)
+        sys.exit(1)
+    print("queued job", job_id, file=sys.stderr)
+    for _ in range(90):
+        time.sleep(2)
+        j = request_json("GET", f"/background-jobs/{job_id}")
+        st = j.get("status")
+        lr = j.get("last_response") or {}
+        if st == "completed" and lr.get("image"):
+            raw = base64.b64decode(lr["image"])
+            out.write_bytes(raw)
+            print(f"Wrote {len(raw)} bytes -> {out}")
+            return
+        if st == "failed":
+            print(json.dumps(j, indent=2), file=sys.stderr)
+            sys.exit(1)
+        if _ % 5 == 0:
+            print(st, lr.get("status"), file=sys.stderr)
+    print("timeout waiting for map-object job", file=sys.stderr)
+    sys.exit(1)
+
+
 def cmd_zip(args: argparse.Namespace) -> None:
     out = Path(args.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -191,6 +223,14 @@ def main() -> None:
     zp.add_argument("character_id")
     zp.add_argument("out", type=Path, help="Output .zip path")
     zp.set_defaults(func=cmd_zip)
+
+    mo = sub.add_parser(
+        "map-object",
+        help="POST /map-objects (PixelLab map object) -> PNG (poll background job)",
+    )
+    mo.add_argument("description", help="Prompt for the object (transparent map sprite)")
+    mo.add_argument("out", type=Path, help="Output .png path")
+    mo.set_defaults(func=cmd_map_object)
 
     args = p.parse_args()
     args.func(args)

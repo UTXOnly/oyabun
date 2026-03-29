@@ -32,6 +32,8 @@ PixelLab MCP (pro mode, canvas typically 104–128px, 8 dirs)
 
 - **Tone**: Adult neo-Tokyo **yakuza / gangster** crime — not cartoon teens, not ninja fantasy.
 - **Weapons**: Prefer **visible SMGs** (Uzi, MP5/MP5K, compact submachine gun) in the sprite; pistols OK; bake into the character — no separate weapon billboards. `create8` may fail (`bone_scaling`) — use **web pro 8-dir** or `pixellab_v2.py create4` + expand on site.
+- **Combat motion**: Regenerate ZIPs with **`running-6-frames`** (or `running-8-frames`) plus a shoot template (**`lead-jab`**, **`cross-punch`**, or custom “firing SMG”) for 8 dirs; stack with `tools/pixellab_zip_to_atlas.py --extra …` so rows 7–12 = run, 13–18 = shoot (see `lib.rs` / `npc.rs`).
+- **FP VFX (pixel art, not shader blobs)**: `client/vfx/muzzle_flash.png` and `blood_overlay.png` are **PixelLab map objects** (regenerate with `python3 tools/pixellab_v2.py map-object "…" client/vfx/<name>.png`). Game loads them via `uploadVfxMuzzleSprite` / `uploadVfxBloodSprite` (nearest filter). Replace PNGs after regenerating; then hard-refresh the browser.
 - **Feet / ground**: Atlas cells often have transparent padding under the feet; `CHAR_BILLBOARD_FEET_DROP` in `render.rs` nudges the quad down so soles meet terrain. Re-tune if a new atlas pivots differently.
 
 ### PixelLab Characters (v3 pro mode, active)
@@ -48,7 +50,7 @@ PixelLab MCP (pro mode, canvas typically 104–128px, 8 dirs)
 
 - Binary: `[u32 LE width][u32 LE height][RGBA pixels...]`
 - Grid: 8 columns (S, SW, W, NW, N, NE, E, SE) × N rows
-- Row 0: idle, Rows 1-6: walk frames (or other animation)
+- Row 0: idle, rows 1–6: walk; rows 7–12 / 13–18: optional run / shoot when built with `--extra` (see `pixellab_zip_to_atlas.py`)
 - Cell size varies per character (boss: 112×112)
 
 ### Rendering (render.rs)
