@@ -85,6 +85,7 @@ python3 tools/pixellab_v2.py animate <character_uuid> walking --name my-walk
 python3 tools/pixellab_v2.py zip <character_uuid> /tmp/char.zip
 python3 tools/pixellab_zip_to_atlas.py /tmp/char.zip -o client/characters/name_atlas.rgba
 python3 tools/pixellab_v2.py create8 "description here" --size 112
+python3 tools/pixellab_v2.py create4 "description here" --size 112   # if create8 → bone_scaling
 ```
 
 Token: `PIXELLAB_API_TOKEN` env, or omit it and the script reads `.cursor/mcp.json` (gitignored). Docs: [api.pixellab.ai/v2/llms.txt](https://api.pixellab.ai/v2/llms.txt), [MCP tools overview](https://api.pixellab.ai/mcp/docs).
