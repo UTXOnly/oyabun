@@ -1,5 +1,7 @@
 # Tokyo Alley Level Redesign — Cursor Prompt
 
+**See also:** [CURSOR_ARCADE_TOKYO_LEVEL.md](./CURSOR_ARCADE_TOKYO_LEVEL.md) — when the target is the **hand-pixel arcade still** (`example_images/arcade_tokyo_alley_ref.png`) rather than full GLB geometry; branch `arcade-tokyo-vision`.
+
 ## Mission
 
 Rebuild `client/levels/tokyo_alley.blend` into a believable **1990s Tokyo back-alley** that feels like walking through a Sega Saturn or PS1 yakuza game — cramped, vertical, dripping with atmosphere. The current scene has 657 objects but reads as flat walls with colored rectangles. We need **recognizable shops, layered depth, and gritty street life**.
