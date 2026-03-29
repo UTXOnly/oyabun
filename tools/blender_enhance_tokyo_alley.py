@@ -473,7 +473,7 @@ def _recipe_for_material(name: str) -> tuple[str, RecipeFn, float, float, bool]:
 
 
 def _apply_material(mat: bpy.types.Material) -> bool:
-    if mat.name.startswith(("Gun_", "FPS_")):
+    if mat.name.startswith(("Gun_", "FPS_", "OYA_ShopFace_")):
         return False
     if not os.environ.get("OYABAUN_REPACK_ALBEDOS") and _already_packed(mat):
         return False

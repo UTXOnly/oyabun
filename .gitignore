@@ -11,3 +11,4 @@ client/levels/tokyo_street.json
 tools/_audit_out/
 tools/_pixellab_tmp/
 **/__pycache__/
+*.blend1

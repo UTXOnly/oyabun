@@ -230,6 +230,29 @@ def _default_tokyo_blend() -> Path:
     return (ROOT / "client" / "levels" / "tokyo_alley.blend").resolve()
 
 
+def cmd_apply_tokyo_shop_textures(ns: argparse.Namespace) -> None:
+    """Run tools/blender_apply_tokyo_shop_textures.py (PixelLab PNGs on ShopFront recess backs)."""
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"apply-tokyo-shop-textures: blend not found: {blend}\n")
+        sys.exit(1)
+    script = ROOT / "tools" / "blender_apply_tokyo_shop_textures.py"
+    if not script.is_file():
+        sys.stderr.write(f"apply-tokyo-shop-textures: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    print(f"apply-tokyo-shop-textures: {blend}", flush=True)
+    subprocess.run(
+        [exe, str(blend), "--background", "--python", str(script)],
+        cwd=ROOT,
+        check=True,
+    )
+    print(
+        "apply-tokyo-shop-textures: done (run export-world with --enhance to bake GLB)",
+        flush=True,
+    )
+
+
 def cmd_redesign_tokyo_phase1(ns: argparse.Namespace) -> None:
     """Run tools/blender_redesign_tokyo_alley_phase1.py (shop recess + awnings + blade signs)."""
     blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
@@ -654,6 +677,14 @@ def main() -> None:
         help="run export-world with enhance+repack after (same as rebuild-level content-wise)",
     )
     sp.set_defaults(func=cmd_redesign_tokyo_phase1, export_after=False)
+
+    sp = sub.add_parser(
+        "apply-tokyo-shop-textures",
+        help="place client/level_textures/tokyo_shops PNGs on ShopFront_*_recess panels (then export-world --enhance)",
+    )
+    sp.add_argument("--blend", default=None, help="path to .blend (default: client/levels/tokyo_alley.blend)")
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.set_defaults(func=cmd_apply_tokyo_shop_textures)
 
     sp = sub.add_parser(
         "import-glb",
