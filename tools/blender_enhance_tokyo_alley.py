@@ -218,8 +218,8 @@ def _pix_awning(r0: float, g0: float, b0: float, w: int, h: int) -> list[float]:
     for y in range(h):
         for x in range(w):
             stripe = (x // 4) % 2
-            m = 0.88 if stripe else 1.08
-            n = _hash12(x, y) * 0.06
+            m = 0.76 if stripe else 1.14
+            n = _hash12(x, y) * 0.08
             rr = min(1.0, r0 * m + n)
             gg = min(1.0, g0 * m + n)
             bb = min(1.0, b0 * m + n)

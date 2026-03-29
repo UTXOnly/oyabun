@@ -79,6 +79,50 @@ def _new_box(
     return ob
 
 
+def _new_awning_canopy(
+    name: str,
+    col: bpy.types.Collection,
+    loc: tuple[float, float, float],
+    size: tuple[float, float, float],
+    rot_euler: tuple[float, float, float],
+    u_repeat: float = 6.0,
+) -> bpy.types.Object:
+    """Bottom face of the old awning box only, with UVs tiled along width (avoids tiny cube islands)."""
+    import bmesh
+
+    awning_d, awning_w, thick = size
+    mesh = bpy.data.meshes.new(name + "_Mesh")
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=2.0)
+    bm.faces.ensure_lookup_table()
+    bottom = [
+        f
+        for f in bm.faces
+        if all(abs(v.co.z + 1.0) < 1e-5 for v in f.verts)
+    ]
+    if len(bottom) != 1:
+        bottom = [max(bm.faces, key=lambda f: f.calc_area())]
+    kill = [f for f in bm.faces if f is not bottom[0]]
+    bmesh.ops.delete(bm, geom=kill, context="FACES")
+    bm.faces.ensure_lookup_table()
+    uvl = bm.loops.layers.uv.verify()
+    f0 = bm.faces[0]
+    for loop in f0.loops:
+        co = loop.vert.co
+        u = (co.y + 1.0) * 0.5 * u_repeat
+        v = (co.x + 1.0) * 0.5
+        loop[uvl].uv = (u, v)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    ob = bpy.data.objects.new(name, mesh)
+    ob.location = Vector(loc)
+    ob.scale = (awning_d / 2.0, awning_w / 2.0, thick / 2.0)
+    ob.rotation_euler = Euler(rot_euler, "XYZ")
+    col.objects.link(ob)
+    return ob
+
+
 def _ensure_uv_smart_project(ob: bpy.types.Object) -> None:
     mesh = ob.data
     if mesh.uv_layers:
@@ -162,12 +206,12 @@ def main() -> None:
         awning_d = 0.62
         awning_z = z0 + door_h - 0.15
         acx = inner_x + (0.32 if side == "L" else -0.32)
-        awning = _new_box(
+        awning = _new_awning_canopy(
             f"{prefix}_awning",
             col,
             (acx, yc, awning_z),
             (awning_d, awning_w, 0.12),
-            rot_euler=awning_rot,
+            awning_rot,
         )
         _link_mat(awning, awning_names[idx % len(awning_names)])
 
