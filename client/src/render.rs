@@ -421,6 +421,90 @@ const MAX_CHARACTER_INSTANCES: usize = 32;
 const CHAR_BILLBOARD_FEET_DROP: f32 = 0.40;
 const CHAR_BILLBOARD_ATLAS_COLS: u32 = 8;
 
+fn upload_rgba_atlas(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    sprite_layout: &wgpu::BindGroupLayout,
+    label: &'static str,
+    rgba_file: &'static [u8],
+) -> (Option<wgpu::BindGroup>, Option<wgpu::Texture>, u32) {
+    if rgba_file.len() <= 8 {
+        return (None, None, 0);
+    }
+    let atlas_w = u32::from_le_bytes([
+        rgba_file[0], rgba_file[1], rgba_file[2], rgba_file[3],
+    ]);
+    let atlas_h = u32::from_le_bytes([
+        rgba_file[4], rgba_file[5], rgba_file[6], rgba_file[7],
+    ]);
+    let rgba_data = &rgba_file[8..];
+    let expected = (atlas_w * atlas_h * 4) as usize;
+    if rgba_data.len() < expected {
+        return (None, None, 0);
+    }
+    let cell = atlas_w / CHAR_BILLBOARD_ATLAS_COLS;
+    let rows = if cell > 0 && atlas_h % cell == 0 {
+        atlas_h / cell
+    } else {
+        1
+    };
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: atlas_w,
+            height: atlas_h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::ImageCopyTexture {
+            texture: &tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &rgba_data[..expected],
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * atlas_w),
+            rows_per_image: Some(atlas_h),
+        },
+        wgpu::Extent3d {
+            width: atlas_w,
+            height: atlas_h,
+            depth_or_array_layers: 1,
+        },
+    );
+    let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("char-sprite-samp"),
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout: sprite_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    });
+    (Some(bg), Some(tex), rows)
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct HudUniform {
@@ -706,11 +790,15 @@ pub struct Gpu {
     pub arms_ready: bool,
     character: Option<CharacterDraw>,
     character_rival: Option<CharacterDraw>,
-    // Character sprite atlas billboard rendering
+    // Character sprite atlas billboard rendering (boss atlas: Boss + Remote; rival when no rival tex)
     char_sprite_bg: Option<wgpu::BindGroup>,
     _char_sprite_tex: Option<wgpu::Texture>,
-    /// Row count in the embedded atlas (idle + walk frames); 0 if no sprite atlas.
+    char_sprite_bg_rival: Option<wgpu::BindGroup>,
+    _char_sprite_tex_rival: Option<wgpu::Texture>,
+    /// Row count in the boss atlas; 0 if missing.
     char_sprite_atlas_rows: u32,
+    /// Row count in the rival atlas; 0 if missing.
+    char_sprite_atlas_rows_rival: u32,
     diag_last_surface_ok: bool,
     diag_last_surface_error: String,
     diag_frames_submitted: u64,
@@ -1122,66 +1210,23 @@ impl Gpu {
         let character_rival =
             character_rival_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_rival.glb"));
 
-        // Load character sprite atlas for billboard rendering
         const BOSS_ATLAS_RGBA: &[u8] = include_bytes!("../characters/boss_v3_atlas.rgba");
-        let mut char_sprite_atlas_rows: u32 = 0;
-        let (char_sprite_bg, _char_sprite_tex) = if BOSS_ATLAS_RGBA.len() > 8 {
-            let atlas_w = u32::from_le_bytes([BOSS_ATLAS_RGBA[0], BOSS_ATLAS_RGBA[1], BOSS_ATLAS_RGBA[2], BOSS_ATLAS_RGBA[3]]);
-            let atlas_h = u32::from_le_bytes([BOSS_ATLAS_RGBA[4], BOSS_ATLAS_RGBA[5], BOSS_ATLAS_RGBA[6], BOSS_ATLAS_RGBA[7]]);
-            let rgba_data = &BOSS_ATLAS_RGBA[8..];
-            let expected = (atlas_w * atlas_h * 4) as usize;
-            if rgba_data.len() >= expected {
-                let cell = atlas_w / CHAR_BILLBOARD_ATLAS_COLS;
-                char_sprite_atlas_rows = if cell > 0 && atlas_h % cell == 0 {
-                    atlas_h / cell
-                } else {
-                    1
-                };
-                let tex = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("char-sprite-atlas"),
-                    size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-                queue.write_texture(
-                    wgpu::ImageCopyTexture {
-                        texture: &tex, mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All,
-                    },
-                    &rgba_data[..expected],
-                    wgpu::ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: Some(4 * atlas_w),
-                        rows_per_image: Some(atlas_h),
-                    },
-                    wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
-                );
-                let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                    label: Some("char-sprite-samp"),
-                    mag_filter: wgpu::FilterMode::Nearest,
-                    min_filter: wgpu::FilterMode::Nearest,
-                    ..Default::default()
-                });
-                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("char-sprite-bg"),
-                    layout: &sprite_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
-                    ],
-                });
-                (Some(bg), Some(tex))
-            } else {
-                (None, None)
-            }
-        } else {
-            (None, None)
-        };
+        const RIVAL_ATLAS_RGBA: &[u8] = include_bytes!("../characters/rival_v3_atlas.rgba");
+        let (char_sprite_bg, _char_sprite_tex, char_sprite_atlas_rows) = upload_rgba_atlas(
+            &device,
+            &queue,
+            &sprite_layout,
+            "char-sprite-boss",
+            BOSS_ATLAS_RGBA,
+        );
+        let (char_sprite_bg_rival, _char_sprite_tex_rival, char_sprite_atlas_rows_rival) =
+            upload_rgba_atlas(
+                &device,
+                &queue,
+                &sprite_layout,
+                "char-sprite-rival",
+                RIVAL_ATLAS_RGBA,
+            );
 
         let (depth, depth_view) = create_depth(&device, width, height);
 
@@ -1219,7 +1264,10 @@ impl Gpu {
             character_rival,
             char_sprite_bg,
             _char_sprite_tex,
+            char_sprite_bg_rival,
+            _char_sprite_tex_rival,
             char_sprite_atlas_rows,
+            char_sprite_atlas_rows_rival,
             diag_last_surface_ok: true,
             diag_last_surface_error: String::new(),
             diag_frames_submitted: 0,
@@ -2086,7 +2134,7 @@ impl Gpu {
 
     /// Sprite atlas billboards use walk frames for leg motion; skip vertical bob (it looked like a South Park bounce).
     pub fn char_sprite_billboard_active(&self) -> bool {
-        self.char_sprite_bg.is_some()
+        self.char_sprite_bg.is_some() || self.char_sprite_bg_rival.is_some()
     }
 
     pub fn character_rival_loaded(&self) -> bool {
@@ -2166,20 +2214,15 @@ impl Gpu {
         // near NPC faces; the character atlas already includes weapon sprites.
         let mural_idx_count: u32 = (mural_vert_count / 4 * 6) as u32;
 
-        // Character sprite billboards
-        let char_quad_start = bill_cpu.len();
-        if self.char_sprite_bg.is_some() {
-            for ci in &capped {
+        // Character sprite billboards: boss atlas (Boss + Remote + Rival fallback) then rival atlas.
+        let push_char_sprite_quad =
+            |bill: &mut Vec<BillVertex>, ci: &CharacterInstance, atlas_rows: f32| {
                 let m = ci.model.to_cols_array_2d();
                 let foot = Vec3::new(m[3][0], m[3][1], m[3][2]);
-
-                // Character sprite billboard: camera-facing quad
-                let char_h = 2.0_f32; // world-space height
-                let char_w = 2.0_f32; // world-space width (square cells)
+                let char_h = 2.0_f32;
+                let char_w = 2.0_f32;
                 let foot_vis = foot - Vec3::new(0.0, CHAR_BILLBOARD_FEET_DROP, 0.0);
                 let center = foot_vis + Vec3::new(0.0, char_h * 0.5, 0.0);
-
-                // Camera-facing right/up vectors (billboard)
                 let to_cam = cam_pos - center;
                 let to_cam_xz = Vec3::new(to_cam.x, 0.0, to_cam.z);
                 let len_xz = to_cam_xz.length();
@@ -2189,50 +2232,67 @@ impl Gpu {
                     Vec3::new(1.0, 0.0, 0.0)
                 };
                 let up = Vec3::new(0.0, 1.0, 0.0);
-
                 let half_w = char_w * 0.5;
                 let half_h = char_h * 0.5;
                 let bl = center - right * half_w - up * half_h;
                 let br = center + right * half_w - up * half_h;
                 let tr = center + right * half_w + up * half_h;
                 let tl = center - right * half_w + up * half_h;
-
-                // Compute direction column from relative angle
-                // Bearing FROM character TO camera (matches yaw convention: yaw=0 is -Z)
                 let cam_bearing = (cam_pos.x - foot_vis.x).atan2(-(cam_pos.z - foot_vis.z));
                 let char_yaw = ci.mesh_yaw;
                 let rel = cam_bearing - char_yaw;
-                // Normalize to [0, 2pi)
-                let rel_norm = ((rel % (2.0 * std::f32::consts::PI)) + 2.0 * std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
-                // Quantize to 8 directions: 0=S, 1=SW, 2=W, 3=NW, 4=N, 5=NE, 6=E, 7=SE
+                let rel_norm = ((rel % (2.0 * std::f32::consts::PI)) + 2.0 * std::f32::consts::PI)
+                    % (2.0 * std::f32::consts::PI);
                 let col = ((rel_norm + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as u32 % 8;
-
-                // Compute animation row
                 let row = if ci.anim_frame >= 1.0 && ci.anim_frame <= 6.0 {
                     ci.anim_frame.floor() as u32
                 } else {
-                    0u32 // idle
+                    0u32
                 };
-
-                let rows = self.char_sprite_atlas_rows.max(1) as f32;
+                let rows = atlas_rows.max(1.0);
                 let u0 = col as f32 / CHAR_BILLBOARD_ATLAS_COLS as f32;
                 let u1 = (col as f32 + 1.0) / CHAR_BILLBOARD_ATLAS_COLS as f32;
                 let v0 = row as f32 / rows;
                 let v1 = (row as f32 + 1.0) / rows;
-
                 let corners = [bl, br, tr, tl];
                 let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
                 for j in 0..4 {
-                    bill_cpu.push(BillVertex {
+                    bill.push(BillVertex {
                         pos: corners[j].to_array(),
                         uv: uvs[j],
                     });
                 }
+            };
+
+        let char_boss_quad_vert_start = bill_cpu.len();
+        if self.char_sprite_bg.is_some() {
+            let rows_b = self.char_sprite_atlas_rows.max(1) as f32;
+            for ci in &capped {
+                let use_boss_atlas = matches!(ci.skin, CharacterSkin::Boss | CharacterSkin::Remote)
+                    || (ci.skin == CharacterSkin::Rival && self.char_sprite_bg_rival.is_none());
+                if use_boss_atlas {
+                    push_char_sprite_quad(&mut bill_cpu, ci, rows_b);
+                }
             }
         }
-        let char_quad_count = bill_cpu.len() - char_quad_start;
-        let char_idx_start = (char_quad_start / 4 * 6) as u32;
-        let char_idx_count = (char_quad_count / 4 * 6) as u32;
+        let char_boss_quad_vert_end = bill_cpu.len();
+        let char_rival_quad_vert_start = bill_cpu.len();
+        if self.char_sprite_bg_rival.is_some() {
+            let rows_r = self.char_sprite_atlas_rows_rival.max(1) as f32;
+            for ci in &capped {
+                if ci.skin == CharacterSkin::Rival {
+                    push_char_sprite_quad(&mut bill_cpu, ci, rows_r);
+                }
+            }
+        }
+        let char_rival_quad_vert_end = bill_cpu.len();
+
+        let char_boss_idx_start = (char_boss_quad_vert_start / 4 * 6) as u32;
+        let char_boss_idx_count = ((char_boss_quad_vert_end - char_boss_quad_vert_start) / 4 * 6) as u32;
+        let char_rival_idx_start = (char_rival_quad_vert_start / 4 * 6) as u32;
+        let char_rival_idx_count =
+            ((char_rival_quad_vert_end - char_rival_quad_vert_start) / 4 * 6) as u32;
+        let char_idx_count = char_boss_idx_count + char_rival_idx_count;
 
         let bill_idx_count: u32 = (bill_cpu.len() / 4 * 6) as u32;
         let gun_idx_count: u32 = bill_idx_count.saturating_sub(mural_idx_count).saturating_sub(char_idx_count);
@@ -2355,7 +2415,7 @@ impl Gpu {
         };
 
         let draw_rival_batch = |pass: &mut wgpu::RenderPass<'_>| {
-            if self.char_sprite_bg.is_none() {
+            if self.char_sprite_bg.is_none() && self.char_sprite_bg_rival.is_none() {
                 if !rivals.is_empty() {
                     if let Some(cd) = self.character_rival.as_ref().or(self.character.as_ref()) {
                         pass.set_pipeline(&cd.pipeline);
@@ -2395,10 +2455,24 @@ impl Gpu {
                     pass.draw_indexed(mural_idx_count..mural_idx_count + gun_idx_count, 0, 0..1);
                 }
             }
-            if char_idx_count > 0 {
+            if char_boss_idx_count > 0 {
                 if let Some(ref bg) = self.char_sprite_bg {
                     pass.set_bind_group(1, bg, &[]);
-                    pass.draw_indexed(char_idx_start..char_idx_start + char_idx_count, 0, 0..1);
+                    pass.draw_indexed(
+                        char_boss_idx_start..char_boss_idx_start + char_boss_idx_count,
+                        0,
+                        0..1,
+                    );
+                }
+            }
+            if char_rival_idx_count > 0 {
+                if let Some(ref bg) = self.char_sprite_bg_rival {
+                    pass.set_bind_group(1, bg, &[]);
+                    pass.draw_indexed(
+                        char_rival_idx_start..char_rival_idx_start + char_rival_idx_count,
+                        0,
+                        0..1,
+                    );
                 }
             }
         };

@@ -10,6 +10,7 @@ Examples:
   python3 tools/pixellab_v2.py get d5ceb30a-0a4b-49c4-8ccb-988898cb8135
   python3 tools/pixellab_v2.py animate dabe33dd-b9d5-481c-9413-402cd0002747 walking
   python3 tools/pixellab_v2.py create8 "yakuza with pistol" --size 112
+  python3 tools/pixellab_v2.py zip dabe33dd-b9d5-481c-9413-402cd0002747 ./rival.zip
 
 Env: PIXELLAB_API_TOKEN (or PIXELLAB_MCP_TOKEN). If unset, reads Bearer from repo .cursor/mcp.json.
 
@@ -110,6 +111,22 @@ def cmd_animate(args: argparse.Namespace) -> None:
     print(json.dumps(r, indent=2))
 
 
+def cmd_zip(args: argparse.Namespace) -> None:
+    out = Path(args.out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    url = f"{BASE}/characters/{args.character_id}/zip"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Authorization", f"Bearer {load_token()}")
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            data = resp.read()
+    except urllib.error.HTTPError as e:
+        print(e.read().decode("utf-8", errors="replace")[:2000], file=sys.stderr)
+        sys.exit(1)
+    out.write_bytes(data)
+    print(f"Wrote {len(data)} bytes -> {out}")
+
+
 def cmd_create8(args: argparse.Namespace) -> None:
     body = {
         "description": args.description,
@@ -149,6 +166,11 @@ def main() -> None:
     cp.add_argument("--size", type=int, default=112)
     cp.add_argument("--view", default="low top-down")
     cp.set_defaults(func=cmd_create8)
+
+    zp = sub.add_parser("zip", help="GET /characters/{id}/zip")
+    zp.add_argument("character_id")
+    zp.add_argument("out", type=Path, help="Output .zip path")
+    zp.set_defaults(func=cmd_zip)
 
     args = p.parse_args()
     args.func(args)

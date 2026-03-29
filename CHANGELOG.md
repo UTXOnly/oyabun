@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-29 — Rival v3 sprite atlas in-game; zip→atlas tool; dual billboard bind groups
+
+- **Client**: `rival_v3_atlas.rgba` embedded; **Rival** skin uses rival atlas, Boss/Remote use boss atlas (two billboard draw ranges + bind groups). `upload_rgba_atlas` helper in `render.rs`.
+- **Tools**: `tools/pixellab_zip_to_atlas.py` builds 8×(idle+6 walk) atlas from PixelLab ZIP (fills missing walk dirs with idle). `tools/pixellab_v2.py zip <id> out.zip` downloads character ZIP.
+- **Note**: Partial PixelLab walk export only had 4 directions; script pads other columns with idle for those frames.
+
 ## 2026-03-29 — PixelLab check-in: rival walk ZIP ready; v2 create8 / player animate blocked server-side
 
 - **Rival v3** `dabe33dd-…`: ZIP export **200** (~90 KB) — ready for `build_game_atlas` / `.rgba`.

@@ -52,7 +52,8 @@ PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
 | `client/src/render.rs` | Billboard sprite rendering, atlas loading, SHADER_BILL |
 | `client/src/lib.rs` | character_model(), walk_anim_frame(), walk_bob_y() |
 | `client/src/npc.rs` | NPC AI, hitboxes, wave spawning |
-| `client/characters/boss_v3_atlas.rgba` | Boss sprite atlas (embedded, 896×784) |
+| `client/characters/boss_v3_atlas.rgba` | Boss sprite atlas (embedded) |
+| `client/characters/rival_v3_atlas.rgba` | Rival sprite atlas (embedded); **Rival** NPCs use this bind group |
 | `~/Desktop/oyabaun-characters/` | Character art repo (generation, refinement, export) |
 
 ### Atlas Format
@@ -68,7 +69,7 @@ PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
 | Character | PixelLab ID | Canvas | Animations | In-Game |
 |-----------|-------------|--------|------------|---------|
 | Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | walk (8 dirs × 6 frames) | ✅ Active |
-| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | ✅ **Walk done** — `GET …/characters/{id}/zip` returns **200** (~90KB); API `animation_count` may show `2` while ZIP is still valid → **build rival atlas** next | ❌ Uses boss atlas until rival atlas wired |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | Walk ZIP → `tools/pixellab_zip_to_atlas.py` → `rival_v3_atlas.rgba` (in repo) | ✅ **In-game** (per-skin billboard) |
 | Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | ⚠️ v2 `animate` → *Failed to start any animation jobs* (tried `walking` / `walk` + `/characters/animations`) — queue walk on **pixellab.ai** for now | ❌ Uses boss atlas |
 | Extra (suit enforcer, no gun in prompt) | `ffe4c106-addf-4e53-902a-9ef73f44ea56` | 48×48 | 1 animation | — |
 
@@ -81,13 +82,15 @@ PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
 python3 tools/pixellab_v2.py balance
 python3 tools/pixellab_v2.py list --limit 20
 python3 tools/pixellab_v2.py animate <character_uuid> walking --name my-walk
+python3 tools/pixellab_v2.py zip <character_uuid> /tmp/char.zip
+python3 tools/pixellab_zip_to_atlas.py /tmp/char.zip -o client/characters/name_atlas.rgba
 python3 tools/pixellab_v2.py create8 "description here" --size 112
 ```
 
 Token: `PIXELLAB_API_TOKEN` env, or omit it and the script reads `.cursor/mcp.json` (gitignored). Docs: [api.pixellab.ai/v2/llms.txt](https://api.pixellab.ai/v2/llms.txt), [MCP tools overview](https://api.pixellab.ai/mcp/docs).
 
 - **Concurrency**: Tier 1 allows **8 concurrent background jobs**. One **8-direction walk** fills all 8 slots — wait for completion before `create8` or a second `animate`, or you’ll get a “maximum 8 concurrent jobs” error.
-- **`create8` server error**: As of check-in, `POST /create-character-with-8-directions` can fail with `Character creation processing failed: 'bone_scaling'`. That is **PixelLab backend**, not your token — use **Character Creator on the web** for new sprites until fixed, or open a ticket with PixelLab.
+- **`create8` server error**: `POST /create-character-with-8-directions` can fail with `'bone_scaling'`. **Workaround**: `POST /create-character-with-4-directions` via `curl`/script (same v2 token) — succeeds (e.g. job `46d21621-…`, character `92d6cd7c-be94-41cc-82e2-f0dc4bdeaaff`, 2026-03-29). Four-dir sprites need either web expansion to 8 dirs or a future atlas/shader path — **Oyabaun billboards expect 8 columns** today.
 
 ### Previous Characters (v2 standard, v1 deprecated)
 
