@@ -10,7 +10,16 @@ From the repo root:
 python3 tools/oyabaunctl.py export-world --blend /path/to/your_scene.blend
 ```
 
-Writes **`client/levels/tokyo_alley.glb`** (and by default also **`tokyo_street.json`** via the legacy script). Use `--format glb` for glTF only. Set **`BLENDER`** or **`--blender`** if `blender` is not on `PATH` (macOS: path to `Blender.app/Contents/MacOS/Blender`).
+### Optional: bulk Tokyo street props (Blender-only)
+
+`tools/blender_enhance_tokyo_alley.py` fills **`client/levels/tokyo_alley.blend`** with collection **`OyabaunTokyoDetail`** (sign boards, neon strips, awnings, wall AC blocks, conduits, vending shells, lanterns, planters, hydrants). It uses the scene’s existing mesh **world AABB** for placement. Re-running replaces that collection.
+
+```bash
+/path/to/Blender client/levels/tokyo_alley.blend --background --python tools/blender_enhance_tokyo_alley.py
+python3 tools/oyabaunctl.py export-world --blend client/levels/tokyo_alley.blend
+```
+
+`export-world` writes **`client/levels/tokyo_alley.glb`** (and by default **`tokyo_street.json`** via the legacy script). Use `--format glb` for glTF only. Set **`BLENDER`** or **`--blender`** if `blender` is not on `PATH` (macOS: path to `Blender.app/Contents/MacOS/Blender`).
 
 ## Export from Blender (manual)
 
