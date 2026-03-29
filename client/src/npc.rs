@@ -28,7 +28,8 @@ const DAMAGE: [f32; 4] = [24.0, 42.0, 16.0, 30.0];
 const NPC_WALK_SPEED: f32 = 1.8;
 const NPC_CHASE_SPEED: f32 = 3.2;
 const NPC_CHASE_RANGE: f32 = 40.0;
-const NPC_ATTACK_RANGE: f32 = 2.5;
+/// Within this XZ distance, NPC stops and plays shoot stance (ranged).
+pub const NPC_SHOOT_RANGE: f32 = 11.0;
 const NPC_PATROL_PAUSE: f32 = 1.5;
 
 /// Which character skin to render for this NPC.
@@ -157,6 +158,10 @@ pub struct Npc {
     idle_timer: f32,
     pub death_timer: f32,
     pub hit_flash: f32,
+    /// Seconds accumulated while holding shoot stance (drives shoot row cycle on client).
+    pub shoot_anim_t: f32,
+    /// Last planar distance to player this tick (for anim / damage).
+    pub chase_dist: f32,
 }
 
 impl Npc {
@@ -175,6 +180,8 @@ impl Npc {
             idle_timer: 0.0,
             death_timer: 0.0,
             hit_flash: 0.0,
+            shoot_anim_t: 0.0,
+            chase_dist: 999.0,
         }
     }
 
@@ -195,6 +202,12 @@ impl Npc {
 
     pub fn hp_frac(&self) -> f32 {
         (self.hp / self.def.max_hp).clamp(0.0, 1.0)
+    }
+
+    pub fn shooting_at_player(&self) -> bool {
+        self.alive()
+            && self.state == NpcState::Chase
+            && self.chase_dist <= NPC_SHOOT_RANGE
     }
 
     fn hit_aabb(&self) -> Aabb {
@@ -220,6 +233,7 @@ impl Npc {
         let dx = player_pos.x - self.foot.x;
         let dz = player_pos.z - self.foot.z;
         let dist_to_player = (dx * dx + dz * dz).sqrt();
+        self.chase_dist = dist_to_player;
 
         // Chase speed varies by NPC type
         let chase_speed = match self.def.label {
@@ -280,15 +294,16 @@ impl Npc {
             NpcState::Chase => {
                 if dist_to_player > NPC_CHASE_RANGE * 1.5 {
                     self.state = NpcState::Patrol;
-                } else if dist_to_player < NPC_ATTACK_RANGE {
+                    self.shoot_anim_t = 0.0;
+                } else if dist_to_player <= NPC_SHOOT_RANGE {
                     self.speed = 0.0;
-                    // Face player when in attack range
+                    self.shoot_anim_t += dt;
                     let target_yaw = dx.atan2(-dz);
                     self.yaw = smooth_turn(self.yaw, target_yaw, turn_speed * dt);
                 } else {
+                    self.shoot_anim_t = 0.0;
                     let dir_x = dx / dist_to_player;
                     let dir_z = dz / dist_to_player;
-                    // Face movement direction
                     let target_yaw = dir_x.atan2(-dir_z);
                     self.yaw = smooth_turn(self.yaw, target_yaw, turn_speed * dt);
                     self.speed = chase_speed;
@@ -535,6 +550,20 @@ impl NpcManager {
     /// Count of living NPCs.
     pub fn alive_count(&self) -> usize {
         self.npcs.iter().filter(|n| n.alive()).count()
+    }
+
+    /// When not on the relay, NPCs in shoot stance apply light hitscan-style damage (server still owns HP when joined).
+    pub fn offline_shoot_damage_per_tick(&self, dt: f32) -> i32 {
+        const DPS_PER_SHOOTER: f32 = 14.0;
+        let n = self
+            .npcs
+            .iter()
+            .filter(|n| n.shooting_at_player())
+            .count() as f32;
+        if n <= 0.0 {
+            return 0;
+        }
+        (DPS_PER_SHOOTER * dt * n).round().max(1.0) as i32
     }
 
     /// Wave display text for HUD.

@@ -58,6 +58,44 @@ fn walk_anim_frame(time: f32, speed: f32) -> f32 {
     frame.floor() + 1.0 // rows 1-6 in the atlas
 }
 
+const RUN_FRAME_COUNT: f32 = 6.0;
+const RUN_FPS: f32 = 11.0;
+const RUN_SPEED_THRESHOLD: f32 = 2.25;
+const SHOOT_FPS: f32 = 9.0;
+const SHOOT_FRAME_COUNT: f32 = 6.0;
+
+fn run_anim_frame(time: f32, speed: f32) -> f32 {
+    let rate = RUN_FPS * (speed / 3.2).max(0.75);
+    let frame = (time * rate) % RUN_FRAME_COUNT;
+    7.0 + frame.floor()
+}
+
+fn shoot_anim_frame(shoot_t: f32) -> f32 {
+    let frame = (shoot_t * SHOOT_FPS) % SHOOT_FRAME_COUNT;
+    13.0 + frame.floor()
+}
+
+fn npc_billboard_anim_frame(time: f32, npc: &npc::Npc, atlas_rows: u32) -> f32 {
+    if npc.hit_flash > 0.0 {
+        return 100.0 + npc.hit_flash;
+    }
+    if !npc.alive() {
+        return 0.0;
+    }
+    let extended_shoot = atlas_rows >= 19;
+    let extended_run = atlas_rows >= 13;
+    if npc.shooting_at_player() {
+        if extended_shoot {
+            return shoot_anim_frame(npc.shoot_anim_t);
+        }
+        return 0.0;
+    }
+    if npc.speed >= RUN_SPEED_THRESHOLD && extended_run {
+        return run_anim_frame(time, npc.speed);
+    }
+    walk_anim_frame(time, npc.speed)
+}
+
 /// Vertical walk bob (sinusoidal bounce) to prevent floating/sliding look.
 fn walk_bob_y(time: f32, speed: f32) -> f32 {
     if speed < WALK_SPEED_THRESHOLD {
@@ -577,6 +615,12 @@ impl OyabaunApp {
             for npc in &mut self.npcs.npcs {
                 npc.foot.y = self.game.feet_draw_y(npc.foot.x, npc.foot.z);
             }
+            if !self.net.joined {
+                let d = self.npcs.offline_shoot_damage_per_tick(dt);
+                if d > 0 {
+                    self.net.self_health = (self.net.self_health - d).max(0);
+                }
+            }
         }
     }
 
@@ -643,14 +687,8 @@ impl OyabaunApp {
                     0.78 * npc.scale() * death_scale,
                     skin,
                 );
-                // Billboard: rows 1–6 = walk; 0 = idle. (>100 = hit flash for 3D shader; billboards treat as idle row.)
-                ch.anim_frame = if npc.hit_flash > 0.0 {
-                    100.0 + npc.hit_flash
-                } else if npc.state == npc::NpcState::Dead {
-                    0.0
-                } else {
-                    walk_anim_frame(self.game_time, npc.speed)
-                };
+                let rows = self.gpu.char_sprite_rows_for_skin(skin);
+                ch.anim_frame = npc_billboard_anim_frame(self.game_time, npc, rows);
                 characters.push(ch);
             }
             if self.net.joined {

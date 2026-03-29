@@ -753,7 +753,7 @@ pub struct CharacterInstance {
     pub model: Mat4,
     pub mesh_yaw: f32,
     pub skin: CharacterSkin,
-    /// 0.0 = idle row, 1.0–6.0 = walk frame rows in the atlas.
+    /// Billboard atlas row index as float: 0 idle; 1–6 walk; 7–12 run; 13–18 shoot; ≥100 hit flash (3D path).
     pub anim_frame: f32,
 }
 
@@ -2137,6 +2137,15 @@ impl Gpu {
         self.char_sprite_bg.is_some() || self.char_sprite_bg_rival.is_some()
     }
 
+    pub fn char_sprite_rows_for_skin(&self, skin: CharacterSkin) -> u32 {
+        match skin {
+            CharacterSkin::Rival if self.char_sprite_bg_rival.is_some() => {
+                self.char_sprite_atlas_rows_rival.max(1)
+            }
+            _ => self.char_sprite_atlas_rows.max(1),
+        }
+    }
+
     pub fn character_rival_loaded(&self) -> bool {
         self.character_rival.is_some()
     }
@@ -2244,10 +2253,12 @@ impl Gpu {
                 let rel_norm = ((rel % (2.0 * std::f32::consts::PI)) + 2.0 * std::f32::consts::PI)
                     % (2.0 * std::f32::consts::PI);
                 let col = ((rel_norm + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as u32 % 8;
-                let row = if ci.anim_frame >= 1.0 && ci.anim_frame <= 6.0 {
-                    ci.anim_frame.floor() as u32
-                } else {
+                let rows_i = atlas_rows.max(1.0) as u32;
+                let max_r = rows_i.saturating_sub(1);
+                let row = if ci.anim_frame >= 100.0 {
                     0u32
+                } else {
+                    (ci.anim_frame.floor() as u32).min(max_r)
                 };
                 let rows = atlas_rows.max(1.0);
                 let u0 = col as f32 / CHAR_BILLBOARD_ATLAS_COLS as f32;
