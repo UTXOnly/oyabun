@@ -206,6 +206,10 @@ Reference art on disk: **`example_images/`** at repo root (`ref-image.png`, `sok
 
 Neon accents should stay **emissive-only** (Principled BSDF with `Emission Color` + `Emission Strength`). The game shader (`SHADER_CHAR_TEX` in `render.rs`) already handles emissive materials via the tint color — the emissive color gets baked into the GLB material's base color by the exporter, so it renders as a bright solid color in-game. No separate unlit pass is needed unless bloom/glow post-processing is added later.
 
+## Render diagnostics (browser)
+
+After load, DevTools console logs **`renderDebugJson`** (~2.5s). Anytime: `JSON.parse(window._oyaApp.renderDebugJson())`. Fields: `gpu.frames_submitted` vs `gpu.frames_skipped_no_swapchain`, `gpu.last_swapchain_error`, world index counts, fog constants, character GLB loaded flags.
+
 ## Runtime lighting (client)
 
 Characters use **`CharacterVertex`** (`pos`, `uv`, **`nrm`**) loaded from glTF normals (or smooth normals computed per primitive if missing). Vertex and fragment shaders **guard degenerate normals** (fallback up-vector). Lighting is **neon-noir**: lateral warm key, **pow** on N·L (~2.45) for stepped contrast without crushing the whole mesh to black, **5-stop ramp** + **4×4 Bayer** (single 16-tap table, WebGPU-safe), cool **rim**, **posterize** (~14 steps) with a **luminance floor**, plus weaker **distance fog** on characters than the world so NPCs stay visible in long alleys.

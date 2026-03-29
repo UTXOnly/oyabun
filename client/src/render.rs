@@ -1,5 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
+use serde::Serialize;
 
 use crate::mesh::Aabb;
 use web_sys::HtmlCanvasElement;
@@ -511,6 +512,42 @@ fn fs_hud_arms(i: HOut) -> @location(0) vec4<f32> {
 
 const WEAPON_BG_LABELS: [&str; 4] = ["weapon-0", "weapon-1", "weapon-2", "weapon-3"];
 
+fn acquire_surface_texture(
+    surface: &wgpu::Surface<'_>,
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
+    match surface.get_current_texture() {
+        Ok(t) => Ok(t),
+        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+            surface.configure(device, config);
+            surface.get_current_texture()
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Snapshot for [`crate::OyabaunApp::render_debug_json`]: swapchain, world draw, fog constants.
+#[derive(Serialize)]
+pub struct GpuRenderDiag {
+    pub surface_width: u32,
+    pub surface_height: u32,
+    pub surface_format: String,
+    pub present_mode: String,
+    pub last_swapchain_acquire_ok: bool,
+    pub last_swapchain_error: String,
+    pub frames_submitted: u64,
+    pub frames_skipped_no_swapchain: u64,
+    pub world_raster: String,
+    pub world_index_count: u64,
+    pub world_batch_count: u32,
+    pub fog_density: f32,
+    pub fog_color: [f32; 4],
+    pub character_boss_loaded: bool,
+    pub character_rival_loaded: bool,
+    pub sprite_ready: bool,
+}
+
 struct WorldBatchGpu {
     first_index: u32,
     index_count: u32,
@@ -633,6 +670,10 @@ pub struct Gpu {
     pub arms_ready: bool,
     character: Option<CharacterDraw>,
     character_rival: Option<CharacterDraw>,
+    diag_last_surface_ok: bool,
+    diag_last_surface_error: String,
+    diag_frames_submitted: u64,
+    diag_frames_skipped_swapchain: u64,
 }
 
 impl Gpu {
@@ -1064,7 +1105,41 @@ impl Gpu {
             arms_ready: false,
             character,
             character_rival,
+            diag_last_surface_ok: true,
+            diag_last_surface_error: String::new(),
+            diag_frames_submitted: 0,
+            diag_frames_skipped_swapchain: 0,
         })
+    }
+
+    pub fn render_diag(&self) -> GpuRenderDiag {
+        let (world_raster, world_index_count, world_batch_count) = match &self.world {
+            WorldRaster::Flat { index_count, .. } => {
+                ("flat".to_string(), *index_count as u64, 0u32)
+            }
+            WorldRaster::Textured { batches, .. } => {
+                let ic: u64 = batches.iter().map(|b| b.index_count as u64).sum();
+                ("textured".to_string(), ic, batches.len() as u32)
+            }
+        };
+        GpuRenderDiag {
+            surface_width: self.config.width,
+            surface_height: self.config.height,
+            surface_format: format!("{:?}", self.config.format),
+            present_mode: format!("{:?}", self.config.present_mode),
+            last_swapchain_acquire_ok: self.diag_last_surface_ok,
+            last_swapchain_error: self.diag_last_surface_error.clone(),
+            frames_submitted: self.diag_frames_submitted,
+            frames_skipped_no_swapchain: self.diag_frames_skipped_swapchain,
+            world_raster,
+            world_index_count,
+            world_batch_count,
+            fog_density: FOG_DENSITY,
+            fog_color: FOG_COLOR_RGBA,
+            character_boss_loaded: self.character.is_some(),
+            character_rival_loaded: self.character_rival.is_some(),
+            sprite_ready: self.sprite_ready,
+        }
     }
 
     fn raster_character_gltf(
@@ -1908,10 +1983,17 @@ impl Gpu {
         level_bounds: &Aabb,
         mural_z: f32,
     ) {
-        let frame = match self.surface.get_current_texture() {
+        let frame = match acquire_surface_texture(&self.surface, &self.device, &self.config) {
             Ok(f) => f,
-            Err(_) => return,
+            Err(e) => {
+                self.diag_last_surface_ok = false;
+                self.diag_last_surface_error = e.to_string();
+                self.diag_frames_skipped_swapchain += 1;
+                return;
+            }
         };
+        self.diag_last_surface_ok = true;
+        self.diag_last_surface_error.clear();
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -2266,6 +2348,10 @@ impl Gpu {
         }
 
         self.queue.submit([enc.finish()]);
+        frame.present();
+        #[cfg(target_arch = "wasm32")]
+        self.device.poll(wgpu::Maintain::Poll);
+        self.diag_frames_submitted += 1;
     }
 }
 

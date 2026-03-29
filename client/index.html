@@ -233,7 +233,7 @@
       </div>
     </div>
     <script type="module">
-      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260328c";
+      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260328d";
 
       function relayWsUrl() {
         const p = location.protocol === "https:" ? "wss" : "ws";
@@ -342,6 +342,13 @@
           dbg = JSON.parse(app.bootDebugJson());
           console.info("oyabaun boot:", dbg);
         } catch (_) {}
+        setTimeout(() => {
+          try {
+            console.info("oyabaun renderDebug (call anytime: JSON.parse(window._oyaApp.renderDebugJson()))", JSON.parse(app.renderDebugJson()));
+          } catch (e) {
+            console.warn("renderDebugJson failed", e);
+          }
+        }, 2500);
 
         try {
           await loadSprite(app);

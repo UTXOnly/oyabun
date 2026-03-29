@@ -395,6 +395,28 @@ impl OyabaunApp {
         self.net.take_outbound()
     }
 
+    /// Live swapchain + world draw diagnostics (browser console: `JSON.parse(app.renderDebugJson())`).
+    #[wasm_bindgen(js_name = renderDebugJson)]
+    pub fn render_debug_json(&self) -> String {
+        let gpu = self.gpu.render_diag();
+        let eye = self.game.eye_pos();
+        let fwd = self.game.view_forward();
+        json!({
+            "gpu": gpu,
+            "clear_rgb": [self.clear.x, self.clear.y, self.clear.z],
+            "eye": [eye.x, eye.y, eye.z],
+            "forward": [fwd.x, fwd.y, fwd.z],
+            "player_yaw": self.game.yaw,
+            "walk_surface_y": self.game.walk_surface_y,
+            "boot_vertex_count": self.vert_count,
+            "boot_batch_count": self.batch_count,
+            "level_bounds_min": [self.level_bounds.min.x, self.level_bounds.min.y, self.level_bounds.min.z],
+            "level_bounds_max": [self.level_bounds.max.x, self.level_bounds.max.y, self.level_bounds.max.z],
+            "hint": "frames_skipped_no_swapchain>0 means get_current_texture failed every time (black canvas). frames_submitted grows with black canvas → GPU/shader/clear path. After fix: present() runs after each submit.",
+        })
+        .to_string()
+    }
+
     #[wasm_bindgen(js_name = bootDebugJson)]
     pub fn boot_debug_json(&self) -> String {
         let bf = self.npcs.npcs.first().map(|n| n.foot).unwrap_or(Vec3::ZERO);
