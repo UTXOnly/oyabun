@@ -205,3 +205,7 @@ Reference art on disk: **`example_images/`** at repo root (`ref-image.png`, `sok
 ## Neon: emissive-only is correct
 
 Neon accents should stay **emissive-only** (Principled BSDF with `Emission Color` + `Emission Strength`). The game shader (`SHADER_CHAR_TEX` in `render.rs`) already handles emissive materials via the tint color — the emissive color gets baked into the GLB material's base color by the exporter, so it renders as a bright solid color in-game. No separate unlit pass is needed unless bloom/glow post-processing is added later.
+
+## Runtime lighting (client)
+
+Characters use **`CharacterVertex`** (`pos`, `uv`, **`nrm`**) loaded from glTF normals (or smooth normals computed per primitive if missing). The fragment shader applies **per-vertex** lighting (wrap + stepped “toon” bands + rim toward camera), not a single global normal — without this, meshes read as flat floating masks regardless of Blender detail.

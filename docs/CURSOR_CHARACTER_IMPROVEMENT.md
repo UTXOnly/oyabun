@@ -49,7 +49,7 @@ fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
 
 ### GLB Format
 
-- Vertex: `WorldVertex { pos: [f32; 3], uv: [f32; 2] }` — 20 bytes
+- Vertex: `CharacterVertex { pos, uv, nrm }` — 32 bytes (normals from glTF or computed)
 - Materials: Principled BSDF with base color (no image textures)
 - Emissive materials used for neon glow effects
 - Feet at Y=0 in glTF (Z=0 in Blender, exported with `export_yup=True`)

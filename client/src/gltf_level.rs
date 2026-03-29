@@ -4,7 +4,7 @@
 //! If missing, spawn is placed near **min-Z** on the map XZ span (alley mouth), not the AABB center — long levels often have empty space at center-Z.
 //! **Collision**: Mesh on a node whose name contains `Collider` or `OyabaunCollision` (case-insensitive).
 
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3, Vec4};
 
 use crate::mesh::Aabb;
 
@@ -33,6 +33,90 @@ impl WorldVertex {
                 },
             ],
         }
+    }
+}
+
+/// NPC / playable body mesh: positions are **pre-baked world** from the glTF scene; normals are
+/// world-space after node transform (used for lighting in `SHADER_CHAR_TEX`).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CharacterVertex {
+    pub pos: [f32; 3],
+    pub uv: [f32; 2],
+    pub nrm: [f32; 3],
+}
+
+impl CharacterVertex {
+    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<CharacterVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 12,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: 20,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+}
+
+pub struct CharacterMeshCpu {
+    pub vertices: Vec<CharacterVertex>,
+    pub indices: Vec<u32>,
+    pub batches: Vec<GltfBatchCpu>,
+    pub images_rgba8: Vec<(u32, u32, Vec<u8>)>,
+}
+
+fn vertex_normals_local(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
+    let mut acc = vec![Vec3::ZERO; positions.len()];
+    for tri in indices.chunks_exact(3) {
+        let i0 = tri[0] as usize;
+        let i1 = tri[1] as usize;
+        let i2 = tri[2] as usize;
+        if i0 >= positions.len() || i1 >= positions.len() || i2 >= positions.len() {
+            continue;
+        }
+        let e1 = positions[i1] - positions[i0];
+        let e2 = positions[i2] - positions[i0];
+        let face_n = e1.cross(e2);
+        if face_n.length_squared() < 1e-20 {
+            continue;
+        }
+        let face_n = face_n.normalize();
+        acc[i0] += face_n;
+        acc[i1] += face_n;
+        acc[i2] += face_n;
+    }
+    acc.into_iter()
+        .map(|v| {
+            if v.length_squared() > 1e-12 {
+                v.normalize()
+            } else {
+                Vec3::Z
+            }
+        })
+        .collect()
+}
+
+fn transform_normal(world: Mat4, n_local: Vec3) -> Vec3 {
+    let v = world * Vec4::new(n_local.x, n_local.y, n_local.z, 0.0);
+    let t = v.truncate();
+    if t.length_squared() > 1e-12 {
+        t.normalize()
+    } else {
+        Vec3::Z
     }
 }
 
@@ -204,7 +288,7 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
 
 /// Minimal glTF (single mesh or small prop) for **playable / NPC 3D bodies**.
 /// Vertices are baked in file space; the renderer applies per-entity `model` from relay pose.
-pub fn parse_character_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
+pub fn parse_character_glb(bytes: &[u8]) -> Result<CharacterMeshCpu, String> {
     let (document, buffers, images) =
         gltf::import_slice(bytes).map_err(|e| format!("character gltf import: {e}"))?;
 
@@ -213,7 +297,7 @@ pub fn parse_character_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
         .or_else(|| document.scenes().next())
         .ok_or_else(|| "character glTF has no scenes".to_string())?;
 
-    let mut vertices: Vec<WorldVertex> = Vec::new();
+    let mut vertices: Vec<CharacterVertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     let mut batches: Vec<GltfBatchCpu> = Vec::new();
 
@@ -238,14 +322,11 @@ pub fn parse_character_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
         return Err("character glTF has no mesh geometry".into());
     }
 
-    Ok(GltfLevelCpu {
+    Ok(CharacterMeshCpu {
         vertices,
         indices,
         batches,
         images_rgba8,
-        spawn: Vec3::ZERO,
-        spawn_yaw: 0.0,
-        solids: Vec::new(),
     })
 }
 
@@ -254,7 +335,7 @@ fn visit_character_node(
     node: gltf::Node<'_>,
     parent: Mat4,
     buffers: &[gltf::buffer::Data],
-    vertices: &mut Vec<WorldVertex>,
+    vertices: &mut Vec<CharacterVertex>,
     indices: &mut Vec<u32>,
     batches: &mut Vec<GltfBatchCpu>,
 ) {
@@ -320,13 +401,28 @@ fn visit_character_node(
                 (0..positions.len() as u32).collect()
             };
 
+            let r_nrm = prim.reader(|b| Some(&buffers[b.index()]));
+            let normals_local: Vec<Vec3> = match r_nrm.read_normals() {
+                Some(iter) => {
+                    let mut v: Vec<Vec3> = iter.map(Vec3::from_array).collect();
+                    if v.len() != positions.len() {
+                        v = vertex_normals_local(&positions, &prim_indices);
+                    }
+                    v
+                }
+                None => vertex_normals_local(&positions, &prim_indices),
+            };
+
             let base = vertices.len() as u32;
             for (i, p) in positions.iter().enumerate() {
                 let wp = world.transform_point3(*p);
                 let uv = uv0.get(i).copied().unwrap_or([0.0, 0.0]);
-                vertices.push(WorldVertex {
+                let nl = normals_local.get(i).copied().unwrap_or(Vec3::Z);
+                let nwm = transform_normal(world, nl);
+                vertices.push(CharacterVertex {
                     pos: wp.to_array(),
                     uv,
+                    nrm: nwm.to_array(),
                 });
             }
 

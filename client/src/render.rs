@@ -236,48 +236,52 @@ struct MatU { tint: vec4<f32>, }
 @group(1) @binding(1) var albedo_samp: sampler;
 @group(1) @binding(2) var<uniform> mu: MatU;
 
-struct Vin { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, }
+struct Vin { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) norm: vec3<f32>, }
 struct Vout {
   @builtin(position) clip: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) world_pos: vec3<f32>,
-  @location(2) normal_approx: vec3<f32>,
+  @location(2) world_n: vec3<f32>,
 };
 @vertex
 fn vs_char(v: Vin) -> Vout {
   let world_pos = (cu.model * vec4<f32>(v.pos, 1.0)).xyz;
-  // Approximate normal from model matrix (uniform scale assumed)
-  let n = normalize((cu.model * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
+  let world_n = normalize((cu.model * vec4<f32>(v.norm, 0.0)).xyz);
   var o: Vout;
   o.world_pos = world_pos;
   o.clip = cu.view_proj * vec4<f32>(world_pos, 1.0);
   o.uv = v.uv;
-  o.normal_approx = n;
+  o.world_n = world_n;
   return o;
 }
 @fragment
 fn fs_char(i: Vout) -> @location(0) vec4<f32> {
     let anim_row = cu.char_params.w;
 
-    // Hit flash: values > 100 encode flash intensity
     var hit_mix = 0.0;
     if (anim_row > 99.0) {
         hit_mix = clamp(anim_row - 100.0, 0.0, 1.0);
     }
 
-    // Material color from tint (3D models use per-material colors, not atlas)
     let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
 
-    // Simple directional lighting
-    let light_dir = normalize(vec3<f32>(0.3, 0.8, -0.5));
-    let ndotl = max(dot(normalize(i.normal_approx), light_dir), 0.0);
-    let ambient = vec3<f32>(0.25, 0.20, 0.28);
-    let lit = t.rgb * (ambient + vec3<f32>(0.7) * ndotl);
+    let n = normalize(i.world_n);
+    let light_dir = normalize(vec3<f32>(0.32, 0.85, -0.42));
+    let nd = max(dot(n, light_dir), 0.0);
+    let wrap = 0.42;
+    let diff_raw = clamp((nd + wrap) / (1.0 + wrap), 0.0, 1.0);
+    let toon = floor(diff_raw * 5.0 + 0.15) / 5.0;
 
-    // Hit flash: red-white overlay
+    let view_dir = normalize(cu.cam_pos.xyz - i.world_pos);
+    let rim = pow(1.0 - max(dot(n, view_dir), 0.0), 2.2) * 0.38;
+    let rim_tint = vec3<f32>(0.2, 0.35, 0.55);
+
+    let ambient = vec3<f32>(0.22, 0.18, 0.24);
+    let key = vec3<f32>(0.72, 0.68, 0.62);
+    let lit = t.rgb * (ambient + key * toon + rim_tint * rim);
+
     let flashed = mix(lit, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
 
-    // Distance fog
     let wp = i.world_pos;
     let dist = length(wp - cu.cam_pos.xyz);
     let fog_amt = 1.0 - exp(-dist * cu.fog_params.x);
@@ -583,8 +587,8 @@ impl Gpu {
         flat_vertices: &[Vertex],
         flat_indices: &[u32],
         gltf_level: Option<crate::gltf_level::GltfLevelCpu>,
-        character_level: Option<crate::gltf_level::GltfLevelCpu>,
-        character_rival_level: Option<crate::gltf_level::GltfLevelCpu>,
+        character_level: Option<crate::gltf_level::CharacterMeshCpu>,
+        character_rival_level: Option<crate::gltf_level::CharacterMeshCpu>,
     ) -> Result<Self, wasm_bindgen::JsValue> {
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
@@ -945,7 +949,7 @@ impl Gpu {
         });
 
         let try_raster_char =
-            |cpu: crate::gltf_level::GltfLevelCpu, label: &str| -> Option<CharacterDraw> {
+            |cpu: crate::gltf_level::CharacterMeshCpu, label: &str| -> Option<CharacterDraw> {
                 if cpu.vertices.is_empty() || cpu.indices.is_empty() || cpu.batches.is_empty() {
                     #[cfg(target_arch = "wasm32")]
                     warn_str(&format!("oyabaun: {label} has no drawable geometry"));
@@ -1013,9 +1017,9 @@ impl Gpu {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-        cpu: crate::gltf_level::GltfLevelCpu,
+        cpu: crate::gltf_level::CharacterMeshCpu,
     ) -> Result<CharacterDraw, wasm_bindgen::JsValue> {
-        use crate::gltf_level::WorldVertex;
+        use crate::gltf_level::CharacterVertex;
 
         let char_struct_size = std::mem::size_of::<CharUniforms>();
         let align = device.limits().min_uniform_buffer_offset_alignment as usize;
@@ -1116,7 +1120,7 @@ impl Gpu {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_char"),
-                buffers: &[WorldVertex::desc()],
+                buffers: &[CharacterVertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -1124,7 +1128,7 @@ impl Gpu {
                 entry_point: Some("fs_char"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
