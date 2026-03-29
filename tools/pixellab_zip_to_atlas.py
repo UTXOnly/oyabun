@@ -9,6 +9,8 @@ each `--extra` animation adds 6 rows (e.g. `--extra running-6-frames --extra lea
 → rows 7–12 run, 13–18 shoot). Missing frames pad with that direction's idle.
 
 Missing walk directions (partial PixelLab exports) are filled with that direction's idle rotation.
+`--extra` animations: if PixelLab only exported a few facings (common for custom anims), missing
+columns are filled by cloning the first real strip (prefers `south`) so billboards shoot from all angles.
 """
 from __future__ import annotations
 
@@ -55,6 +57,8 @@ def load_six_frame_anim(
     anim_key: str,
     cell: int,
     idle_by_dir: dict[str, Image.Image],
+    *,
+    clone_missing_dirs_from_donor: bool = False,
 ) -> dict[str, list[Image.Image]]:
     anim_dirs = (frames_meta.get(anim_key) or {}) if frames_meta else {}
     out: dict[str, list[Image.Image]] = {}
@@ -68,6 +72,38 @@ def load_six_frame_anim(
         while len(loaded) < 6:
             loaded.append(idle.copy())
         out[d] = loaded[:6]
+
+    if clone_missing_dirs_from_donor:
+        # PixelLab often exports an extra animation only for a few facings; idle-padded
+        # columns look like "no shoot anim". Clone a real strip (prefer south) into gaps.
+        donor: list[Image.Image] | None = None
+        for pref in (
+            "south",
+            "south-east",
+            "south-west",
+            "east",
+            "west",
+            "north",
+            "north-east",
+            "north-west",
+        ):
+            paths = anim_dirs.get(pref) if isinstance(anim_dirs.get(pref), list) else []
+            real = [rel for rel in paths if rel in z.namelist()]
+            if not real:
+                continue
+            seq: list[Image.Image] = []
+            for rel in real[:6]:
+                seq.append(resize_cell(load_png(z, rel), cell))
+            idle = idle_by_dir[pref]
+            while len(seq) < 6:
+                seq.append(idle.copy())
+            donor = seq[:6]
+            break
+        if donor:
+            for d in DIR_ORDER:
+                paths = anim_dirs.get(d) if isinstance(anim_dirs.get(d), list) else []
+                if not any(rel in z.namelist() for rel in paths):
+                    out[d] = [im.copy() for im in donor]
     return out
 
 
@@ -133,7 +169,16 @@ def main() -> None:
 
         extra_block: list[dict[str, list[Image.Image]]] = []
         for ex in args.extra:
-            extra_block.append(load_six_frame_anim(z, frames_meta, ex, cell, idle_by_dir))
+            extra_block.append(
+                load_six_frame_anim(
+                    z,
+                    frames_meta,
+                    ex,
+                    cell,
+                    idle_by_dir,
+                    clone_missing_dirs_from_donor=True,
+                )
+            )
 
         nrows = 1 + 6 + 6 * len(extra_block)
         atlas = Image.new("RGBA", (cell * 8, cell * nrows), (0, 0, 0, 0))
