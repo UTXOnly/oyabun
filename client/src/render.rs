@@ -58,6 +58,8 @@ impl Vertex {
 pub struct BillVertex {
     pub pos: [f32; 3],
     pub uv: [f32; 2],
+    /// RGB multiply + alpha (mural = white; NPC sprites = injury / corpse tint).
+    pub tint: [f32; 4],
 }
 
 impl BillVertex {
@@ -75,6 +77,11 @@ impl BillVertex {
                     offset: 12,
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: 20,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x4,
                 },
             ],
         }
@@ -391,14 +398,15 @@ struct Globals {
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var samp: sampler;
 
-struct Bin { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, };
-struct Bout { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32>, };
+struct Bin { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) tint: vec4<f32>, };
+struct Bout { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) tint: vec4<f32>, };
 
 @vertex
 fn vs_bill(v: Bin) -> Bout {
     var o: Bout;
     o.clip = g.view_proj * vec4<f32>(v.pos, 1.0);
     o.uv = v.uv;
+    o.tint = v.tint;
     return o;
 }
 
@@ -408,7 +416,8 @@ fn fs_bill(i: Bout) -> @location(0) vec4<f32> {
     if (c.a < 0.35) { discard; }
     let d = length(i.uv - vec2<f32>(0.5, 0.5));
     let rim = smoothstep(0.72, 0.38, d) * 0.15;
-    return vec4<f32>(c.rgb * (1.05 + rim) + vec3<f32>(0.08, 0.02, 0.04) * rim, c.a);
+    let rgb = c.rgb * i.tint.rgb * (1.05 + rim) + vec3<f32>(0.08, 0.02, 0.04) * rim * i.tint.rgb;
+    return vec4<f32>(rgb, c.a * i.tint.a);
 }
 "#;
 
@@ -564,8 +573,8 @@ fn vs_hud(v: HIn) -> HOut {
   let by = cos(hu.bob * 1.35) * 0.018;
 
   // Recoil kick: weapon jumps up strongly on fire
-  let recoil_y = hu.recoil * hu.recoil * 0.14;
-  let recoil_x = -hu.recoil * 0.03 * inv_aspect;
+  let recoil_y = hu.recoil * hu.recoil * 0.17;
+  let recoil_x = -hu.recoil * 0.036 * inv_aspect;
 
   // Reload: weapon drops below screen then comes back
   var reload_y = 0.0;
@@ -596,26 +605,27 @@ fn fs_hud(i: HOut) -> @location(0) vec4<f32> {
   if (t.a < 0.10) { discard; }
 
   // Base color with flash brightening
-  let flash_boost = 1.0 + 0.6 * hu.flash;
+  let flash_boost = 1.0 + 0.95 * hu.flash;
   var rgb = t.rgb * flash_boost;
 
   // White-hot flash on weapon surface when firing
-  if (hu.flash > 0.3) {
-    let hot = (hu.flash - 0.3) * 1.43; // 0..1
-    rgb = mix(rgb, vec3<f32>(1.0, 0.95, 0.85), hot * 0.35);
+  if (hu.flash > 0.25) {
+    let hot = (hu.flash - 0.25) * 1.33;
+    rgb = mix(rgb, vec3<f32>(1.0, 0.92, 0.78), hot * 0.5);
   }
 
-  // Muzzle flash glow — large dramatic burst at barrel tip
+  // Muzzle flash — per-weapon barrel anchors in HUD quad UV space
   if (hu.flash > 0.01) {
-    // Flash center: top-right area where barrel is (adjusted for new sprite layout)
-    let muzzle_uv = vec2<f32>(0.72, 0.78);
+    var muzzle_uv = vec2<f32>(0.72, 0.78);
+    if (hu.weapon == 1u) { muzzle_uv = vec2<f32>(0.62, 0.72); }
+    else if (hu.weapon == 2u) { muzzle_uv = vec2<f32>(0.74, 0.76); }
+    else if (hu.weapon == 3u) { muzzle_uv = vec2<f32>(0.68, 0.74); }
     let mf = length(i.uv - muzzle_uv);
-    // Large primary flash
-    let fl1 = smoothstep(0.30, 0.0, mf) * hu.flash;
-    // Hot core
-    let fl2 = smoothstep(0.10, 0.0, mf) * hu.flash;
-    let flash_color = mix(vec3<f32>(1.0, 0.7, 0.2), vec3<f32>(1.0, 1.0, 0.9), fl2);
-    rgb = mix(rgb, flash_color, fl1 * 0.8);
+    let fl1 = smoothstep(0.38, 0.0, mf) * hu.flash;
+    let fl2 = smoothstep(0.14, 0.0, mf) * hu.flash;
+    let fl3 = smoothstep(0.55, 0.12, mf) * hu.flash * 0.45;
+    let flash_color = mix(vec3<f32>(1.0, 0.55, 0.12), vec3<f32>(1.0, 0.98, 0.75), fl2);
+    rgb = rgb + flash_color * (fl1 * 1.15 + fl3);
   }
 
   return vec4<f32>(rgb, t.a);
@@ -626,7 +636,15 @@ fn fs_hud_arms(i: HOut) -> @location(0) vec4<f32> {
   let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
   let t = textureSample(wtex, wsamp, uv_tex);
   if (t.a < 0.06) { discard; }
-  return vec4<f32>(t.rgb * (1.0 + 0.3 * hu.flash), t.a);
+  let arm_hot = 1.0 + 0.55 * hu.flash;
+  var rgb = t.rgb * arm_hot;
+  if (hu.flash > 0.08) {
+    let muzzle_uv = vec2<f32>(0.78, 0.82);
+    let mf = length(i.uv - muzzle_uv);
+    let fl = smoothstep(0.22, 0.0, mf) * hu.flash;
+    rgb = rgb + vec3<f32>(1.0, 0.75, 0.35) * fl * 0.9;
+  }
+  return vec4<f32>(rgb, t.a);
 }
 "#;
 
@@ -755,6 +773,8 @@ pub struct CharacterInstance {
     pub skin: CharacterSkin,
     /// Billboard atlas row index as float: 0 idle; 1–6 walk; 7–12 run; 13–18 shoot; ≥100 hit flash (3D path).
     pub anim_frame: f32,
+    /// Sprite billboard RGBA multiplier (injury, hit flash, corpse); `[1,1,1,1]` for remotes / default.
+    pub bill_tint: [f32; 4],
 }
 
 pub struct Gpu {
@@ -2211,10 +2231,12 @@ impl Gpu {
                 [0.0, 0.0],
             ];
             let corners = [bl, br, tr, tl];
+            let white = [1.0_f32, 1.0, 1.0, 1.0];
             for i in 0..4 {
                 bill_cpu.push(BillVertex {
                     pos: corners[i].to_array(),
                     uv: uvs[i],
+                    tint: white,
                 });
             }
             mural_vert_count = 4;
@@ -2267,10 +2289,12 @@ impl Gpu {
                 let v1 = (row as f32 + 1.0) / rows;
                 let corners = [bl, br, tr, tl];
                 let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
+                let tt = ci.bill_tint;
                 for j in 0..4 {
                     bill.push(BillVertex {
                         pos: corners[j].to_array(),
                         uv: uvs[j],
+                        tint: tt,
                     });
                 }
             };

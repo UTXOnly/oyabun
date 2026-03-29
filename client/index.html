@@ -198,6 +198,23 @@
       }
       #doom-ammo-wrap .label { font-size: 0.58rem; color: #6a5048; letter-spacing: 0.12em; }
       #doom-ammo-wrap #doom-ammo { color: #f0b070; font-weight: 700; font-size: 0.85rem; }
+      /* Arcade blood splatter (Doom / light-gun style); driven by blood_splat from WASM */
+      #blood-overlay {
+        pointer-events: none;
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        opacity: 0;
+        mix-blend-mode: multiply;
+        background:
+          radial-gradient(ellipse 45% 38% at 6% 18%, rgba(160, 0, 20, 0.75) 0%, transparent 42%),
+          radial-gradient(ellipse 40% 35% at 94% 28%, rgba(140, 0, 25, 0.7) 0%, transparent 40%),
+          radial-gradient(ellipse 50% 28% at 48% 6%, rgba(120, 0, 15, 0.55) 0%, transparent 36%),
+          radial-gradient(ellipse 30% 22% at 22% 88%, rgba(100, 0, 10, 0.5) 0%, transparent 45%),
+          radial-gradient(ellipse 28% 20% at 78% 82%, rgba(90, 0, 12, 0.48) 0%, transparent 45%);
+        image-rendering: pixelated;
+        transition: opacity 0.04s linear;
+      }
     </style>
   </head>
   <body>
@@ -214,6 +231,7 @@
     <div id="crosshair" hidden></div>
     <div id="hitmarker"></div>
     <div id="kill-text"></div>
+    <div id="blood-overlay" aria-hidden="true"></div>
     <div id="hint">Relay <code>ws://HOST:8765/ws</code> · <code>1–4</code> weapons · <code>Q</code>/<code>E</code> cycle · <code>R</code> reload</div>
     <div id="doom-bar" aria-label="status">
       <div id="doom-face">◉</div>
@@ -233,7 +251,7 @@
       </div>
     </div>
     <script type="module">
-      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260328e";
+      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260329a";
 
       function relayWsUrl() {
         const p = location.protocol === "https:" ? "wss" : "ws";
@@ -497,11 +515,15 @@
               else if (h > 0) face.textContent = "◍";
               else face.textContent = "☠";
             }
+            if (bloodOverlay && typeof st.blood_splat === "number") {
+              bloodOverlay.style.opacity = String(Math.min(0.92, st.blood_splat * 0.88));
+            }
           } catch (_) {}
         }
 
         const hitmarker = document.getElementById("hitmarker");
         const killText = document.getElementById("kill-text");
+        const bloodOverlay = document.getElementById("blood-overlay");
         let hitTimer = 0;
         let killTimer = 0;
 

@@ -39,7 +39,40 @@ fn make_character(foot: Vec3, facing_yaw: f32, scale: f32, skin: CharacterSkin) 
         mesh_yaw: facing_yaw,
         skin,
         anim_frame: 0.0,
+        bill_tint: [1.0, 1.0, 1.0, 1.0],
     }
+}
+
+fn npc_sprite_billboard_tint(npc: &npc::Npc) -> [f32; 4] {
+    let mut r = 1.0_f32;
+    let mut g = 1.0;
+    let mut b = 1.0;
+    let mut a = 1.0_f32;
+    if npc.alive() {
+        let inj = 1.0 - npc.hp_frac();
+        r += inj * 0.48;
+        g -= inj * 0.26;
+        b -= inj * 0.22;
+    }
+    if npc.hit_flash > 0.0 {
+        let h = npc.hit_flash.min(1.0);
+        r += h * 0.62;
+        g += h * 0.12;
+        b += h * 0.08;
+    }
+    if npc.state == npc::NpcState::Dead {
+        let t = npc.death_timer;
+        r = r * (0.4 + (1.0 - t) * 0.35) + t * 0.22;
+        g = g * (0.22 + (1.0 - t) * 0.32);
+        b = b * (0.24 + (1.0 - t) * 0.28);
+        a = 0.94 - t * 0.18;
+    }
+    [
+        r.clamp(0.12, 2.2),
+        g.clamp(0.12, 2.2),
+        b.clamp(0.12, 2.2),
+        a.clamp(0.25, 1.0),
+    ]
 }
 
 /// Compute walk animation frame (1.0–6.0) from time, or 0.0 for idle.
@@ -336,6 +369,8 @@ pub struct OyabaunApp {
     last_hit: bool,
     /// Name of last killed NPC (empty if none this frame).
     last_kill: String,
+    /// Screen blood overlay strength for HUD (0..1), arcade hit feedback.
+    blood_splat: f32,
     clear: Vec3,
     level_bounds: mesh::Aabb,
     mural_z: f32,
@@ -537,6 +572,7 @@ impl OyabaunApp {
             "armor": 0,
             "weapons": weapons,
             "joined": self.net.joined,
+            "blood_splat": self.blood_splat,
         })
         .to_string()
     }
@@ -561,6 +597,7 @@ impl OyabaunApp {
         if dt > 0.0 {
             self.loadout.tick(dt);
             self.game.tick(dt, &mut self.input);
+            self.blood_splat = (self.blood_splat - dt * 2.65).max(0.0);
         }
 
         let (wp, wn, pick, rel) = self.input.take_weapon_edges();
@@ -586,6 +623,7 @@ impl OyabaunApp {
             let hit = self.npcs.register_shot(&self.game, wi);
             if hit {
                 self.last_hit = true;
+                self.blood_splat = (self.blood_splat + 0.92).min(1.0);
             }
             // Check for kills
             for (i, npc) in self.npcs.npcs.iter().enumerate() {
@@ -675,20 +713,15 @@ impl OyabaunApp {
                     npc::NpcSkin::Rival => CharacterSkin::Rival,
                     npc::NpcSkin::Boss => CharacterSkin::Boss,
                 };
-                // Scale shrinks as NPC dies (collapse effect)
-                let death_scale = if npc.state == npc::NpcState::Dead {
-                    1.0 - npc.death_timer * 0.7
-                } else {
-                    1.0
-                };
                 let mut ch = make_character(
                     Vec3::new(f.x, foot_y, f.z),
                     facing_yaw,
-                    0.78 * npc.scale() * death_scale,
+                    0.78 * npc.scale(),
                     skin,
                 );
                 let rows = self.gpu.char_sprite_rows_for_skin(skin);
                 ch.anim_frame = npc_billboard_anim_frame(self.game_time, npc, rows);
+                ch.bill_tint = npc_sprite_billboard_tint(npc);
                 characters.push(ch);
             }
             if self.net.joined {
@@ -814,6 +847,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         game_time: 0.0,
         last_hit: false,
         last_kill: String::new(),
+        blood_splat: 0.0,
         clear: Vec3::new(0.14, 0.12, 0.20),
         level_bounds: boot.level_bounds,
         mural_z: boot.mural_z,

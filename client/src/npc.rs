@@ -29,7 +29,7 @@ const NPC_WALK_SPEED: f32 = 1.8;
 const NPC_CHASE_SPEED: f32 = 3.2;
 const NPC_CHASE_RANGE: f32 = 40.0;
 /// Within this XZ distance, NPC stops and plays shoot stance (ranged).
-pub const NPC_SHOOT_RANGE: f32 = 11.0;
+pub const NPC_SHOOT_RANGE: f32 = 7.5;
 const NPC_PATROL_PAUSE: f32 = 1.5;
 
 /// Which character skin to render for this NPC.
