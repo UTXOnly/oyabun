@@ -208,7 +208,7 @@ Neon accents should stay **emissive-only** (Principled BSDF with `Emission Color
 
 ## Render diagnostics (browser)
 
-After load, DevTools console logs **`renderDebugJson`** (~2.5s). Anytime: `JSON.parse(window._oyaApp.renderDebugJson())`. Fields: `gpu.frames_submitted` vs `gpu.frames_skipped_no_swapchain`, `gpu.last_swapchain_error`, world index counts, fog constants, character GLB loaded flags.
+After load, DevTools console logs **`renderDebugJson`** (~2.5s). Anytime: `JSON.parse(window._oyaApp.renderDebugJson())`. Fields: `gpu.frames_submitted` vs `gpu.frames_skipped_no_swapchain`, `gpu.last_swapchain_error`, world index counts, fog constants, character GLB loaded flags, **`ndc_level_center_xyzw` / `ndc_4m_ahead_xyzw`** (clip-space probes; xy should sit in ~[-1,1] when the level/ahead point is visible). The page **syncs canvas.width/height to layout before `createOyabaunApp`** so the first WebGPU configure matches the backing store (avoids black canvas on some browsers).
 
 ## Runtime lighting (client)
 

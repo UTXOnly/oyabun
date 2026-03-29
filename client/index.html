@@ -233,7 +233,7 @@
       </div>
     </div>
     <script type="module">
-      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260328d";
+      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260328e";
 
       function relayWsUrl() {
         const p = location.protocol === "https:" ? "wss" : "ws";
@@ -329,12 +329,27 @@
         }
       }
 
+      function syncCanvasBackingStore(canvas) {
+        const r = canvas.getBoundingClientRect();
+        const w = Math.max(1, Math.floor(r.width * devicePixelRatio));
+        const h = Math.max(1, Math.floor(r.height * devicePixelRatio));
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        return { w, h };
+      }
+
       async function main() {
         await init();
         const canvas = document.getElementById("game-canvas");
         const hud = document.getElementById("hud");
         const cross = document.getElementById("crosshair");
+        await new Promise(requestAnimationFrame);
+        let { w, h } = syncCanvasBackingStore(canvas);
         const app = await createOyabaunApp(canvas);
+        ({ w, h } = syncCanvasBackingStore(canvas));
+        app.resize(w, h);
         window._oyaApp = app;  // expose for debugging
 
         let dbg = {};

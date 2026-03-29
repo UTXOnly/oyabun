@@ -733,7 +733,17 @@ impl Gpu {
             .ok_or_else(|| wasm_bindgen::JsValue::from_str("no surface config"))?;
         config.format = format;
         config.present_mode = wgpu::PresentMode::AutoVsync;
+        config.alpha_mode = wgpu::CompositeAlphaMode::Opaque;
         surface.configure(&device, &config);
+
+        device.on_uncaptured_error(Box::new(|e| {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::error_1(
+                &wasm_bindgen::JsValue::from_str(&format!("wgpu uncaptured error: {e:?}")),
+            );
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!("wgpu uncaptured error: {e:?}");
+        }));
 
         let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals"),

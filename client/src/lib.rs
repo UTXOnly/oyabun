@@ -401,18 +401,34 @@ impl OyabaunApp {
         let gpu = self.gpu.render_diag();
         let eye = self.game.eye_pos();
         let fwd = self.game.view_forward();
+        let aspect = self.gpu.config.width.max(1) as f32 / self.gpu.config.height.max(1) as f32;
+        let vp = self.game.view_proj(aspect);
+        let ndc = |p: Vec3| -> [f32; 4] {
+            let c = vp * p.extend(1.0);
+            let w = c.w;
+            if w.abs() > 1e-7 {
+                let t = c.truncate() / w;
+                [t.x, t.y, t.z, w]
+            } else {
+                [f32::NAN, f32::NAN, f32::NAN, w]
+            }
+        };
+        let level_mid = (self.level_bounds.min + self.level_bounds.max) * 0.5;
+        let ahead = eye + fwd * 4.0;
         json!({
             "gpu": gpu,
             "clear_rgb": [self.clear.x, self.clear.y, self.clear.z],
             "eye": [eye.x, eye.y, eye.z],
             "forward": [fwd.x, fwd.y, fwd.z],
+            "ndc_level_center_xyzw": ndc(level_mid),
+            "ndc_4m_ahead_xyzw": ndc(ahead),
             "player_yaw": self.game.yaw,
             "walk_surface_y": self.game.walk_surface_y,
             "boot_vertex_count": self.vert_count,
             "boot_batch_count": self.batch_count,
             "level_bounds_min": [self.level_bounds.min.x, self.level_bounds.min.y, self.level_bounds.min.z],
             "level_bounds_max": [self.level_bounds.max.x, self.level_bounds.max.y, self.level_bounds.max.z],
-            "hint": "frames_skipped_no_swapchain>0 means get_current_texture failed every time (black canvas). frames_submitted grows with black canvas → GPU/shader/clear path. After fix: present() runs after each submit.",
+            "hint": "ndc_* xy should be roughly in [-1,1] if that point is on-screen. If both are way outside, camera/proj may face away from the level. frames_skipped_no_swapchain>0 = swapchain acquire failed. Check console for wgpu uncaptured error lines.",
         })
         .to_string()
     }
