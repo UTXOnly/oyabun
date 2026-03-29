@@ -46,8 +46,9 @@ Blender Python (skin modifier + detail meshes)
 ### Shader (SHADER_CHAR_TEX in render.rs)
 
 - Vertex: `world_pos = model * vec4(v.pos, 1.0)` — standard 3D transform
-- Fragment: `textureSample(albedo, samp, uv) * mu.tint` — material tint color
-- Directional lighting + cyberpunk ambient + hit flash + distance fog
+- Fragment: albedo × tint, **4-step dithered cel** from N·L (albedo-preserving, not a fixed orange ramp)
+- Same **height ambient + neon spill + 24-level posterize + fog cap** as world `fs_tex` for a matched early-90s arcade read
+- Chunky **Blinn spec** highlight; hit flash + fog unchanged
 - Depth write ON, solid alpha (no transparency)
 - No billboard, no atlas, no direction selection
 

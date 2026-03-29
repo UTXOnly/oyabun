@@ -286,6 +286,7 @@ fn fs_char(@builtin(position) frag_coord: vec4<f32>, i: Vout) -> @location(0) ve
 
     let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
     let a = t.rgb;
+    let lum = a.r * 0.3 + a.g * 0.5 + a.b * 0.2;
 
     var wn = i.world_n;
     if (dot(wn, wn) < 1e-8) {
@@ -297,49 +298,50 @@ fn fs_char(@builtin(position) frag_coord: vec4<f32>, i: Vout) -> @location(0) ve
     let to_cam = cu.cam_pos.xyz - i.world_pos;
     let vd2 = dot(to_cam, to_cam);
     let view_dir = select(normalize(to_cam), vec3<f32>(0.0, 0.0, 1.0), vd2 < 1e-8);
-    // Strong warm key from the side (neon-alley); keep readable silhouettes (not pure black crush).
-    let light_dir = normalize(vec3<f32>(-0.82, 0.38, 0.42));
-    let nd = dot(n, light_dir);
-    let mu_l = clamp(nd * 0.5 + 0.5, 0.0, 1.0);
-    let hard = pow(mu_l, 2.45);
+
+    // Early-90s cab: few discrete shade steps, but tint comes from mesh albedo (suits read true).
+    let key_dir = normalize(vec3<f32>(-0.82, 0.38, 0.42));
+    let fill_dir = normalize(vec3<f32>(0.55, 0.15, -0.35));
+    let ndk = dot(n, key_dir);
+    let ndf = dot(n, fill_dir);
+    let shade_raw = clamp(ndk * 0.62 + ndf * 0.28 + 0.40, 0.0, 1.0);
 
     let px = vec2<i32>(frag_coord.xy);
     let b = char_bayer4(px);
     let d = (b + 0.5) / 16.0 - 0.5;
-    let n_levels = 5.0;
-    let scaled = hard * (n_levels - 1.0) + d * 0.85;
-    let band = clamp(floor(scaled + 0.5), 0.0, n_levels - 1.0) / (n_levels - 1.0);
+    let n_cel = 4.0;
+    let scaled = shade_raw * (n_cel - 1.0) + d * 0.65;
+    let band = clamp(floor(scaled + 0.5), 0.0, n_cel - 1.0) / (n_cel - 1.0);
 
-    // Neon-noir ramp: lifted shadow floor so mesh stays visible on dark fog.
-    let r0 = vec3<f32>(0.045, 0.055, 0.10);
-    let r1 = vec3<f32>(0.22, 0.06, 0.11);
-    let r2 = vec3<f32>(0.62, 0.12, 0.24);
-    let r3 = vec3<f32>(0.94, 0.38, 0.13);
-    let r4 = vec3<f32>(1.0, 0.88, 0.44);
-    var ramp = r0;
-    ramp = select(ramp, r1, band > 0.06);
-    ramp = select(ramp, r2, band > 0.28);
-    ramp = select(ramp, r3, band > 0.52);
-    ramp = select(ramp, r4, band > 0.76);
-    let al = max(a, vec3<f32>(0.04));
-    let lit_base = ramp * (0.28 + 0.72 * al) + vec3<f32>(0.02, 0.018, 0.03) * al;
+    let wp = i.world_pos;
+    let h_norm = clamp((wp.y - 0.0) / 6.0, 0.0, 1.0);
+    let ambient_warm = vec3<f32>(0.30, 0.22, 0.16) * (0.5 + 0.5 * h_norm);
+    let ambient_cool = vec3<f32>(0.12, 0.20, 0.26) * (1.0 - h_norm * 0.5);
+    let ambient = ambient_warm + ambient_cool;
 
-    let rim_edge = 1.0 - max(dot(n, view_dir), 0.0);
-    let rim_mask = smoothstep(0.38, 0.96, rim_edge) * smoothstep(0.2, -0.35, nd);
-    let rim_col = vec3<f32>(1.0, 0.32, 0.12) * rim_mask * 1.05;
+    let neon_phase = wp.x * 0.15 + wp.z * 0.12;
+    let neon_r = 0.10 * max(sin(neon_phase * 2.1 + 1.0), 0.0);
+    let neon_g = 0.06 * max(sin(neon_phase * 1.7 + 3.5), 0.0);
+    let neon_b = 0.12 * max(sin(neon_phase * 2.8 + 5.2), 0.0);
+    let neon_spill = vec3<f32>(neon_r, neon_g, neon_b) * (1.0 - h_norm * 0.4);
 
-    var lit = lit_base + rim_col;
+    let emit_boost = max(lum - 0.35, 0.0) * 1.2;
+    let al = max(a, vec3<f32>(0.03));
+    let lit_char = al * (0.20 + 0.80 * band) + ambient * 0.55 * al + neon_spill * 0.45 + al * emit_boost;
 
-    let poster = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 14.0) / 14.0;
-    let floor_rgb = vec3<f32>(0.09, 0.085, 0.12);
-    let poster_vis = max(poster, floor_rgb);
+    let h = normalize(key_dir + view_dir);
+    let spec = pow(max(dot(n, h), 0.0), 24.0);
+    let spec_step = select(0.0, 0.22, spec > 0.35);
+    var lit = lit_char + vec3<f32>(spec_step);
+
+    let q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
+    let floor_rgb = vec3<f32>(0.06, 0.055, 0.08);
+    let poster_vis = max(q, floor_rgb);
 
     let flashed = mix(poster_vis, vec3<f32>(1.0, 0.3, 0.2), hit_mix * 0.6);
 
-    let wp = i.world_pos;
     let dist = length(wp - cu.cam_pos.xyz);
-    let fog_raw = 1.0 - exp(-dist * cu.fog_params.x);
-    let fog_amt = min(fog_raw * 0.38, 0.52);
+    let fog_amt = min(1.0 - exp(-dist * cu.fog_params.x), 0.58);
     let fc = cu.fog_color.rgb;
     return vec4<f32>(mix(flashed, fc, clamp(fog_amt, 0.0, 1.0)), 1.0);
 }
