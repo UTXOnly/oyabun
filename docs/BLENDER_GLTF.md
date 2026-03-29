@@ -24,6 +24,10 @@ python3 tools/oyabaunctl.py export-world --force-all
 python3 tools/oyabaunctl.py rebuild-level
 python3 tools/oyabaunctl.py rebuild-level --wasm
 
+# Redesign Phase 1 (shop recess + awnings + blade signs; see docs/CURSOR_LEVEL_REDESIGN.md)
+python3 tools/oyabaunctl.py redesign-tokyo-phase1
+python3 tools/oyabaunctl.py redesign-tokyo-phase1 --export-after
+
 # Albedos only (no GLB write)
 python3 tools/oyabaunctl.py enhance-tokyo-alley
 python3 tools/oyabaunctl.py enhance-tokyo-alley --repack

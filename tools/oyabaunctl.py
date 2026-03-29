@@ -230,6 +230,39 @@ def _default_tokyo_blend() -> Path:
     return (ROOT / "client" / "levels" / "tokyo_alley.blend").resolve()
 
 
+def cmd_redesign_tokyo_phase1(ns: argparse.Namespace) -> None:
+    """Run tools/blender_redesign_tokyo_alley_phase1.py (shop recess + awnings + blade signs)."""
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"redesign-tokyo-phase1: blend not found: {blend}\n")
+        sys.exit(1)
+    script = ROOT / "tools" / "blender_redesign_tokyo_alley_phase1.py"
+    if not script.is_file():
+        sys.stderr.write(f"redesign-tokyo-phase1: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    print(f"redesign-tokyo-phase1: {blend}", flush=True)
+    subprocess.run(
+        [exe, str(blend), "--background", "--python", str(script)],
+        cwd=ROOT,
+        check=True,
+    )
+    print("redesign-tokyo-phase1: done (run export-world --force-all to repack + export)", flush=True)
+    if ns.export_after:
+        cmd_export_world(
+            argparse.Namespace(
+                blend=str(blend),
+                enhance=True,
+                repack=True,
+                force_all=False,
+                fmt="both",
+                blender=ns.blender,
+                output_glb=None,
+                output_json=None,
+            )
+        )
+
+
 def cmd_enhance_tokyo_alley(ns: argparse.Namespace) -> None:
     """Run tools/blender_enhance_tokyo_alley.py (packed glTF-ready albedos, strip OyabaunTokyoDetail)."""
     blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
@@ -607,6 +640,20 @@ def main() -> None:
         help="Blender executable (default: $BLENDER env or 'blender' on PATH)",
     )
     sp.set_defaults(func=cmd_enhance_tokyo_alley, repack=False)
+
+    sp = sub.add_parser(
+        "redesign-tokyo-phase1",
+        help="Tokyo alley CURSOR_LEVEL_REDESIGN phase 1: add shop recesses, awnings, blade signs (see tools/blender_redesign_tokyo_alley_phase1.py)",
+    )
+    sp.add_argument("--blend", default=None, help="path to .blend (default: client/levels/tokyo_alley.blend)")
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.add_argument(
+        "--export-after",
+        action="store_true",
+        dest="export_after",
+        help="run export-world with enhance+repack after (same as rebuild-level content-wise)",
+    )
+    sp.set_defaults(func=cmd_redesign_tokyo_phase1, export_after=False)
 
     sp = sub.add_parser(
         "import-glb",

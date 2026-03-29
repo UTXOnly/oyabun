@@ -29,6 +29,7 @@ python3 tools/oyabaunctl.py export-world --enhance     # pack glTF albedos, then
 python3 tools/oyabaunctl.py export-world --force-all   # repack all albedos + export (full level refresh)
 python3 tools/oyabaunctl.py rebuild-level              # same as --force-all; add --wasm to wasm-pack after
 python3 tools/oyabaunctl.py enhance-tokyo-alley        # albedo pass only (optional --repack)
+python3 tools/oyabaunctl.py redesign-tokyo-phase1     # shop recess + awnings + blade signs (optional --export-after)
 ```
 
 Logs: `.oyabaun/relay.log`, `.oyabaun/http.log`. State: `.oyabaun/state.json`.

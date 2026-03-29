@@ -1,5 +1,59 @@
 # Changelog
 
+## 2026-03-28 — Tokyo alley redesign Phase 1 (shop depth) + doc/ctl alignment
+
+### Level geometry
+
+- **`tools/blender_redesign_tokyo_alley_phase1.py`**: Idempotent pass that recreates collection **`OyabaunRedesign_Phase1`** — per `LeftBuilding_*` / `RightBuilding_*` segment: recessed doorway volume (`OYA_Trim`), tilted awning (`OYA_Awning` / trim / building), vertical blade sign (`ShopSign_*` rotation). No `Collider` in object names; awnings ~0.6 m from façade.
+- **`oyabaunctl redesign-tokyo-phase1`**: Runs that script on `client/levels/tokyo_alley.blend`; optional **`--export-after`** chains enhance+repack+GLB/JSON (same as manual `export-world --force-all` after).
+
+### Docs
+
+- **`docs/CURSOR_LEVEL_REDESIGN.md`**: Progress table, `oyabaunctl` export pipeline (removed invalid `export_colors` example), Phase 1 marked scripted vs still-handwork.
+
+### Assets
+
+- **`client/levels/tokyo_alley.blend`** / **`.glb`** / **`tokyo_street.json`**: Re-exported after Phase 1 (~+1k tris). Phases 2–5 in redesign doc remain TODO (kanji neon, ground debris, overhead density, etc.).
+
+---
+
+## 2026-03-30 — Walk animation system, multi-frame atlas, all characters animated
+
+### Walk animation pipeline
+
+- **Multi-frame atlas format**: Character atlases are now 8 columns × 7 rows (row 0 = idle, rows 1–6 = walk frames). Previous format was 8 columns × 1 row (idle only).
+- **Shader walk frame selection**: `fs_char` reads `char_params.w` as `anim_row` and computes `atlas_v = (uv.y + anim_row) / ATLAS_ROWS` to select the correct row. `ATLAS_ROWS` constant (7.0) defined in WGSL.
+- **`CharacterInstance.anim_frame`**: New field passed through `char_params.w` to the shader. NPCs send 0.0 (idle), remote players cycle walk frames at 8 FPS.
+- **`walk_anim_frame()` helper**: Computes frame index from `game_time` and movement speed. Below 0.3 m/s → idle (row 0), above → cycles rows 1–6.
+- **`game_time` accumulator**: Added to `OyabaunApp` for smooth time-based animation independent of frame rate.
+
+### All three characters now have walk animations (PixelLab)
+
+| Character | PixelLab ID | Atlas | Dimensions |
+|-----------|-------------|-------|------------|
+| Oyabaun Boss | `6d169ab6` | `sprite1.png` | 512×350 (8×7, cell 64×50) |
+| Yakuza Rival | `213e25e0` | `sprite_rival.png` | 512×357 (8×7, cell 64×51) |
+| Player Ronin | `ea4cdb4d` | `sprite_player.png` | 512×336 (8×7, cell 64×48) |
+
+Each atlas contains 8 directional idle frames + 6-frame walk cycle per direction (48 walk frames total per character).
+
+### Atlas build pipeline
+
+Python script crops all PixelLab 64×64 frames to tight vertical bounds, arranges into 8-column grid (S, SE, E, NE, N, NW, W, SW order), idle in row 0, walk frames in rows 1–6. Output PNG fed to Blender GLB build script.
+
+### GLB rebuild
+
+- `tools/blender_make_oyabaun_character.py` updated for new atlas cell aspect ratio (64×50 → 1.28:1 vs old 64×49 → 1.306:1). Added `ATLAS_ROWS`, `CELL_W`, `CELL_H` constants. Accepts `OYABAUN_OUT` and `OYABAUN_SPRITE` env vars for building different characters.
+- `oyabaun_player.glb` rebuilt with boss walk atlas (37KB, down from 1.1MB — old GLB had the full Blender character mesh baked in).
+- `oyabaun_rival.glb` rebuilt with rival walk atlas (36KB).
+
+### Known issues / TODO
+
+- **Multi-character texture swap**: All non-rival entities still share the boss atlas (`oyabaun_player.glb`). Player ronin atlas built (`sprite_player.png`) but needs a third `CharacterDraw` or runtime texture swap to display in-game.
+- **Player visibility desync**: Users in different browser sessions sometimes see different player sets — likely server-side relay snapshot sync issue.
+
+---
+
 ## 2026-03-30 — Atlas vs billboard yaw, ground snap, idle bob, offline local body
 
 - **Fixed black / wrong atlas column**: Every instance used `yaw_face_cam_xz` (mesh faces camera) while `fs_char` also picked an atlas column from camera→character angle — double-counting, often sampling empty strips. Fragment shader now uses a **fixed front column** (index 4) until we add a mode that pairs **true world yaw** with camera-relative column selection.
