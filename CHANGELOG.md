@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-29 — PixelLab v2 CLI (`pixellab_v2.py`) — fixes Cursor MCP JSON bug
+
+- **Tooling**: `tools/pixellab_v2.py` calls `https://api.pixellab.ai/v2` with correct JSON (`balance`, `list`, `get`, `animate`, `create8`). Uses `PIXELLAB_API_TOKEN` or Bearer from `.cursor/mcp.json`.
+- **Cause**: Cursor’s HTTP MCP layer can emit invalid JSON for string tool args (e.g. unquoted `template_animation_id`), so jobs never start — unrelated to token mismatch.
+- **Art**: Queued **walking** template for **Yakuza Rival v3** `dabe33dd-b9d5-481c-9413-402cd0002747` (8 background jobs). New `create8` yakuza+pistol deferred until those slots free (Tier 1 = 8 concurrent jobs).
+- **Docs**: `docs/CURSOR_CHARACTER_IMPROVEMENT.md`, `character-gen.mdc`, `SKILL.md` updated.
+
 ## 2026-03-29 — NPC sprite walk frames; no bob on billboards; PixelLab MCP notes
 
 - **Client**: NPCs use `walk_anim_frame` for atlas rows 1–6 when moving; vertical **bob is disabled** when sprite billboards are active (walk legs carry motion). Dead NPCs stay on idle row.

@@ -39,10 +39,10 @@ PixelLab MCP (pro mode, canvas typically 104–128px, 8 dirs)
 | Character | ID | Canvas | Status |
 |-----------|----|--------|--------|
 | Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | ✅ Walk anim, atlas in-game |
-| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | Rotations only — add **walk** on PixelLab web |
-| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | Rotations only |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | Walk anim — queue with `python3 tools/pixellab_v2.py animate … walking` (not broken MCP) |
+| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | Rotations only — same v2 script when job slots free |
 
-**MCP token**: `list_characters` reflects the API key in `.cursor/mcp.json`; it must match the PixelLab account you use in the browser, or creates will look “missing”. **`animate_character`** often has to be run from the PixelLab site (Cursor MCP JSON bug on string args).
+**Cursor MCP bug**: `animate_character` / sometimes `create` may never create jobs — the client emits invalid JSON for string parameters. Use **`tools/pixellab_v2.py`** (HTTP v2, same Bearer as `.cursor/mcp.json`) per `docs/CURSOR_CHARACTER_IMPROVEMENT.md`. **8 concurrent jobs max** — a full 8-dir walk fills the queue.
 
 ### Atlas Format
 

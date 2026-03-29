@@ -68,15 +68,25 @@ PixelLab MCP (pro mode, canvas ~104–128px typical, 8 directions)
 | Character | PixelLab ID | Canvas | Animations | In-Game |
 |-----------|-------------|--------|------------|---------|
 | Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | walk (8 dirs × 6 frames) | ✅ Active |
-| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | rotations only (add **walk** on PixelLab when ready) | ❌ Uses boss atlas |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | **walk** queued via `tools/pixellab_v2.py animate … walking` (2026-03-29) | ❌ Uses boss atlas until rival atlas built |
 | Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | rotations only | ❌ Uses boss atlas |
 | Extra (suit enforcer, no gun in prompt) | `ffe4c106-addf-4e53-902a-9ef73f44ea56` | 48×48 | 1 animation | — |
 
-### PixelLab MCP vs web app (why you might see “nothing generating”)
+### PixelLab: Cursor MCP vs HTTP v2 (reliable workaround)
 
-- **Same API key**: `.cursor/mcp.json` must use **your** PixelLab `Bearer` token ([PixelLab account / API](https://pixellab.ai)). If the token differs from the account you open in the browser, **create** jobs will not show in the web UI and `list_characters` (MCP) is the source of truth for that key.
-- **Verify**: Run MCP `list_characters` — if a new ID never appears after ~5 minutes, the job did not land on that key or failed server-side; create the character on **pixellab.ai** instead and copy the ID into this table.
-- **`animate_character` from Cursor**: Some clients send broken JSON for string fields (`template_animation_id`), so template walks often must be queued from the **PixelLab website** (Animations → template **walk** / **walking**, all directions).
+- **Root cause**: Some Cursor MCP HTTP clients serialize tool arguments into **invalid JSON** (string values lose quotes, e.g. `"template_animation_id": walk` instead of `"walking"`). The server then rejects the call before any job is created — so **nothing appears** in the web app or in `list_characters`.
+- **Fix (recommended)**: Use the same Bearer token as MCP and call **PixelLab REST v2** from the repo:
+
+```bash
+python3 tools/pixellab_v2.py balance
+python3 tools/pixellab_v2.py list --limit 20
+python3 tools/pixellab_v2.py animate <character_uuid> walking --name my-walk
+python3 tools/pixellab_v2.py create8 "description here" --size 112
+```
+
+Token: `PIXELLAB_API_TOKEN` env, or omit it and the script reads `.cursor/mcp.json` (gitignored). Docs: [api.pixellab.ai/v2/llms.txt](https://api.pixellab.ai/v2/llms.txt), [MCP tools overview](https://api.pixellab.ai/mcp/docs).
+
+- **Concurrency**: Tier 1 allows **8 concurrent background jobs**. One **8-direction walk** fills all 8 slots — wait for completion before `create8` or a second `animate`, or you’ll get a “maximum 8 concurrent jobs” error.
 
 ### Previous Characters (v2 standard, v1 deprecated)
 

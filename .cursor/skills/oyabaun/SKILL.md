@@ -49,3 +49,4 @@ description: >-
 - In-world characters are **PixelLab pro** pixel art → atlas `.rgba` → billboards in `client/src/render.rs` (see `.cursor/rules/character-gen.mdc`).
 - After changing `client/characters/*_atlas.rgba` or billboard code, run `wasm-pack build` from `client/`.
 - Quick export: `python3 tools/export_character_atlas_to_rgba.py path/to/atlas.png -o client/characters/name_atlas.rgba`.
+- If Cursor’s PixelLab MCP never shows new jobs / `animate_character` fails: use **`python3 tools/pixellab_v2.py`** (REST v2, same token as MCP) — see `docs/CURSOR_CHARACTER_IMPROVEMENT.md`.

@@ -7,8 +7,8 @@ The 3D procedural approach failed to match the neo-noir pixel art reference styl
 ## Current Pipeline
 
 ```
-PixelLab MCP create_character (pro mode, ~112px canvas, 8 dirs)
-    → animate walk (MCP or PixelLab web if MCP string-args break)
+PixelLab: prefer `tools/pixellab_v2.py` (HTTP v2) — Cursor MCP often breaks JSON on `animate_character`
+    → create8 / animate walking (same Bearer as .cursor/mcp.json)
     → download ZIP → extract
     → ~/Desktop/oyabaun-characters/tools/build_game_atlas.py
     → atlas PNG → oyabaun tools/export_character_atlas_to_rgba.py → .rgba
