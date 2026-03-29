@@ -21,12 +21,20 @@ use loadout::{Loadout, WEAPONS};
 use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
 use net::NetController;
 use render::WeaponHudParams;
-pub use render::{Gpu, Vertex};
+pub use render::{CharacterInstance, CharacterSkin, Gpu, Vertex};
 
 use serde_json::json;
 
 fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
     Mat4::from_scale_rotation_translation(Vec3::splat(scale), Quat::from_rotation_y(yaw), foot)
+}
+
+fn make_character(foot: Vec3, mesh_yaw: f32, scale: f32, skin: CharacterSkin) -> CharacterInstance {
+    CharacterInstance {
+        model: character_model(foot, mesh_yaw, scale),
+        mesh_yaw,
+        skin,
+    }
 }
 
 fn yaw_face_cam_xz(foot: Vec3, cam: Vec3) -> f32 {
@@ -296,6 +304,7 @@ impl OyabaunApp {
             "spawn": [self.game.pos.x, self.game.pos.y, self.game.pos.z],
             "mural_z": self.mural_z,
             "characters_3d_loaded": self.gpu.characters_loaded(),
+            "character_rival_loaded": self.gpu.character_rival_loaded(),
             "boss_foot": [bf.x, bf.y, bf.z],
             "rival_foot": [rf.x, rf.y, rf.z],
             "boss_alive": self.npcs.boss().alive(),
@@ -426,7 +435,7 @@ impl OyabaunApp {
             self.gpu.config.width.max(1) as f32 / self.gpu.config.height.max(1) as f32;
         let vp = self.game.view_proj(aspect);
         let cam = self.game.pos + Vec3::new(0.0, 1.65, 0.0);
-        let mut character_models: Vec<Mat4> = Vec::new();
+        let mut characters: Vec<CharacterInstance> = Vec::new();
         let you = self.net.entity_id;
         if self.gpu.characters_loaded() {
             for npc in &self.npcs.npcs {
@@ -434,13 +443,21 @@ impl OyabaunApp {
                     continue;
                 }
                 let f = npc.foot;
-                let gy = self.game.ground_y_at(f.x, f.z);
-                let foot_y = gy.max(f.y);
-                let y = yaw_face_cam_xz(Vec3::new(f.x, 0.0, f.z), Vec3::new(cam.x, 0.0, cam.z));
-                character_models.push(character_model(
+                let foot_y = self.game.feet_draw_y(f.x, f.z);
+                let mesh_yaw = yaw_face_cam_xz(
+                    Vec3::new(f.x, 0.0, f.z),
+                    Vec3::new(cam.x, 0.0, cam.z),
+                );
+                let skin = if npc.def.label == npc::RIVAL_DEF.label {
+                    CharacterSkin::Rival
+                } else {
+                    CharacterSkin::Boss
+                };
+                characters.push(make_character(
                     Vec3::new(f.x, foot_y, f.z),
-                    y,
+                    mesh_yaw,
                     0.72 * npc.scale(),
+                    skin,
                 ));
             }
             if self.net.joined {
@@ -451,17 +468,17 @@ impl OyabaunApp {
                     if Some(p.id) == you {
                         continue;
                     }
-                    let gy = self.game.ground_y_at(p.x, p.z);
-                    let foot_y = gy.max(p.y);
+                    let foot_y = self.game.feet_draw_y(p.x, p.z);
                     let sc = 0.66 + (p.id % 3) as f32 * 0.04;
-                    let face_yaw = yaw_face_cam_xz(
+                    let mesh_yaw = yaw_face_cam_xz(
                         Vec3::new(p.x, 0.0, p.z),
                         Vec3::new(cam.x, 0.0, cam.z),
                     );
-                    character_models.push(character_model(
+                    characters.push(make_character(
                         Vec3::new(p.x, foot_y, p.z),
-                        face_yaw,
+                        mesh_yaw,
                         sc,
+                        CharacterSkin::Remote,
                     ));
                 }
             } else {
@@ -476,30 +493,32 @@ impl OyabaunApp {
                     Vec3::new(mid.x + 0.5, 0.0, mid.z + 4.0),
                 ];
                 for pos in &spots {
-                    let gy = self.game.ground_y_at(pos.x, pos.z);
-                    let face_yaw = yaw_face_cam_xz(
+                    let foot_y = self.game.feet_draw_y(pos.x, pos.z);
+                    let mesh_yaw = yaw_face_cam_xz(
                         Vec3::new(pos.x, 0.0, pos.z),
                         Vec3::new(cam.x, 0.0, cam.z),
                     );
-                    character_models.push(character_model(
-                        Vec3::new(pos.x, gy, pos.z),
-                        face_yaw,
+                    characters.push(make_character(
+                        Vec3::new(pos.x, foot_y, pos.z),
+                        mesh_yaw,
                         0.88,
+                        CharacterSkin::Remote,
                     ));
                 }
             }
             // Offline: show your own body with the same GLB/atlas (first-person otherwise has no mesh).
             if !self.net.joined {
                 let gp = self.game.pos;
-                let ggy = self.game.ground_y_at(gp.x, gp.z).max(gp.y);
-                let face = yaw_face_cam_xz(
+                let foot_y = self.game.feet_draw_y(gp.x, gp.z);
+                let mesh_yaw = yaw_face_cam_xz(
                     Vec3::new(gp.x, 0.0, gp.z),
                     Vec3::new(cam.x, 0.0, cam.z),
                 );
-                character_models.push(character_model(
-                    Vec3::new(gp.x, ggy, gp.z),
-                    face,
+                characters.push(make_character(
+                    Vec3::new(gp.x, foot_y, gp.z),
+                    mesh_yaw,
                     0.64,
+                    CharacterSkin::Remote,
                 ));
             }
         }
@@ -514,8 +533,7 @@ impl OyabaunApp {
             vp,
             self.clear,
             cam,
-            &character_models,
-            (self.last_ms as f32) * 0.001,
+            &characters,
             weapon_hud,
             &self.level_bounds,
             self.mural_z,
@@ -547,12 +565,33 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         const EMB_CHAR: &[u8] = include_bytes!("../characters/oyabaun_player.glb");
         gltf_level::parse_character_glb(EMB_CHAR).ok()
     };
+    #[cfg(target_arch = "wasm32")]
+    let character_rival_cpu = {
+        const EMB_RIVAL: &[u8] = include_bytes!("../characters/oyabaun_rival.glb");
+        let mut c = gltf_level::parse_character_glb(EMB_RIVAL).ok();
+        let url = format!(
+            "./characters/oyabaun_rival.glb?v={}",
+            js_sys::Date::now() as u64
+        );
+        if let Some(bytes) = fetch_bytes(&url).await {
+            if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
+                c = Some(x);
+            }
+        }
+        c
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let character_rival_cpu = {
+        const EMB_RIVAL: &[u8] = include_bytes!("../characters/oyabaun_rival.glb");
+        gltf_level::parse_character_glb(EMB_RIVAL).ok()
+    };
     let gpu = Gpu::new(
         canvas,
         &boot.arena.vertices,
         &boot.arena.indices,
         gi.gltf,
         character_cpu,
+        character_rival_cpu,
     )
     .await?;
     let game = GameState::new(

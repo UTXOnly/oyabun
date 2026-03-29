@@ -200,10 +200,8 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
 "#;
 
 /// Textured character mesh; vertex applies **per-entity model** (relay pose).
-// 8-column sprite atlas (512×N: each column 64px). PixelLab “south” = front toward camera.
-// Meshes use yaw_face_cam_xz in lib — geometry already faces the camera, so sampling must
-// NOT re-pick a column from camera bearing (that double-counts and hits empty strips).
-// char_params.w = global anim time (seconds) for idle bob until walk rows exist.
+// 8-column atlas. char_params.x = mesh yaw (radians, same convention as lib `yaw_face_cam_xz`).
+// Fragment picks column from (camera bearing − mesh_yaw) so the correct facing shows while the card yaws toward you.
 const SHADER_CHAR_TEX: &str = r#"
 struct CharU {
   view_proj: mat4x4<f32>,
@@ -231,10 +229,7 @@ struct Vout {
 };
 @vertex
 fn vs_char(v: Vin) -> Vout {
-  var lp = v.pos;
-  // Idle bob until walk-cycle rows are in the atlas (CHANGELOG TODO)
-  lp.y = lp.y + sin(cu.char_params.w * 4.5) * 0.018;
-  let world_pos = (cu.model * vec4<f32>(lp, 1.0)).xyz;
+  let world_pos = (cu.model * vec4<f32>(v.pos, 1.0)).xyz;
   var o: Vout;
   o.world_pos = world_pos;
   o.clip = cu.view_proj * vec4<f32>(world_pos, 1.0);
@@ -243,8 +238,19 @@ fn vs_char(v: Vin) -> Vout {
 }
 @fragment
 fn fs_char(i: Vout) -> @location(0) vec4<f32> {
-    // Fixed “front” column — mesh rotation already tracks camera in lib.rs
-    let dir_idx = 4u;
+    let mesh_yaw = cu.char_params.x;
+    let chx = cu.char_params.y;
+    let chz = cu.char_params.z;
+    let dx = cu.cam_pos.x - chx;
+    let dz = cu.cam_pos.z - chz;
+    // Same bearing convention as `mesh::default_spawn_yaw` / gameplay forward (dx, -dz).
+    var view = atan2(dx, -dz);
+    if (view < 0.0) { view = view + 6.28318530718; }
+    var rel = view - mesh_yaw;
+    rel = rel - floor(rel / 6.28318530718) * 6.28318530718;
+    if (rel < 0.0) { rel = rel + 6.28318530718; }
+    let dir_f = (rel + 0.39269908) / 0.78539816;
+    let dir_idx = (u32(dir_f) + 4u) % 8u;
     let atlas_u = (i.uv.x + f32(dir_idx)) * 0.125;
     let uv_atlas = vec2<f32>(atlas_u, i.uv.y);
     let t = textureSample(albedo, albedo_samp, uv_atlas) * mu.tint;
@@ -443,7 +449,7 @@ struct CharUniforms {
     cam_pos: [f32; 4],
     fog_color: [f32; 4],
     fog_params: [f32; 4],
-    char_params: [f32; 4], // [unused, world_x, world_z, anim_time_s]
+    char_params: [f32; 4], // [mesh_yaw, world_x, world_z, unused]
     _p1: [f32; 4],
     _p2: [f32; 4],
     _p3: [f32; 4],
@@ -471,6 +477,20 @@ pub struct WeaponHudParams {
     pub flash: f32,
     pub recoil: f32,
     pub reload: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CharacterSkin {
+    Boss,
+    Rival,
+    /// Other players / offline demos (boss atlas until a player strip ships).
+    Remote,
+}
+
+pub struct CharacterInstance {
+    pub model: Mat4,
+    pub mesh_yaw: f32,
+    pub skin: CharacterSkin,
 }
 
 pub struct Gpu {
@@ -505,6 +525,7 @@ pub struct Gpu {
     arms_bind_group: wgpu::BindGroup,
     pub arms_ready: bool,
     character: Option<CharacterDraw>,
+    character_rival: Option<CharacterDraw>,
 }
 
 impl Gpu {
@@ -514,6 +535,7 @@ impl Gpu {
         flat_indices: &[u32],
         gltf_level: Option<crate::gltf_level::GltfLevelCpu>,
         character_level: Option<crate::gltf_level::GltfLevelCpu>,
+        character_rival_level: Option<crate::gltf_level::GltfLevelCpu>,
     ) -> Result<Self, wasm_bindgen::JsValue> {
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
@@ -872,34 +894,33 @@ impl Gpu {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let character = match character_level {
-            Some(cpu)
-                if !cpu.vertices.is_empty()
-                    && !cpu.indices.is_empty()
-                    && !cpu.batches.is_empty() =>
-            {
+        let try_raster_char =
+            |cpu: crate::gltf_level::GltfLevelCpu, label: &str| -> Option<CharacterDraw> {
+                if cpu.vertices.is_empty() || cpu.indices.is_empty() || cpu.batches.is_empty() {
+                    #[cfg(target_arch = "wasm32")]
+                    warn_str(&format!("oyabaun: {label} has no drawable geometry"));
+                    return None;
+                }
                 match Self::raster_character_gltf(&device, &queue, format, cpu) {
                     Ok(cd) => Some(cd),
                     Err(e) => {
                         #[cfg(target_arch = "wasm32")]
                         warn_str(&format!(
-                            "oyabaun: 3D character mesh GPU init failed ({e:?}) — rebuild client/characters/oyabaun_player.glb"
+                            "oyabaun: {label} GPU init failed ({e:?}) — rebuild client/characters/*.glb"
                         ));
                         None
                     }
                 }
-            }
-            Some(_) => {
-                #[cfg(target_arch = "wasm32")]
-                warn_str("oyabaun: oyabaun_player.glb has no drawable geometry");
-                None
-            }
-            None => {
-                #[cfg(target_arch = "wasm32")]
-                warn_str("oyabaun: no oyabaun_player.glb parsed — run tools/blender_make_oyabaun_character.py and wasm-pack build");
-                None
-            }
-        };
+            };
+
+        let character = character_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_player.glb"));
+        #[cfg(target_arch = "wasm32")]
+        if character_level.is_none() {
+            warn_str("oyabaun: no oyabaun_player.glb parsed — run tools/blender_make_oyabaun_character.py and wasm-pack build");
+        }
+
+        let character_rival =
+            character_rival_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_rival.glb"));
 
         let (depth, depth_view) = create_depth(&device, width, height);
 
@@ -934,6 +955,7 @@ impl Gpu {
             arms_bind_group,
             arms_ready: false,
             character,
+            character_rival,
         })
     }
 
@@ -1764,13 +1786,16 @@ impl Gpu {
         self.character.is_some()
     }
 
+    pub fn character_rival_loaded(&self) -> bool {
+        self.character_rival.is_some()
+    }
+
     pub fn draw_world(
         &mut self,
         view_proj: Mat4,
         clear_rgb: Vec3,
         cam_pos: Vec3,
-        character_models: &[Mat4],
-        character_anim_t: f32,
+        characters: &[CharacterInstance],
         weapon_hud: WeaponHudParams,
         level_bounds: &Aabb,
         mural_z: f32,
@@ -1828,68 +1853,64 @@ impl Gpu {
                 .write_buffer(&self.bill_vb, 0, bytemuck::cast_slice(&bill_cpu));
         }
 
-        let char_n = character_models.len().min(MAX_CHARACTER_INSTANCES);
-        let mut char_uniform_bytes: Vec<u8> = Vec::new();
-        if let Some(cd) = &self.character {
-            if char_n > 0 {
-                let stride = cd.char_uniform_stride as usize;
-                char_uniform_bytes.resize(stride * char_n, 0);
-                for (i, &model) in character_models.iter().take(char_n).enumerate() {
-                    // Extract character world position from model matrix (translation column)
-                    let m = model.to_cols_array_2d();
-                    let char_x = m[3][0];
-                    let char_z = m[3][2];
-                    let u = CharUniforms {
-                        view_proj: view_proj.to_cols_array_2d(),
-                        model: m,
-                        cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
-                        fog_color: [0.12, 0.09, 0.18, 1.0],
-                        fog_params: [0.022, 0.0, 0.0, 0.0],
-                        char_params: [0.0, char_x, char_z, character_anim_t],
-                        _p1: [0.0; 4],
-                        _p2: [0.0; 4],
-                        _p3: [0.0; 4],
-                        _p4: [0.0; 4],
-                    };
-                    let dst = &mut char_uniform_bytes[i * stride..i * stride + std::mem::size_of::<CharUniforms>()];
-                    dst.copy_from_slice(bytemuck::bytes_of(&u));
-                }
-                self.queue
-                    .write_buffer(&cd.char_uniform, 0, char_uniform_bytes.as_slice());
+        let capped: Vec<&CharacterInstance> = characters.iter().take(MAX_CHARACTER_INSTANCES).collect();
+        let (rivals, boss_like): (Vec<_>, Vec<_>) = capped
+            .into_iter()
+            .partition(|c| c.skin == CharacterSkin::Rival);
+
+        let fill_char_uniforms = |list: &[&CharacterInstance], cd: &CharacterDraw| -> Vec<u8> {
+            let n = list.len();
+            let stride = cd.char_uniform_stride as usize;
+            let mut raw = vec![0u8; stride * n];
+            for (i, inst) in list.iter().enumerate() {
+                let m = inst.model.to_cols_array_2d();
+                let char_x = m[3][0];
+                let char_z = m[3][2];
+                let u = CharUniforms {
+                    view_proj: view_proj.to_cols_array_2d(),
+                    model: m,
+                    cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
+                    fog_color: [0.12, 0.09, 0.18, 1.0],
+                    fog_params: [0.022, 0.0, 0.0, 0.0],
+                    char_params: [inst.mesh_yaw, char_x, char_z, 0.0],
+                    _p1: [0.0; 4],
+                    _p2: [0.0; 4],
+                    _p3: [0.0; 4],
+                    _p4: [0.0; 4],
+                };
+                let dst = &mut raw[i * stride..i * stride + std::mem::size_of::<CharUniforms>()];
+                dst.copy_from_slice(bytemuck::bytes_of(&u));
             }
+            raw
+        };
+
+        let char_share_buffer = self.character_rival.is_none() && self.character.is_some();
+        let split_char_passes =
+            char_share_buffer && !boss_like.is_empty() && !rivals.is_empty();
+
+        let write_boss_uniforms = || {
+            if let Some(cd) = self.character.as_ref() {
+                if !boss_like.is_empty() {
+                    let bytes = fill_char_uniforms(&boss_like, cd);
+                    self.queue.write_buffer(&cd.char_uniform, 0, bytes.as_slice());
+                }
+            }
+        };
+        let write_rival_uniforms = || {
+            if !rivals.is_empty() {
+                if let Some(cd) = self.character_rival.as_ref().or(self.character.as_ref()) {
+                    let bytes = fill_char_uniforms(&rivals, cd);
+                    self.queue.write_buffer(&cd.char_uniform, 0, bytes.as_slice());
+                }
+            }
+        };
+
+        if !split_char_passes {
+            write_boss_uniforms();
+            write_rival_uniforms();
         }
 
-        let mut enc = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
-
-        {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("world"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: clear_rgb.x as f64,
-                            g: clear_rgb.y as f64,
-                            b: clear_rgb.z as f64,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let draw_world = |pass: &mut wgpu::RenderPass<'_>| {
             match &self.world {
                 WorldRaster::Flat {
                     pipeline,
@@ -1921,14 +1942,16 @@ impl Gpu {
                     }
                 }
             }
+        };
 
+        let draw_boss_batch = |pass: &mut wgpu::RenderPass<'_>| {
             if let Some(ref cd) = self.character {
-                if char_n > 0 {
+                if !boss_like.is_empty() {
                     pass.set_pipeline(&cd.pipeline);
                     pass.set_vertex_buffer(0, cd.vb.slice(..));
                     pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
                     let stride = cd.char_uniform_stride;
-                    for i in 0..char_n {
+                    for i in 0..boss_like.len() {
                         pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
                         for b in &cd.batches {
                             pass.set_bind_group(1, &b.bind_group, &[]);
@@ -1938,7 +1961,28 @@ impl Gpu {
                     }
                 }
             }
+        };
 
+        let draw_rival_batch = |pass: &mut wgpu::RenderPass<'_>| {
+            if !rivals.is_empty() {
+                if let Some(cd) = self.character_rival.as_ref().or(self.character.as_ref()) {
+                    pass.set_pipeline(&cd.pipeline);
+                    pass.set_vertex_buffer(0, cd.vb.slice(..));
+                    pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
+                    let stride = cd.char_uniform_stride;
+                    for i in 0..rivals.len() {
+                        pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                        for b in &cd.batches {
+                            pass.set_bind_group(1, &b.bind_group, &[]);
+                            let end = b.first_index.saturating_add(b.index_count);
+                            pass.draw_indexed(b.first_index..end, 0, 0..1);
+                        }
+                    }
+                }
+            }
+        };
+
+        let draw_billboard = |pass: &mut wgpu::RenderPass<'_>| {
             if self.sprite_ready && !bill_cpu.is_empty() {
                 let vcount = bill_cpu.len() as u32;
                 let icount = (vcount / 4) * 6;
@@ -1950,6 +1994,103 @@ impl Gpu {
                 pass.set_vertex_buffer(0, self.bill_vb.slice(0..vb_bytes));
                 pass.set_index_buffer(self.bill_ib.slice(0..ib_bytes), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..icount, 0, 0..1);
+            }
+        };
+
+        let mut enc = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+
+        if split_char_passes {
+            write_boss_uniforms();
+            {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("world"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: clear_rgb.x as f64,
+                                g: clear_rgb.y as f64,
+                                b: clear_rgb.z as f64,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                draw_world(&mut pass);
+                draw_boss_batch(&mut pass);
+            }
+            write_rival_uniforms();
+            {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("world_chars2"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                draw_rival_batch(&mut pass);
+                draw_billboard(&mut pass);
+            }
+        } else {
+            {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("world"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: clear_rgb.x as f64,
+                                g: clear_rgb.y as f64,
+                                b: clear_rgb.z as f64,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                draw_world(&mut pass);
+                draw_boss_batch(&mut pass);
+                draw_rival_batch(&mut pass);
+                draw_billboard(&mut pass);
             }
         }
 
