@@ -1,169 +1,187 @@
 # Character Improvement Task Doc
 
-## Status: IN PROGRESS — generator: `tools/blender_build_oyabaun_characters_3d.py`; refs: `example_images/` + `docs/CHARACTER_PIPELINE_HANDOFF.md`
+## Status: PIPELINE REVERTED — now using PixelLab pixel art sprites, NOT 3D Blender models
 
-## Goal
+## What Changed (2026-03-29)
 
-The current 3D characters are smooth humanoid shapes (via Blender skin modifier) but lack detail. They need to look like stylized cyberpunk yakuza gangsters — menacing, detailed, with visible clothing features and weapons.
+The 3D Blender skin-modifier character pipeline **FAILED** to match the neo-noir pixel art reference style. After multiple iterations (procedural textures, audit tools, shader tuning), the approach was abandoned.
 
-**Reference style**: Cyberpunk yakuza — dark alley setting, neon accents, suits with visible lapels/collars, sunglasses, weapons (pistols, katanas), slicked/spiky hair, facial scars. Think Yakuza game series meets cyberpunk aesthetic.
+**Characters are now PixelLab pro-mode pixel art sprites** rendered as camera-facing billboard quads. This produces dramatically better results that match the reference images in `example_images/`.
+
+### DEPRECATED — Do NOT use:
+- `tools/blender_build_oyabaun_characters_3d.py` — old 3D generator
+- `tools/character_style_audit.py` — compared renders to ref, irrelevant now
+- `tools/blender_character_capture.py` — headless render for audit
+- `client/characters/oyabaun_player.glb` / `oyabaun_rival.glb` — old 3D models (still embedded but bypassed)
+- Any Blender-based character workflow
 
 ## Current Architecture
-
-Characters are **3D meshes** (NOT billboard sprites — the old PixelLab pixel art pipeline is deprecated).
 
 ### Pipeline
 
 ```
-Blender Python script (skin modifier + detail meshes)
-    → join all parts into single mesh
-    → export as GLB (glTF binary)
-    → client/characters/oyabaun_player.glb (boss)
-    → client/characters/oyabaun_rival.glb (rival)
-    → include_bytes!() in Rust WASM build
-    → parse_character_glb() loads verts + indices + material batches
-    → SHADER_CHAR_TEX renders with standard model*position transform
-    → per-material tint colors (no textures, just colored materials)
-    → directional lighting + hit flash + distance fog
+PixelLab MCP (pro mode, 64px canvas, 8 directions)
+    → animate_character (walk, shoot, etc.)
+    → download ZIP → extract frames
+    → oyabaun-characters/tools/build_game_atlas.py
+        → 8 cols (directions) × N rows (idle + anim frames) atlas PNG
+    → convert PNG to raw RGBA binary (.rgba file with 8-byte header)
+    → client/characters/<name>_atlas.rgba
+    → include_bytes!() in render.rs
+    → billboard quads in draw_world() with atlas UV selection
+    → SHADER_BILL: alpha discard, fog, nearest sampling
 ```
 
-### Shader (render.rs — SHADER_CHAR_TEX)
+### Rendering (render.rs)
 
-- Standard 3D vertex transform: `world_pos = model * vec4(v.pos, 1.0)`
-- Fragment: material tint * directional light + ambient + hit flash + fog
-- Depth write ON, alpha = 1.0 (solid models)
-- No billboard, no atlas UV selection
-
-### Character Model Matrix
-
-```rust
-fn character_model(foot: Vec3, yaw: f32, scale: f32) -> Mat4 {
-    // +PI offset because Blender -Y front → glTF +Z, game yaw 0 = -Z
-    Mat4::from_scale_rotation_translation(
-        Vec3::splat(scale),
-        Quat::from_rotation_y(yaw + PI),
-        foot,
-    )
-}
-```
-
-### GLB Format
-
-- Vertex: `CharacterVertex { pos, uv, nrm }` — 32 bytes (normals from glTF or computed)
-- Materials: Principled BSDF with base color (no image textures)
-- Emissive materials used for neon glow effects
-- Feet at Y=0 in glTF (Z=0 in Blender, exported with `export_yup=True`)
-- Front of character faces -Y in Blender → +Z in glTF
+- `char_sprite_bg`: bind group for the sprite atlas texture
+- Billboard quads generated per-character in `draw_world()`:
+  - Camera-facing quad at character foot position
+  - Direction column (0-7) from `atan2(cam-char)` relative to `mesh_yaw`
+  - Animation row from `anim_frame` (0 = idle, 1-6 = walk)
+- `SHADER_BILL`: simple texture sample + alpha discard + rim
+- 3D GLB path preserved but bypassed when `char_sprite_bg.is_some()`
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `client/src/render.rs` | SHADER_CHAR_TEX, CharUniforms, raster_character_gltf pipeline |
-| `client/src/lib.rs` | character_model(), make_character(), NPC rendering loop |
-| `client/src/gltf_level.rs` | parse_character_glb() — loads GLB vertices/indices/materials |
-| `client/src/npc.rs` | NPC AI, hitboxes, wave spawning, smooth_turn |
-| `client/characters/oyabaun_player.glb` | Boss character model |
-| `client/characters/oyabaun_rival.glb` | Rival character model |
-| `tools/blender_build_oyabaun_characters_3d.py` | Skin-modifier boss/rival (`OYABAUN_VARIANT`, optional `OYABAUN_CHAR_DECIMATE`) |
-| `tools/blender_make_oyabaun_character.py` | Stub / legacy sprite quad only (`OYABAUN_LEGACY_SPRITE=1`) |
-| `docs/CHARACTER_PIPELINE_HANDOFF.md` | Pipeline answers, material tables, `example_images` list |
+| `client/src/render.rs` | Billboard sprite rendering, atlas loading, SHADER_BILL |
+| `client/src/lib.rs` | character_model(), walk_anim_frame(), walk_bob_y() |
+| `client/src/npc.rs` | NPC AI, hitboxes, wave spawning |
+| `client/characters/boss_v3_atlas.rgba` | Boss sprite atlas (embedded, 896×784) |
+| `~/Desktop/oyabaun-characters/` | Character art repo (generation, refinement, export) |
 
-## What Needs Improvement
+### Atlas Format
 
-### Priority 1: Character Detail (Body)
+- Raw binary: 8-byte header (u32 LE width, u32 LE height) + RGBA pixel data
+- Layout: 8 columns × N rows of square cells
+- Columns: S, SW, W, NW, N, NE, E, SE
+- Row 0: idle/standing rotation
+- Rows 1+: animation frames
 
-The skin modifier creates smooth organic shapes but they're featureless mannequins. Need:
+### PixelLab Characters (v3 pro mode)
 
-- [ ] **Facial features**: Nose (wedge/pyramid), ears, eyebrow ridges, jaw definition, chin
-- [ ] **Muscular definition**: Pectoral separation on chest, deltoid bumps on shoulders, forearm taper
-- [ ] **Hands**: At minimum thumb separation, ideally 3-4 finger groupings
-- [ ] **Feet/Shoes**: Sole separation, heel detail, pointed or rounded toe shape
+| Character | PixelLab ID | Canvas | Animations | In-Game |
+|-----------|-------------|--------|------------|---------|
+| Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | walk (8 dirs × 6 frames) | ✅ Active |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | None yet | ❌ Uses boss atlas |
+| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | None yet | ❌ Uses boss atlas |
 
-### Priority 2: Clothing Detail
+### Previous Characters (v2 standard, v1 deprecated)
 
-- [ ] **Suit jacket**: Raised collar geometry, visible lapel V-panels, shoulder pads, breast pocket, jacket hem at waist, button dots, sleeve cuffs
-- [ ] **Shirt**: Visible underneath jacket at V-neck, collar points
-- [ ] **Pants**: Belt with buckle, slight crease definition, break at ankle
-- [ ] **Tie** (boss): Proper tapered shape with knot
+- v2 Boss: `6d169ab6-bb02-4ef2-bf1e-6bec41553472` (64×64, standard mode)
+- v2 Rival: `213e25e0-9c7a-4d71-a37f-cd199a4f9855`
+- v2 Player: `ea4cdb4d-00bb-4f77-853d-843061b465f2`
+- v1 Boss: `572836f2-a19f-41b5-bee5-46998f43b019`
+- v1 Rival: `afd7b081-5b53-49bf-8f00-ecbd5e65f1c2`
 
-### Priority 3: Character-Specific Features
+## TODOs
 
-**Boss** (dark suit, menacing):
-- [ ] Slicked-back hair with volume and side-part definition
-- [ ] Sunglasses with wrap-around shape
-- [ ] Cigarette in mouth
-- [ ] Pistol in right hand (currently basic box shape — needs trigger, slide detail)
-- [ ] Signet ring or hand tattoo
-- [ ] Broader shoulders, more imposing stance
+### Priority 1: Characters with weapons baked in
 
-**Rival** (white suit, agile):
-- [ ] Spiky bleached hair (5+ distinct spikes with height variation)
-- [ ] Facial scar more prominent (longer, slightly raised)
-- [ ] Purple-tinted glasses
-- [ ] Katana: proper wrapped handle segments, decorative guard, curved blade with taper
-- [ ] Leaner, more athletic build
-- [ ] Open collar showing chain/necklace
+The current boss sprite has no visible weapon — the pistol needs to be part of the character sprite, NOT a separate floating billboard. **Regenerate characters with weapons visible in their sprites.**
 
-### Priority 4: Neon Accents
+- [ ] **Boss with pistol**: Create new PixelLab character (pro mode) — "Japanese yakuza boss holding pistol in right hand, dark suit, sunglasses, cigarette, menacing stance"
+- [ ] **Rival with katana**: Create new PixelLab character (pro mode) — "Young yakuza enforcer holding katana, leather jacket, spiky platinum hair, purple sunglasses, aggressive stance"
+- [ ] **Player with weapon**: Create new PixelLab character (pro mode) — "Street ronin holding katana behind back, dark hoodie, face mask, tactical gear"
 
-Both characters should have glowing cyberpunk accents:
-- [ ] Neon piping on suit edges (lapels, pockets, cuffs)
-- [ ] Emissive belt buckle or jewelry
-- [ ] Boss: cyan/teal glow accents
-- [ ] Rival: purple/magenta glow accents
-- [ ] Weapon glow effects (gun muzzle, katana edge)
+### Priority 2: Shooting/attack animations
 
-## Technical Constraints
+PixelLab template animations available for combat:
+- `cross-punch`, `fireball`, `flying-kick`, `high-kick`, `hurricane-kick`, `lead-jab`, `leg-sweep`, `roundhouse-kick`, `surprise-uppercut`, `taking-punch`
 
-- **Vertex budget**: ~1000-2000 verts per character (current: ~1100). Can go up to 3000 if needed.
-- **Material limit**: Keep under 15 materials per character (each creates a draw batch)
-- **No image textures**: All coloring via material base color / emission. The GLB parser handles untextured materials.
-- **Smooth shading**: Use `shade_smooth()` on organic parts, flat shading on hard-surface accessories
-- **Blender coordinate system**: Z-up, front = -Y. Export with `export_yup=True` flips to Y-up for glTF.
+For a shooter game, custom animations may be better:
+- [ ] **Boss shooting pistol**: custom animation — "firing pistol forward" (costs 20-40 generations/direction)
+- [ ] **Rival katana slash**: Use template `cross-punch` or custom "slashing katana" animation
+- [ ] **Player attack**: custom animation matching player's weapon
 
-## Approach: Skin Modifier + Detail Meshes
+### Priority 3: Per-character atlas wiring
 
-The current approach (and recommended path forward):
+Currently all characters use the boss atlas. Need:
 
-1. **Base body**: Skin modifier from skeleton joints → subdivision → decimate (~1000 faces)
-2. **Material assignment**: By face center Z/X position (height determines suit vs skin vs hair vs shoes)
-3. **Detail meshes**: Separate objects for accessories (glasses, gun, tie, neon strips, etc.)
-4. **Join all**: `bpy.ops.object.join()` merges everything into one mesh with multiple material slots
-5. **Export**: Single GLB per character type
+- [ ] **Rival atlas**: Queue walk animations for rival v3, build atlas, convert to .rgba, add to render.rs
+- [ ] **Player atlas**: Same for player v3
+- [ ] **Per-skin bind group**: Modify render.rs to store `char_sprite_bg_boss`, `char_sprite_bg_rival`, select in `draw_world()` based on `CharacterSkin`
 
-### Skin Modifier Skeleton
+### Priority 4: Additional animations
 
-Define joints as `{name: (x, y, z)}` dict, connect with edges, set radii per joint:
+Template animations to consider (1 generation/direction, cheap):
+- [ ] `breathing-idle` — better than static idle
+- [ ] `running-6-frames` or `running-8-frames` — for sprint
+- [ ] `falling-back-death` — death animation
+- [ ] `taking-punch` — hit reaction
+- [ ] `fight-stance-idle-8-frames` — combat idle
 
-```python
-# Example radii for broad-shouldered boss
-radii = {
-    'pelvis':      (0.14, 0.10),  # wide hips
-    'chest':       (0.16, 0.12),  # broad chest
-    'upper_chest': (0.18, 0.12),  # wide shoulders
-    'neck':        (0.06, 0.06),  # thin neck
-    'head':        (0.10, 0.11),  # round head
-    # ... etc
-}
-```
+### Priority 5: Hit flash
 
-## How to Test
+- [ ] Add hit flash support to SHADER_BILL (or create SHADER_CHAR_BILL with tint uniform)
+- [ ] When `anim_frame > 100.0`, mix sprite color with red (same convention as old 3D shader)
+
+### Priority 6: Pixel art weapons as separate sprites (alternative approach)
+
+If baking weapons into characters doesn't work well:
+- [ ] Generate standalone weapon pixel art (pistol, katana, SMG) as small sprites
+- [ ] Render as separate billboard quads attached to character hand positions
+- [ ] Animate weapon independently of character
+
+## Build & Test
 
 ```bash
-# Rebuild WASM after GLB changes
+# After changing .rgba atlas files or render.rs:
 cd client && wasm-pack build --target web --no-typescript
 
-# Serve locally
+# Serve:
 python3 -m http.server 8080 --directory client
 
-# Hard refresh browser (Cmd+Shift+R) — static server caches aggressively
+# Hard refresh browser (Cmd+Shift+R)
+```
+
+## Character Art Repo
+
+The dedicated character art repo at `~/Desktop/oyabaun-characters/` has:
+
+```
+reference/          # Style target images + palettes
+prompts/            # PixelLab generation prompts per character
+raw/sprites/        # PixelLab outputs (ZIP extracts)
+export/atlases/     # Game-ready atlas PNGs
+tools/
+    build_game_atlas.py   # Extracted ZIP → atlas PNG
+    palette_extract.py    # Reference → color palette
+    compare.py            # Side-by-side QA
+    export_to_game.py     # Copy to oyabaun repo
+```
+
+### Atlas build workflow
+
+```bash
+cd ~/Desktop/oyabaun-characters
+
+# 1. Extract PixelLab ZIP
+unzip raw/sprites/boss_v3/boss_v3.zip -d raw/sprites/boss_v3/extracted
+
+# 2. Build atlas
+python tools/build_game_atlas.py raw/sprites/boss_v3/extracted --out export/atlases/boss_v3_atlas.png
+
+# 3. Convert to raw RGBA for embedding
+python3 -c "
+from PIL import Image; import struct
+img = Image.open('export/atlases/boss_v3_atlas.png').convert('RGBA')
+w, h = img.size
+with open('../oyabaun/client/characters/boss_v3_atlas.rgba', 'wb') as f:
+    f.write(struct.pack('<II', w, h))
+    f.write(img.tobytes())
+"
+
+# 4. Rebuild WASM
+cd ../oyabaun/client && wasm-pack build --target web --no-typescript
 ```
 
 ## DO NOT
 
-- Use PixelLab or any sprite/billboard approach — that pipeline is deprecated
-- Use atlas UV selection in the shader — characters are solid 3D models
-- Modify the Tokyo alley level (`client/levels/tokyo_alley.glb`) — it's complete
-- Change the shader uniform struct layout (CharUniforms) without updating Rust side
-- Forget to run `wasm-pack build` after changing GLB files (they're embedded via include_bytes!)
+- Use Blender skin-modifier pipeline for characters — it's deprecated
+- Use `tools/blender_build_oyabaun_characters_3d.py` — deprecated
+- Create floating weapon billboards separate from characters (bake weapons into sprites instead)
+- Use billboard vertex shaders with model transforms — billboard quads are pre-built in world space
+- Forget that atlas .rgba files have an 8-byte header (u32 width, u32 height) before pixel data

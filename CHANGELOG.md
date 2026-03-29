@@ -1,6 +1,58 @@
 # Changelog
 
-## 2026-03-29 — 3D character overhaul: skin modifier models replace sprite billboards
+## 2026-03-29 — Pixel art sprite billboards replace 3D models (PixelLab v3 pro)
+
+### Reverted: 3D Blender skin-modifier characters → PixelLab pixel art sprites
+
+The procedural 3D character approach could not match the neo-noir pixel art reference style despite multiple iterations (audit tool, texture tweaks, shader tuning). Characters are now **PixelLab pro-mode pixel art sprites** rendered as camera-facing billboard quads.
+
+### New character pipeline
+
+```
+PixelLab MCP (pro mode, 64px canvas, 8 directions)
+    → walk animation (6 frames × 8 dirs)
+    → download ZIP → extract
+    → build_game_atlas.py → 896×784 atlas (8 cols × 7 rows, 112×112 cells)
+    → convert to .rgba binary (width + height header + raw RGBA)
+    → embed via include_bytes! in render.rs
+    → billboard quads generated per-character per-frame
+    → SHADER_BILL renders with alpha discard + fog
+```
+
+### Character art repo
+
+Dedicated repo at `~/Desktop/oyabaun-characters/` for character art production:
+- `reference/` — style target images + extracted palettes
+- `prompts/` — generation prompts per character
+- `tools/` — atlas builder, palette extractor, comparison tool, game export
+- `raw/` → `refined/` → `export/` pipeline
+
+### Characters (v3 pro mode)
+
+| Character | PixelLab ID | Canvas | Status |
+|-----------|-------------|--------|--------|
+| Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | ✅ Atlas in-game |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | Rotations only, walk TODO |
+| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | Rotations only, walk TODO |
+
+### Rendering changes (render.rs)
+
+- **Added**: Embedded sprite atlas loading (raw RGBA → GPU texture → bind group)
+- **Added**: Camera-facing billboard quad generation per character
+- **Added**: 8-direction selection from camera-character relative angle
+- **Added**: Walk animation row selection from `anim_frame`
+- **Preserved**: 3D GLB path (bypassed when sprite atlas present)
+- **Shader**: Reuses `SHADER_BILL` (alpha discard at 0.35, nearest sampling)
+
+### Files changed
+
+- `client/src/render.rs` — char_sprite_bg fields, atlas loading, billboard quad gen, draw calls
+- `client/characters/boss_v3_atlas.rgba` — Embedded sprite atlas (896×784, 2.8MB)
+- `client/characters/boss_v3_atlas.png` — Visual reference copy
+
+---
+
+## 2026-03-29 (earlier) — 3D character overhaul: skin modifier models replace sprite billboards
 
 ### Breaking change: Deprecated PixelLab sprite pipeline
 
