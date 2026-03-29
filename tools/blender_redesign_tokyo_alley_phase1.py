@@ -75,7 +75,29 @@ def _new_box(
     if rot_euler:
         ob.rotation_euler = Euler(rot_euler, "XYZ")
     col.objects.link(ob)
+    _ensure_uv_smart_project(ob)
     return ob
+
+
+def _ensure_uv_smart_project(ob: bpy.types.Object) -> None:
+    mesh = ob.data
+    if mesh.uv_layers:
+        return
+    import bmesh
+
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    try:
+        bmesh.ops.smart_project(
+            bm,
+            angle_limit=math.radians(66.0),
+            island_margin=0.02,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"oyabaun: phase1: uv skip {ob.name}: {exc}", file=sys.stderr)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
 
 
 def _link_mat(ob: bpy.types.Object, mat_name: str) -> None:

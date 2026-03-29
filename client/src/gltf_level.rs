@@ -67,6 +67,18 @@ fn mat_from_transform(t: gltf::scene::Transform) -> Mat4 {
     Mat4::from_scale_rotation_translation(scale, q, translation)
 }
 
+/// glTF primitives that reference `baseColorTexture` but omit TEXCOORD_* (e.g. bmesh cubes
+/// from Blender scripts) would otherwise get UV (0,0) for every vertex — one texel, often
+/// near-white after sRGB decode. Derive repeating UVs from world position instead.
+fn world_space_fallback_uv(world_pos: Vec3) -> [f32; 2] {
+    const SX: f32 = 0.38;
+    const SY: f32 = 0.22;
+    [
+        (world_pos.x * SX + world_pos.z * SX * 0.65).rem_euclid(1.0),
+        (world_pos.y * SY + world_pos.z * SY * 0.55).rem_euclid(1.0),
+    ]
+}
+
 fn is_spawn_name(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     n == "oyabaunspawn"
@@ -283,10 +295,23 @@ fn visit_character_node(
             }
 
             let r_uv = prim.reader(|b| Some(&buffers[b.index()]));
-            let uv0: Vec<[f32; 2]> = r_uv
-                .read_tex_coords(uv_set)
-                .map(|tc| tc.into_f32().collect())
-                .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+            let uv0: Vec<[f32; 2]> = match r_uv.read_tex_coords(uv_set).map(|tc| tc.into_f32().collect::<Vec<[f32; 2]>>()) {
+                Some(collected) if collected.len() == positions.len() => collected,
+                Some(collected) => positions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        collected.get(i).copied().unwrap_or_else(|| {
+                            world_space_fallback_uv(world.transform_point3(*p))
+                        })
+                    })
+                    .collect(),
+                None if image_index != usize::MAX => positions
+                    .iter()
+                    .map(|p| world_space_fallback_uv(world.transform_point3(*p)))
+                    .collect(),
+                None => vec![[0.0, 0.0]; positions.len()],
+            };
 
             let r_idx = prim.reader(|b| Some(&buffers[b.index()]));
             let prim_indices: Vec<u32> = if let Some(idr) = r_idx.read_indices() {
@@ -431,10 +456,23 @@ fn visit_node(
             }
 
             let r_uv = prim.reader(|b| Some(&buffers[b.index()]));
-            let uv0: Vec<[f32; 2]> = r_uv
-                .read_tex_coords(uv_set)
-                .map(|tc| tc.into_f32().collect())
-                .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+            let uv0: Vec<[f32; 2]> = match r_uv.read_tex_coords(uv_set).map(|tc| tc.into_f32().collect::<Vec<[f32; 2]>>()) {
+                Some(collected) if collected.len() == positions.len() => collected,
+                Some(collected) => positions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        collected.get(i).copied().unwrap_or_else(|| {
+                            world_space_fallback_uv(world.transform_point3(*p))
+                        })
+                    })
+                    .collect(),
+                None if image_index != usize::MAX => positions
+                    .iter()
+                    .map(|p| world_space_fallback_uv(world.transform_point3(*p)))
+                    .collect(),
+                None => vec![[0.0, 0.0]; positions.len()],
+            };
 
             let r_idx = prim.reader(|b| Some(&buffers[b.index()]));
             let prim_indices: Vec<u32> = if let Some(idr) = r_idx.read_indices() {
