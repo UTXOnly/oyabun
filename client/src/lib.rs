@@ -20,7 +20,7 @@ use loadout::{Loadout, WEAPONS};
 use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
 use net::NetController;
 use render::WeaponHudParams;
-pub use render::{BloodSplat, CharacterInstance, CharacterSkin, Gpu, Vertex};
+pub use render::{BloodSplat, CharacterInstance, CharacterSkin, Gpu, HudShell, Vertex};
 
 use serde_json::json;
 
@@ -103,9 +103,43 @@ fn run_anim_frame(time: f32, speed: f32) -> f32 {
     7.0 + frame.floor()
 }
 
-fn shoot_anim_frame(shoot_t: f32) -> f32 {
-    let frame = (shoot_t * SHOOT_FPS) % SHOOT_FRAME_COUNT;
-    13.0 + frame.floor()
+/// Row where 6-frame shoot cycle starts: full atlas (run+shoot) uses 13; compact (walk+suit sprint) uses 7.
+fn shoot_row_start(atlas_rows: u32) -> Option<f32> {
+    if atlas_rows >= 19 {
+        Some(13.0)
+    } else if atlas_rows >= 13 {
+        Some(7.0)
+    } else {
+        None
+    }
+}
+
+const MAX_HUD_SHELLS: usize = 14;
+
+fn push_hud_shell(shells: &mut Vec<HudShell>, s: HudShell) {
+    if shells.len() >= MAX_HUD_SHELLS {
+        shells.remove(0);
+    }
+    shells.push(s);
+}
+
+/// Brass eject in HUD weapon space (matches `vs_hud` before clip).
+fn spawn_hud_shells_for_weapon(wi: usize, shells: &mut Vec<HudShell>) {
+    match wi {
+        0 => push_hud_shell(
+            shells,
+            HudShell::new(0.38, -0.64, 0.46, 0.52, 15.0),
+        ),
+        1 => {
+            push_hud_shell(shells, HudShell::new(0.36, -0.58, 0.40, 0.50, 11.0));
+            push_hud_shell(shells, HudShell::new(0.34, -0.62, 0.36, 0.46, -9.0));
+        }
+        2 => push_hud_shell(
+            shells,
+            HudShell::new(0.42, -0.66, 0.52, 0.42, 24.0),
+        ),
+        _ => {}
+    }
 }
 
 fn npc_billboard_anim_frame(time: f32, npc: &npc::Npc, atlas_rows: u32) -> f32 {
@@ -115,11 +149,12 @@ fn npc_billboard_anim_frame(time: f32, npc: &npc::Npc, atlas_rows: u32) -> f32 {
     if !npc.alive() {
         return 0.0;
     }
-    let extended_shoot = atlas_rows >= 19;
-    let extended_run = atlas_rows >= 13;
+    let shoot_base = shoot_row_start(atlas_rows);
+    let extended_run = atlas_rows >= 19;
     if npc.shooting_at_player() {
-        if extended_shoot {
-            return shoot_anim_frame(npc.shoot_anim_t);
+        if let Some(base) = shoot_base {
+            let frame = (npc.shoot_anim_t * SHOOT_FPS) % SHOOT_FRAME_COUNT;
+            return base + frame.floor();
         }
         return 0.0;
     }
@@ -371,6 +406,8 @@ pub struct OyabaunApp {
     last_kill: String,
     /// Pixel blood splats at hit locations in world space (fade over time).
     blood_splats: Vec<BloodSplat>,
+    /// First-person ejected brass (HUD space, same transform as weapon).
+    hud_shells: Vec<HudShell>,
     clear: Vec3,
     level_bounds: mesh::Aabb,
     mural_z: f32,
@@ -600,6 +637,14 @@ impl OyabaunApp {
                 s.life -= dt * 3.2;
             }
             self.blood_splats.retain(|s| s.life > 0.02);
+            for s in &mut self.hud_shells {
+                s.vy -= dt * 1.9;
+                s.x += s.vx * dt;
+                s.y += s.vy * dt;
+                s.rot += s.spin * dt;
+                s.life -= dt * 1.15;
+            }
+            self.hud_shells.retain(|s| s.life > 0.03);
         }
 
         let (wp, wn, pick, rel) = self.input.take_weapon_edges();
@@ -618,6 +663,7 @@ impl OyabaunApp {
         }
         if shot_fired {
             let wi = self.loadout.current_idx();
+            spawn_hud_shells_for_weapon(wi, &mut self.hud_shells);
             // Check HP before and after to detect hits and kills
             let hp_before: Vec<(f32, bool)> = self.npcs.npcs.iter()
                 .map(|n| (n.hp, n.alive()))
@@ -701,6 +747,11 @@ impl OyabaunApp {
         self.gpu.upload_vfx_blood_sprite(&img)
     }
 
+    #[wasm_bindgen(js_name = uploadVfxShellSprite)]
+    pub fn upload_vfx_shell_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
+        self.gpu.upload_vfx_shell_sprite(&img)
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.gpu.resize(width, height);
     }
@@ -779,6 +830,7 @@ impl OyabaunApp {
             flash: self.loadout.muzzle_flash,
             recoil: self.loadout.recoil,
             reload: self.loadout.reload_anim,
+            anim_t: self.game_time,
         };
         self.gpu.draw_world(
             vp,
@@ -787,6 +839,7 @@ impl OyabaunApp {
             &characters,
             weapon_hud,
             &self.blood_splats,
+            &self.hud_shells,
             &self.level_bounds,
             self.mural_z,
         );
@@ -870,6 +923,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         last_hit: false,
         last_kill: String::new(),
         blood_splats: Vec::new(),
+        hud_shells: Vec::new(),
         clear: Vec3::new(0.14, 0.12, 0.20),
         level_bounds: boot.level_bounds,
         mural_z: boot.mural_z,

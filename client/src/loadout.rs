@@ -9,15 +9,15 @@ pub const WEAPONS: [WeaponDef; 4] = [
         max_clip: 12,
     },
     WeaponDef {
-        name: "500",
+        name: "Pump",
         max_clip: 8,
     },
     WeaponDef {
-        name: "SCAR",
+        name: "SMG",
         max_clip: 32,
     },
     WeaponDef {
-        name: "LITE",
+        name: "Plasma",
         max_clip: 50,
     },
 ];

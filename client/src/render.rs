@@ -523,7 +523,8 @@ struct HudUniform {
     recoil: f32,
     reload: f32,
     aspect: f32,
-    _pad: [f32; 2],
+    anim_t: f32,
+    _pad: f32,
 }
 
 #[repr(C)]
@@ -555,7 +556,7 @@ impl HudVertex {
 }
 
 const SHADER_HUD: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, _p1: f32, _p2: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, _p2: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var wtex: texture_2d<f32>;
 @group(1) @binding(1) var wsamp: sampler;
@@ -563,35 +564,27 @@ struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect:
 struct HIn { @location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>, }
 struct HOut { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32>, }
 
-@vertex
-fn vs_hud(v: HIn) -> HOut {
-  // Aspect ratio correction — keep weapon square regardless of screen shape
+fn hud_motion_offset() -> vec2<f32> {
   let inv_aspect = 1.0 / max(hu.aspect, 0.5);
-
-  // Walk bob (scaled for aspect)
   let bx = sin(hu.bob) * 0.025 * inv_aspect;
   let by = cos(hu.bob * 1.35) * 0.018;
-
-  // Recoil kick: weapon jumps up strongly on fire
   let recoil_y = hu.recoil * hu.recoil * 0.17;
   let recoil_x = -hu.recoil * 0.036 * inv_aspect;
-
-  // Reload: weapon drops below screen then comes back
   var reload_y = 0.0;
   if (hu.reload > 0.0) {
-    if (hu.reload < 1.0) {
-      reload_y = -hu.reload * 0.7;
-    } else {
-      reload_y = -(2.0 - hu.reload) * 0.7;
-    }
+    if (hu.reload < 1.0) { reload_y = -hu.reload * 0.7; }
+    else { reload_y = -(2.0 - hu.reload) * 0.7; }
   }
+  return vec2<f32>(bx + recoil_x, by + recoil_y + reload_y);
+}
 
-  // Position: correct X for aspect ratio, offset weapon slightly right
+@vertex
+fn vs_hud(v: HIn) -> HOut {
+  let inv_aspect = 1.0 / max(hu.aspect, 0.5);
   var p = v.pos;
   p.x = p.x * inv_aspect + 0.12 * inv_aspect;
-
   var o: HOut;
-  o.clip = vec4<f32>(p + vec2<f32>(bx + recoil_x, by + recoil_y + reload_y), 0.0, 1.0);
+  o.clip = vec4<f32>(p + hud_motion_offset(), 0.0, 1.0);
   o.uv = v.uv;
   return o;
 }
@@ -617,7 +610,7 @@ fn fs_hud_arms(i: HOut) -> @location(0) vec4<f32> {
 "#;
 
 const SHADER_HUD_VFX: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, _p1: f32, _p2: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, _p2: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var vtex: texture_2d<f32>;
 @group(1) @binding(1) var vsamp: sampler;
@@ -625,9 +618,7 @@ struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect:
 struct HIn { @location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>, }
 struct HOut { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32>, }
 
-// Muzzle sprite anchored to FP weapon barrel (HUD quad space, matches vs_hud weapon placement).
-@vertex
-fn vs_muzzle(v: HIn) -> HOut {
+fn hud_motion_vfx() -> vec2<f32> {
   let inv_aspect = 1.0 / max(hu.aspect, 0.5);
   let bx = sin(hu.bob) * 0.025 * inv_aspect;
   let by = cos(hu.bob * 1.35) * 0.018;
@@ -638,16 +629,22 @@ fn vs_muzzle(v: HIn) -> HOut {
     if (hu.reload < 1.0) { reload_y = -hu.reload * 0.7; }
     else { reload_y = -(2.0 - hu.reload) * 0.7; }
   }
-  var ox = 0.485;
-  var oy = -0.34;
-  var sc = 0.13;
-  if (hu.weapon == 1u) { ox = 0.395; oy = -0.30; sc = 0.15; }
-  else if (hu.weapon == 2u) { ox = 0.515; oy = -0.36; sc = 0.12; }
-  else if (hu.weapon == 3u) { ox = 0.455; oy = -0.33; sc = 0.125; }
+  return vec2<f32>(bx + recoil_x, by + recoil_y + reload_y);
+}
+
+@vertex
+fn vs_muzzle(v: HIn) -> HOut {
+  let inv_aspect = 1.0 / max(hu.aspect, 0.5);
+  var ox = 0.498;
+  var oy = -0.355;
+  var sc = 0.155;
+  if (hu.weapon == 1u) { ox = 0.412; oy = -0.318; sc = 0.178; }
+  else if (hu.weapon == 2u) { ox = 0.528; oy = -0.372; sc = 0.148; }
+  else if (hu.weapon == 3u) { ox = 0.468; oy = -0.348; sc = 0.152; }
   var p = v.pos * vec2<f32>(sc, sc) + vec2<f32>(ox, oy);
   p.x = p.x * inv_aspect + 0.12 * inv_aspect;
   var o: HOut;
-  o.clip = vec4<f32>(p + vec2<f32>(bx + recoil_x, by + recoil_y + reload_y), 0.0, 1.0);
+  o.clip = vec4<f32>(p + hud_motion_vfx(), 0.0, 1.0);
   o.uv = v.uv;
   return o;
 }
@@ -656,14 +653,84 @@ fn vs_muzzle(v: HIn) -> HOut {
 fn fs_muzzle(i: HOut) -> @location(0) vec4<f32> {
   let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
   let t = textureSample(vtex, vsamp, uv_tex);
-  let k = hu.flash * 1.4;
+  let flicker = 1.0 + 0.42 * sin(hu.anim_t * 38.0);
+  let pulse = 1.0 + 0.55 * hu.flash;
+  let k = hu.flash * (2.35 + flicker) * pulse;
   let a = t.a * k;
   if (a < 0.02) { discard; }
   return vec4<f32>(t.rgb * k, a);
 }
 "#;
 
+const SHADER_HUD_SHELL: &str = r#"
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, _p2: f32, }
+@group(0) @binding(0) var<uniform> hu: Hu;
+@group(1) @binding(0) var stex: texture_2d<f32>;
+@group(1) @binding(1) var ssamp: sampler;
+
+struct HIn { @location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>, }
+struct HOut { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32>, }
+
+fn hud_motion_shell() -> vec2<f32> {
+  let inv_aspect = 1.0 / max(hu.aspect, 0.5);
+  let bx = sin(hu.bob) * 0.025 * inv_aspect;
+  let by = cos(hu.bob * 1.35) * 0.018;
+  let recoil_y = hu.recoil * hu.recoil * 0.17;
+  let recoil_x = -hu.recoil * 0.036 * inv_aspect;
+  var reload_y = 0.0;
+  if (hu.reload > 0.0) {
+    if (hu.reload < 1.0) { reload_y = -hu.reload * 0.7; }
+    else { reload_y = -(2.0 - hu.reload) * 0.7; }
+  }
+  return vec2<f32>(bx + recoil_x, by + recoil_y + reload_y);
+}
+
+@vertex
+fn vs_shell(v: HIn) -> HOut {
+  let inv_aspect = 1.0 / max(hu.aspect, 0.5);
+  var p = v.pos;
+  p.x = p.x * inv_aspect + 0.12 * inv_aspect;
+  var o: HOut;
+  o.clip = vec4<f32>(p + hud_motion_shell(), 0.0, 1.0);
+  o.uv = v.uv;
+  return o;
+}
+
+@fragment
+fn fs_shell(i: HOut) -> @location(0) vec4<f32> {
+  let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
+  let t = textureSample(stex, ssamp, uv_tex);
+  if (t.a < 0.08) { discard; }
+  return vec4<f32>(t.rgb, t.a);
+}
+"#;
+
 const WEAPON_BG_LABELS: [&str; 4] = ["weapon-0", "weapon-1", "weapon-2", "weapon-3"];
+
+fn build_hud_shell_vertices(shell: &HudShell) -> [HudVertex; 4] {
+    let g = shell.life.clamp(0.2, 1.0);
+    let hw = 0.028 * g;
+    let hh = 0.013 * g;
+    let s = shell.rot.sin();
+    let c = shell.rot.cos();
+    let corners: [([f32; 2], [f32; 2]); 4] = [
+        ([-hw, -hh], [0.0, 0.0]),
+        ([hw, -hh], [1.0, 0.0]),
+        ([hw, hh], [1.0, 1.0]),
+        ([-hw, hh], [0.0, 1.0]),
+    ];
+    let mut out = [HudVertex {
+        pos: [0.0, 0.0],
+        uv: [0.0, 0.0],
+    }; 4];
+    for (i, (lj, uv)) in corners.into_iter().enumerate() {
+        let (lx, ly) = (lj[0], lj[1]);
+        let rx = lx * c - ly * s + shell.x;
+        let ry = lx * s + ly * c + shell.y;
+        out[i] = HudVertex { pos: [rx, ry], uv };
+    }
+    out
+}
 
 fn acquire_surface_texture(
     surface: &wgpu::Surface<'_>,
@@ -772,6 +839,8 @@ pub struct WeaponHudParams {
     pub flash: f32,
     pub recoil: f32,
     pub reload: f32,
+    /// Game time (seconds) for muzzle flicker / cheap animated VFX.
+    pub anim_t: f32,
 }
 
 /// World-space blood splat (PixelLab texture on a small camera-facing billboard).
@@ -779,6 +848,32 @@ pub struct WeaponHudParams {
 pub struct BloodSplat {
     pub pos: Vec3,
     pub life: f32,
+}
+
+/// Ejected brass in first-person HUD space (same units as weapon quad `vs_hud` input `pos`).
+#[derive(Clone, Copy, Debug)]
+pub struct HudShell {
+    pub x: f32,
+    pub y: f32,
+    pub vx: f32,
+    pub vy: f32,
+    pub rot: f32,
+    pub spin: f32,
+    pub life: f32,
+}
+
+impl HudShell {
+    pub fn new(x: f32, y: f32, vx: f32, vy: f32, spin: f32) -> Self {
+        Self {
+            x,
+            y,
+            vx,
+            vy,
+            rot: 0.0,
+            spin,
+            life: 1.0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -793,7 +888,7 @@ pub struct CharacterInstance {
     pub model: Mat4,
     pub mesh_yaw: f32,
     pub skin: CharacterSkin,
-    /// Billboard atlas row index as float: 0 idle; 1–6 walk; 7–12 run; 13–18 shoot; ≥100 hit flash (3D path).
+    /// Billboard atlas row index as float: 0 idle; 1–6 walk; 7–12 run or compact shoot (13-row atlas); 13–18 shoot (19+ rows); ≥100 hit flash (3D path).
     pub anim_frame: f32,
     /// Sprite billboard RGBA multiplier (injury, hit flash, corpse); `[1,1,1,1]` for remotes / default.
     pub bill_tint: [f32; 4],
@@ -839,6 +934,11 @@ pub struct Gpu {
     vfx_muzzle_vb: wgpu::Buffer,
     pub vfx_muzzle_ready: bool,
     pub vfx_blood_ready: bool,
+    hud_shell_pipeline: wgpu::RenderPipeline,
+    shell_vb: wgpu::Buffer,
+    vfx_shell_bg: Option<wgpu::BindGroup>,
+    _vfx_shell_tex: Option<wgpu::Texture>,
+    pub vfx_shell_ready: bool,
     character: Option<CharacterDraw>,
     character_rival: Option<CharacterDraw>,
     // Character sprite atlas billboard rendering (boss atlas: Boss + Remote; rival when no rival tex)
@@ -1310,6 +1410,42 @@ impl Gpu {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
+        let shader_hud_shell = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("hud-shell"),
+            source: wgpu::ShaderSource::Wgsl(SHADER_HUD_SHELL.into()),
+        });
+        let hud_shell_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("hud-shell"),
+            layout: Some(&hud_pl),
+            vertex: wgpu::VertexState {
+                module: &shader_hud_shell,
+                entry_point: Some("vs_shell"),
+                buffers: &[HudVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader_hud_shell,
+                entry_point: Some("fs_shell"),
+                targets: &hud_color_targets,
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        let shell_vb = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shell-vb"),
+            size: (14 * 4 * std::mem::size_of::<HudVertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let try_raster_char =
             |cpu: crate::gltf_level::CharacterMeshCpu, label: &str| -> Option<CharacterDraw> {
                 if cpu.vertices.is_empty() || cpu.indices.is_empty() || cpu.batches.is_empty() {
@@ -1397,6 +1533,11 @@ impl Gpu {
             vfx_muzzle_vb,
             vfx_muzzle_ready: false,
             vfx_blood_ready: false,
+            hud_shell_pipeline,
+            shell_vb,
+            vfx_shell_bg: None,
+            _vfx_shell_tex: None,
+            vfx_shell_ready: false,
             character,
             character_rival,
             char_sprite_bg,
@@ -2383,6 +2524,72 @@ impl Gpu {
         Ok(())
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn upload_vfx_shell_sprite(
+        &mut self,
+        img: &web_sys::HtmlImageElement,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let w = img.width().max(1);
+        let h = img.height().max(1);
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vfx-shell"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let src = ImageCopyExternalImage {
+            source: ExternalImageSource::HTMLImageElement(img.clone()),
+            origin: Origin2d::ZERO,
+            flip_y: false,
+        };
+        let dst = wgpu::ImageCopyTextureTagged {
+            texture: &tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+            color_space: wgpu::PredefinedColorSpace::Srgb,
+            premultiplied_alpha: false,
+        };
+        self.queue.copy_external_image_to_texture(
+            &src,
+            dst,
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vfx-shell-bg"),
+            layout: &self.sprite_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.vfx_sampler),
+                },
+            ],
+        });
+        self._vfx_shell_tex = Some(tex);
+        self.vfx_shell_bg = Some(bg);
+        self.vfx_shell_ready = true;
+        Ok(())
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn upload_arms_sprite(&mut self, _img: &web_sys::HtmlImageElement) -> Result<(), wasm_bindgen::JsValue> {
         Ok(())
@@ -2398,6 +2605,14 @@ impl Gpu {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn upload_vfx_blood_sprite(
+        &mut self,
+        _img: &web_sys::HtmlImageElement,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn upload_vfx_shell_sprite(
         &mut self,
         _img: &web_sys::HtmlImageElement,
     ) -> Result<(), wasm_bindgen::JsValue> {
@@ -2443,6 +2658,7 @@ impl Gpu {
         characters: &[CharacterInstance],
         weapon_hud: WeaponHudParams,
         blood_splats: &[BloodSplat],
+        hud_shells: &[HudShell],
         level_bounds: &Aabb,
         mural_z: f32,
     ) {
@@ -2934,10 +3150,24 @@ impl Gpu {
                 recoil: weapon_hud.recoil.clamp(0.0, 1.0),
                 reload: weapon_hud.reload.clamp(0.0, 2.0),
                 aspect: screen_aspect,
-                _pad: [0.0; 2],
+                anim_t: weapon_hud.anim_t,
+                _pad: 0.0,
             };
             self.queue
                 .write_buffer(&self.hud_uniform, 0, bytemuck::bytes_of(&hu));
+            let mut shell_draw_n: i32 = 0;
+            if self.vfx_shell_ready && self.vfx_shell_bg.is_some() {
+                for shell in hud_shells {
+                    if shell.life <= 0.03 {
+                        continue;
+                    }
+                    let verts = build_hud_shell_vertices(shell);
+                    let off = (shell_draw_n as u64) * (4 * std::mem::size_of::<HudVertex>() as u64);
+                    self.queue
+                        .write_buffer(&self.shell_vb, off, bytemuck::cast_slice(&verts));
+                    shell_draw_n += 1;
+                }
+            }
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("hud"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2977,6 +3207,18 @@ impl Gpu {
                     pass.set_vertex_buffer(0, self.vfx_muzzle_vb.slice(..));
                     pass.set_index_buffer(self.hud_ib.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..6, 0, 0..1);
+                }
+            }
+            if shell_draw_n > 0 {
+                if let Some(ref bg) = self.vfx_shell_bg {
+                    pass.set_pipeline(&self.hud_shell_pipeline);
+                    pass.set_bind_group(0, &self.hud_bind_group, &[]);
+                    pass.set_bind_group(1, bg, &[]);
+                    pass.set_vertex_buffer(0, self.shell_vb.slice(..));
+                    pass.set_index_buffer(self.hud_ib.slice(..), wgpu::IndexFormat::Uint32);
+                    for k in 0..shell_draw_n {
+                        pass.draw_indexed(0..6, k * 4, 0..1);
+                    }
                 }
             }
         }

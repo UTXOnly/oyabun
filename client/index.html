@@ -329,6 +329,18 @@
         } catch (e) {
           console.warn("vfx/blood_overlay.png", e);
         }
+        try {
+          const sh = document.createElement("img");
+          sh.crossOrigin = "anonymous";
+          sh.src = "./vfx/shell_brass.png?v=" + v;
+          await new Promise((res, rej) => {
+            sh.onload = res;
+            sh.onerror = rej;
+          });
+          app.uploadVfxShellSprite(sh);
+        } catch (e) {
+          console.warn("vfx/shell_brass.png", e);
+        }
       }
 
       function drainNet(ws, app) {
