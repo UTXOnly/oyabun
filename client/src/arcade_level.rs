@@ -4,12 +4,12 @@
 //! - Narrow alley lined with Kabukicho shop facades (PixelLab pixel art)
 //! - Vertical neon signs mounted on buildings
 //! - Vending machines, awnings, lanterns, overhead wire tangles
-//! - Parked car: **merged Blender-style glTF blockout** (`props/arcade_parked_car_blockout.glb`) — real mesh, not PNG quads
+//! - Parked car: **multi-quad R32 volume** (side + front/rear bumper UV bands + roof/hood/trunk/glass shells) — same idea as `wall_prop`, not a single glTF box
 //! - Dense, atmospheric, 90s arcade feel
 //!
 //! Procedural quads + optional merged `.glb` props (see `props/`).
 
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 
 use crate::gltf_level::{GltfBatchCpu, GltfLevelCpu, WorldVertex};
 use crate::mesh::Aabb;
@@ -42,6 +42,9 @@ const NEON_ARROW: &[u8] = include_bytes!("../level_textures/tokyo_props/neon_arr
 const NOREN_CURTAIN: &[u8] = include_bytes!("../level_textures/tokyo_props/noren_curtain.png");
 const BICYCLE: &[u8] = include_bytes!("../level_textures/tokyo_props/bicycle.png");
 const LANTERN_PAPER: &[u8] = include_bytes!("../level_textures/tokyo_props/lantern_paper.png");
+const R32_SIDE: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_side.png");
+const R32_FRONT: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_front.png");
+const R32_REAR: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_rear.png");
 // ---------------------------------------------------------------------------
 // Palette
 // ---------------------------------------------------------------------------
@@ -61,6 +64,7 @@ const WET_STREET: [u8; 4] = [0x18, 0x1E, 0x30, 0xFF];
 const SHELL_TRASH: [f32; 4] = [0.24, 0.22, 0.28, 1.0];
 const SHELL_CRATE: [f32; 4] = [0.38, 0.29, 0.22, 1.0];
 const SHELL_BIKE: [f32; 4] = [0.28, 0.28, 0.34, 1.0];
+const SHELL_CAR: [f32; 4] = [0.20, 0.22, 0.30, 1.0];
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -83,7 +87,7 @@ const Z_START: f32 = 4.0;
 // 0..7 = shop textures
 // 8..11 = sign textures
 // 12 = vending machine
-// 13..22 = solid colors; 23..27 props; 28 = lantern
+// 13..22 = solid colors; 23..27 props; 28 = lantern; 29..31 = R32 parked car
 const IMG_SIGN_YAKINIKU: usize = 8;
 const IMG_SIGN_KARAOKE: usize = 9;
 const IMG_SIGN_SAKE: usize = 10;
@@ -106,6 +110,9 @@ const IMG_ARROW: usize = 25;
 const IMG_NOREN: usize = 26;
 const IMG_BICYCLE: usize = 27;
 const IMG_LANTERN_PAPER: usize = 28;
+const IMG_R32_SIDE: usize = 29;
+const IMG_R32_FRONT: usize = 30;
+const IMG_R32_REAR: usize = 31;
 
 // ---------------------------------------------------------------------------
 // Public entry
@@ -146,6 +153,9 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     images.push(decode_png(NOREN_CURTAIN)?);       // 26
     images.push(decode_png(BICYCLE)?);             // 27
     images.push(decode_png(LANTERN_PAPER)?);       // 28
+    images.push(decode_png(R32_SIDE)?);            // 29
+    images.push(decode_png(R32_FRONT)?);           // 30
+    images.push(decode_png(R32_REAR)?);            // 31
 
     let mut b = LevelBuilder::new();
 
@@ -837,8 +847,8 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         );
     }
 
-    // Parked car slot (mesh merged from `arcade_parked_car_blockout.glb` at end of build)
     let z_r32 = Z_START - SHOP_GAP - 2.85_f32 * SHOP_STEP - SHOP_W * 0.5;
+    b.parked_r32_volume(z_r32);
 
     // ══════════════════════════════════════════════════════════════════
     // PUDDLE REFLECTIONS (additional wet spots near vending machines)
@@ -1037,7 +1047,7 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     let spawn = Vec3::new(0.0, 0.05, Z_START - 2.0);
     let spawn_yaw = 0.0; // facing -Z
 
-    let mut cpu = GltfLevelCpu {
+    Ok(GltfLevelCpu {
         vertices: b.verts,
         indices: b.idxs,
         batches: b.batches,
@@ -1046,13 +1056,7 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         spawn_yaw,
         solids,
         skip_floor_slab: true,
-    };
-    const PARKED_CAR_GLB: &[u8] = include_bytes!("../props/arcade_parked_car_blockout.glb");
-    let car_w = 1.68_f32;
-    let car_t = Mat4::from_translation(Vec3::new(STREET_HW - car_w * 0.5, 0.0, z_r32));
-    let extra_solids = crate::gltf_level::append_glb_transform(&mut cpu, PARKED_CAR_GLB, car_t)?;
-    cpu.solids.extend(extra_solids);
-    Ok(cpu)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1215,6 +1219,200 @@ struct LevelBuilder {
 impl LevelBuilder {
     fn new() -> Self {
         Self { verts: Vec::new(), idxs: Vec::new(), batches: Vec::new() }
+    }
+
+    /// Parked R32: alley-facing **side** sprite + narrow **front/rear** bumper bands (lower PNG UVs) +
+    /// roof, hood, trunk, mid-body shells, windshield glass — reads as a car, not one textured cube.
+    fn parked_r32_volume(&mut self, z_mid: f32) {
+        const X0: f32 = STREET_HW - 1.76;
+        const X1: f32 = STREET_HW + 0.06;
+        const Y0: f32 = 0.0;
+        const Y1: f32 = 1.24;
+        const HZ: f32 = 2.12;
+        const SKIN: f32 = 0.018;
+
+        let z0 = z_mid - HZ;
+        let z1 = z_mid + HZ;
+
+        let uv_bumper = [[0.0_f32, 0.56], [1.0, 0.56], [1.0, 1.0], [0.0, 1.0]];
+        let uv1 = [[0.0_f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+
+        let side_tint = [1.12_f32, 1.08, 1.14, 1.0];
+        let bumper_tint = [1.25_f32, 1.22, 1.28, 1.0];
+        let roof_tint = [
+            SHELL_CAR[0] * 1.15,
+            SHELL_CAR[1] * 1.12,
+            SHELL_CAR[2] * 1.18,
+            1.0,
+        ];
+        let hood_tint = [SHELL_CAR[0] * 1.05, SHELL_CAR[1] * 1.02, SHELL_CAR[2] * 1.08, 1.0];
+        let glass_tint = [0.45_f32, 0.55, 0.75, 0.92];
+
+        let side_shell = [
+            SHELL_CAR[0] * 0.88,
+            SHELL_CAR[1] * 0.86,
+            SHELL_CAR[2] * 0.92,
+            SHELL_CAR[3],
+        ];
+
+        let xs = X0 + SKIN;
+
+        // Alley-facing side profile (hero read)
+        self.quad(
+            [
+                Vec3::new(xs, Y0, z0),
+                Vec3::new(xs, Y0, z1),
+                Vec3::new(xs, Y1, z1),
+                Vec3::new(xs, Y1, z0),
+            ],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_SIDE,
+            side_tint,
+        );
+
+        // Wall-facing side (dark body)
+        let xr = X1 - SKIN;
+        self.quad(
+            [
+                Vec3::new(xr, Y0, z1),
+                Vec3::new(xr, Y0, z0),
+                Vec3::new(xr, Y1, z0),
+                Vec3::new(xr, Y1, z1),
+            ],
+            uv1,
+            IMG_PIPE,
+            side_shell,
+        );
+
+        // Front bumper (+Z): lower texture band only
+        let zf = z1 - SKIN;
+        let bump_h = 0.46_f32;
+        self.quad(
+            [
+                Vec3::new(X0, Y0, zf),
+                Vec3::new(X1, Y0, zf),
+                Vec3::new(X1, Y0 + bump_h, zf),
+                Vec3::new(X0, Y0 + bump_h, zf),
+            ],
+            uv_bumper,
+            IMG_R32_FRONT,
+            bumper_tint,
+        );
+        // Front mid body (between bumper and roof line)
+        let y_split = Y0 + bump_h;
+        let y_roof0 = 0.68_f32;
+        self.quad(
+            [
+                Vec3::new(X0, y_split, zf),
+                Vec3::new(X1, y_split, zf),
+                Vec3::new(X1, y_roof0, zf),
+                Vec3::new(X0, y_roof0, zf),
+            ],
+            uv1,
+            IMG_PIPE,
+            side_shell,
+        );
+        // Windshield
+        self.quad(
+            [
+                Vec3::new(X0 + 0.04, y_roof0 - 0.02, zf),
+                Vec3::new(X1 - 0.04, y_roof0 - 0.02, zf),
+                Vec3::new(X1 - 0.04, Y1 - 0.12, zf),
+                Vec3::new(X0 + 0.04, Y1 - 0.12, zf),
+            ],
+            uv1,
+            IMG_WINDOW,
+            glass_tint,
+        );
+
+        // Rear bumper (-Z)
+        let zb = z0 + SKIN;
+        self.quad(
+            [
+                Vec3::new(X1, Y0, zb),
+                Vec3::new(X0, Y0, zb),
+                Vec3::new(X0, Y0 + bump_h, zb),
+                Vec3::new(X1, Y0 + bump_h, zb),
+            ],
+            uv_bumper,
+            IMG_R32_REAR,
+            bumper_tint,
+        );
+        self.quad(
+            [
+                Vec3::new(X1, y_split, zb),
+                Vec3::new(X0, y_split, zb),
+                Vec3::new(X0, y_roof0, zb),
+                Vec3::new(X1, y_roof0, zb),
+            ],
+            uv1,
+            IMG_PIPE,
+            side_shell,
+        );
+        self.quad(
+            [
+                Vec3::new(X1 - 0.04, y_roof0 - 0.02, zb),
+                Vec3::new(X0 + 0.04, y_roof0 - 0.02, zb),
+                Vec3::new(X0 + 0.04, Y1 - 0.12, zb),
+                Vec3::new(X1 - 0.04, Y1 - 0.12, zb),
+            ],
+            uv1,
+            IMG_WINDOW,
+            [glass_tint[0] * 0.85, glass_tint[1] * 0.9, glass_tint[2] * 0.95, glass_tint[3]],
+        );
+
+        // Roof deck
+        let y_roof = Y1 - 0.08;
+        self.quad(
+            [
+                Vec3::new(X0 + 0.03, y_roof, z0 + 0.12),
+                Vec3::new(X1 - 0.03, y_roof, z0 + 0.12),
+                Vec3::new(X1 - 0.03, y_roof, z1 - 0.12),
+                Vec3::new(X0 + 0.03, y_roof, z1 - 0.12),
+            ],
+            uv1,
+            IMG_PIPE,
+            roof_tint,
+        );
+
+        // Hood (forward half of top surface)
+        self.quad(
+            [
+                Vec3::new(X0 + 0.05, 0.52, z1 - 0.25),
+                Vec3::new(X1 - 0.05, 0.52, z1 - 0.25),
+                Vec3::new(X1 - 0.05, 0.52, z_mid + 0.15),
+                Vec3::new(X0 + 0.05, 0.52, z_mid + 0.15),
+            ],
+            uv1,
+            IMG_PIPE,
+            hood_tint,
+        );
+        // Trunk deck
+        self.quad(
+            [
+                Vec3::new(X0 + 0.05, 0.5, z_mid - 0.2),
+                Vec3::new(X1 - 0.05, 0.5, z_mid - 0.2),
+                Vec3::new(X1 - 0.05, 0.5, z0 + 0.35),
+                Vec3::new(X0 + 0.05, 0.5, z0 + 0.35),
+            ],
+            uv1,
+            IMG_PIPE,
+            hood_tint,
+        );
+
+        // Ground contact shadow
+        let gy = 0.012_f32;
+        self.quad(
+            [
+                Vec3::new(X0 - 0.06, gy, z0 - 0.08),
+                Vec3::new(X1 + 0.14, gy, z0 - 0.08),
+                Vec3::new(X1 + 0.14, gy, z1 + 0.08),
+                Vec3::new(X0 - 0.06, gy, z1 + 0.08),
+            ],
+            uv1,
+            IMG_VERY_DARK,
+            [0.35, 0.32, 0.38, 0.72],
+        );
     }
 
     fn wall_prop(

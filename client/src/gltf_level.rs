@@ -292,9 +292,10 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
 }
 
 /// Merge a second `.glb` into an existing level (vertices, indices, batches, images).
-/// Use for arcade procedural mesh + Blender blockout props. Geometry is transformed by `root` (Y-up, same as Blender export).
+/// Use for procedural `GltfLevelCpu` + optional Blender blockout props. Geometry is transformed by `root` (Y-up, same as Blender export).
 /// `image_index` in appended batches is offset by the pre-append image count.
 /// Returns extra collision AABBs from collider-named meshes in the appended file (often empty).
+#[allow(dead_code)]
 pub fn append_glb_transform(
     cpu: &mut GltfLevelCpu,
     bytes: &[u8],

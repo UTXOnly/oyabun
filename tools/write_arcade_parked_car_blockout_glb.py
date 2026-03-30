@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Y-up glTF binary: box mesh, r32_side on street face (-X), dark gray PNG on other faces."""
+"""Optional Y-up glTF box (R32 textures). Arcade mode uses `arcade_level::parked_r32_volume` instead.
+
+Regenerate only if you want a merged `.glb` for Blender experiments or `append_glb_transform`.
+"""
 from __future__ import annotations
 
 import json
