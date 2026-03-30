@@ -106,6 +106,7 @@ Use as **soft** targets for textures and tint — not law.
 
 ## Coordination With Other Docs
 
+- **[CURSOR_ARCADE_PROP_BILLBOARDS.md](./CURSOR_ARCADE_PROP_BILLBOARDS.md)** — PixelLab MCP **cannot** run `create_character` / `animate_character` for cars/crates; multi-angle props should follow the **same atlas + billboard column math** as NPCs (`render.rs` `push_char_sprite_quad`).
 - **`CURSOR_LEVEL_REDESIGN.md`** — Blender-forward redesign; still valid for **Option A** and for exporting **collision-only** or **prop** meshes under Option B.
 - **`level-design.mdc`** — Update when a non-GLB world path is merged (document second pipeline).
 - **Agents:** When touching world rendering, **read this file** if branch is `arcade-tokyo-vision` or issue mentions “arcade ref.”

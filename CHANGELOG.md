@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-03-30 — Doc: PixelLab MCP limits + prop billboard atlas plan
+
+- **`docs/CURSOR_ARCADE_PROP_BILLBOARDS.md`**: `create_character` / `animate_character` are **not** for vehicles or static props; multi-angle props should reuse **8-column atlases + `SHADER_BILL`** like NPCs. Linked from `CURSOR_ARCADE_TOKYO_LEVEL.md`.
+
 ## 2026-03-29 — Props: pixel-art regen, solid shells, alpha fringe in `fs_tex`
 
 - **Art**: Re-ran PixelLab map-object for **trash, crates, bike, R32×3, lantern** with prompts demanding **chunky pixel art, thick black outline, flat cel, no photograph** so props match the arcade alley instead of photo decals.
