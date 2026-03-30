@@ -1,0 +1,25 @@
+Tokyo alley props (PixelLab map-object unless noted).
+
+Embedded in `client/src/arcade_level.rs` via `include_bytes!`.
+
+| File | Notes |
+|------|--------|
+| vending_machine.png | Shop gap vending |
+| trash_bags.png | Wall cluster + second offset pile |
+| beer_crates.png | Stacked base + `wall_prop_y` second tier |
+| neon_arrow.png | Entrance arrows |
+| noren_curtain.png | Doorway noren |
+| bicycle.png | `wall_prop` + `bike_lean_wing` |
+| lantern_paper.png | Japanese paper chōchin — wall + cross-alley lanterns |
+| r32_side.png | Parked Skyline side panel |
+| r32_front.png | R32 front bumper quad |
+| r32_rear.png | R32 rear bumper quad |
+
+Regenerate (requires token in env or `.cursor/mcp.json`):
+
+```
+python3 tools/pixellab_v2.py map-object --width 96 --height 128 "…chōchin…" client/level_textures/tokyo_props/lantern_paper.png
+python3 tools/pixellab_v2.py map-object --width 200 --height 88 "…R32 side…" client/level_textures/tokyo_props/r32_side.png
+```
+
+Then `wasm-pack build` from `client/`.

@@ -40,6 +40,10 @@ const BEER_CRATES: &[u8] = include_bytes!("../level_textures/tokyo_props/beer_cr
 const NEON_ARROW: &[u8] = include_bytes!("../level_textures/tokyo_props/neon_arrow.png");
 const NOREN_CURTAIN: &[u8] = include_bytes!("../level_textures/tokyo_props/noren_curtain.png");
 const BICYCLE: &[u8] = include_bytes!("../level_textures/tokyo_props/bicycle.png");
+const LANTERN_PAPER: &[u8] = include_bytes!("../level_textures/tokyo_props/lantern_paper.png");
+const R32_SIDE: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_side.png");
+const R32_FRONT: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_front.png");
+const R32_REAR: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_rear.png");
 
 // ---------------------------------------------------------------------------
 // Palette
@@ -77,7 +81,7 @@ const Z_START: f32 = 4.0;
 // 0..7 = shop textures
 // 8..11 = sign textures
 // 12 = vending machine
-// 13+ = solid colors
+// 13..22 = solid colors; 23..27 props; 28+ lanterns & vehicle
 const IMG_SIGN_YAKINIKU: usize = 8;
 const IMG_SIGN_KARAOKE: usize = 9;
 const IMG_SIGN_SAKE: usize = 10;
@@ -87,7 +91,8 @@ const IMG_DARK_WALL: usize = 13;
 const IMG_VERY_DARK: usize = 14;
 const IMG_STREET: usize = 15;
 const IMG_WARM_ACCENT: usize = 16;
-const IMG_LANTERN: usize = 17;
+/// Solid warm pixel (utility paint stripes on asphalt).
+const IMG_SOLID_WARM: usize = 17;
 const IMG_PIPE: usize = 18;
 const IMG_WINDOW: usize = 19;
 const IMG_NEON_PINK: usize = 20;
@@ -98,6 +103,10 @@ const IMG_CRATES: usize = 24;
 const IMG_ARROW: usize = 25;
 const IMG_NOREN: usize = 26;
 const IMG_BICYCLE: usize = 27;
+const IMG_LANTERN_PAPER: usize = 28;
+const IMG_R32_SIDE: usize = 29;
+const IMG_R32_FRONT: usize = 30;
+const IMG_R32_REAR: usize = 31;
 
 // ---------------------------------------------------------------------------
 // Public entry
@@ -137,6 +146,10 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     images.push(decode_png(NEON_ARROW)?);          // 25
     images.push(decode_png(NOREN_CURTAIN)?);       // 26
     images.push(decode_png(BICYCLE)?);             // 27
+    images.push(decode_png(LANTERN_PAPER)?);       // 28
+    images.push(decode_png(R32_SIDE)?);            // 29
+    images.push(decode_png(R32_FRONT)?);           // 30
+    images.push(decode_png(R32_REAR)?);            // 31
 
     let mut b = LevelBuilder::new();
 
@@ -361,7 +374,7 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
                 [Vec3::new(lx, ly, z_mid + z_off - ll), Vec3::new(lx, ly, z_mid + z_off + ll),
                  Vec3::new(lx, ly + lh, z_mid + z_off + ll), Vec3::new(lx, ly + lh, z_mid + z_off - ll)],
                 [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                IMG_LANTERN, [2.8, 2.0, 0.7, 1.0],
+                IMG_LANTERN_PAPER, [2.4, 1.95, 1.35, 1.0],
             );
             b.lantern_cord(lx, z_mid + z_off, SHOP_H - 0.06, ly + lh);
         }
@@ -374,7 +387,7 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
                 [Vec3::new(rx, ly, z_mid + z_off + ll), Vec3::new(rx, ly, z_mid + z_off - ll),
                  Vec3::new(rx, ly + lh, z_mid + z_off - ll), Vec3::new(rx, ly + lh, z_mid + z_off + ll)],
                 [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                IMG_LANTERN, [2.8, 2.0, 0.7, 1.0],
+                IMG_LANTERN_PAPER, [2.4, 1.95, 1.35, 1.0],
             );
             b.lantern_cord(rx, z_mid + z_off, SHOP_H - 0.06, ly + lh);
         }
@@ -386,7 +399,7 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         let y0 = SHOP_H + UPPER_H * 0.55 + (i % 3) as f32 * 0.1;
         let hang = 0.4;
         let wire_y = (SHOP_H + UPPER_H * 2.15 + (i % 2) as f32 * 0.25).min(SHOP_H + UPPER_H * 3.2);
-        b.cross_lantern(0.0, z_mid, y0, 0.17, hang, [2.75, 2.05, 0.78, 1.0]);
+        b.cross_lantern(0.0, z_mid, y0, 0.17, hang, [2.5, 1.9, 1.25, 1.0]);
         b.lantern_cord(0.0, z_mid, wire_y, y0 + hang);
     }
 
@@ -705,6 +718,11 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
             0.5, 0.55, 0.8,
             IMG_TRASH, [1.6, 1.5, 1.5, 1.0],
         );
+        b.wall_prop(
+            wall_x, z_gap + 0.52, left,
+            0.36, 0.42, 0.58,
+            IMG_TRASH, [1.45, 1.4, 1.4, 1.0],
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -722,6 +740,12 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
             wall_x, z_gap, left,
             0.45, 0.5, 1.0,
             IMG_CRATES, [1.3, 1.2, 1.1, 1.0],
+        );
+        b.wall_prop_y(
+            wall_x, z_gap, left,
+            0.38, 0.46, 0.52,
+            0.92,
+            IMG_CRATES, [1.15, 1.05, 0.95, 1.0],
         );
     }
 
@@ -805,7 +829,16 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
             0.65, 0.5, 0.9,
             IMG_BICYCLE, [1.3, 1.2, 1.2, 1.0],
         );
+        b.bike_lean_wing(
+            wall_x, z_gap, left,
+            0.65, 0.5, 0.9,
+            IMG_BICYCLE, [1.3, 1.2, 1.2, 1.0],
+        );
     }
+
+    // Parked R32 (right wall): side + front + rear pixel panels
+    let z_r32 = Z_START - SHOP_GAP - 2.85_f32 * SHOP_STEP - SHOP_W * 0.5;
+    add_parked_r32(&mut b, STREET_HW, z_r32, false);
 
     // ══════════════════════════════════════════════════════════════════
     // PUDDLE REFLECTIONS (additional wet spots near vending machines)
@@ -887,7 +920,7 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
             [Vec3::new(-STREET_HW + 0.5, 0.004, z_c + 0.6), Vec3::new(-STREET_HW + 0.5 + 0.08, 0.004, z_c + 0.6),
              Vec3::new(-STREET_HW + 0.5 + 0.08, 0.004, z_c - 0.6), Vec3::new(-STREET_HW + 0.5, 0.004, z_c - 0.6)],
             [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            IMG_LANTERN, [0.8, 0.7, 0.3, 0.6],
+            IMG_SOLID_WARM, [0.8, 0.7, 0.3, 0.6],
         );
     }
 
@@ -955,18 +988,32 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     for &(gap_idx, left) in &trash_spots {
         let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W - SHOP_GAP * 0.5;
         let (xmin, xmax) = if left { (-STREET_HW, -STREET_HW + 0.55) } else { (STREET_HW - 0.55, STREET_HW) };
-        solids.push(Aabb { min: Vec3::new(xmin, 0.0, z_gap - 0.5), max: Vec3::new(xmax, 0.7, z_gap + 0.5) });
+        solids.push(Aabb {
+            min: Vec3::new(xmin, 0.0, z_gap - 0.55),
+            max: Vec3::new(xmax, 0.75, z_gap + 0.95),
+        });
     }
     for &(gap_idx, left) in &crate_spots {
         let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W + 0.3;
         let (xmin, xmax) = if left { (-STREET_HW, -STREET_HW + 0.5) } else { (STREET_HW - 0.5, STREET_HW) };
-        solids.push(Aabb { min: Vec3::new(xmin, 0.0, z_gap - 0.45), max: Vec3::new(xmax, 0.9, z_gap + 0.45) });
+        solids.push(Aabb {
+            min: Vec3::new(xmin, 0.0, z_gap - 0.48),
+            max: Vec3::new(xmax, 1.48, z_gap + 0.48),
+        });
     }
     for &(gap_idx, left) in &bike_spots {
         let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W - SHOP_GAP * 0.5;
-        let (xmin, xmax) = if left { (-STREET_HW, -STREET_HW + 0.5) } else { (STREET_HW - 0.5, STREET_HW) };
-        solids.push(Aabb { min: Vec3::new(xmin, 0.0, z_gap - 0.65), max: Vec3::new(xmax, 0.8, z_gap + 0.65) });
+        let (xmin, xmax) = if left { (-STREET_HW, -STREET_HW + 0.55) } else { (STREET_HW - 0.55, STREET_HW) };
+        solids.push(Aabb {
+            min: Vec3::new(xmin, 0.0, z_gap - 0.68),
+            max: Vec3::new(xmax, 0.92, z_gap + 0.68),
+        });
     }
+
+    solids.push(Aabb {
+        min: Vec3::new(STREET_HW - 1.76, 0.0, z_r32 - 2.12),
+        max: Vec3::new(STREET_HW + 0.06, 1.24, z_r32 + 2.12),
+    });
 
     // Vending machine collision
     for &(x, z, left) in &vm_positions {
@@ -1005,6 +1052,57 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
 // ---------------------------------------------------------------------------
 // Vertical neon (double-sided quad on wall plane X)
 // ---------------------------------------------------------------------------
+
+/// Parked Nissan R32: side + front + rear quads (pixel art textures), bumper toward -Z.
+fn add_parked_r32(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_side: bool) {
+    let car_len = 4.05_f32;
+    let car_w = 1.68_f32;
+    let car_h = 1.18_f32;
+    let z0 = z_center - car_len * 0.5;
+    let z1 = z_center + car_len * 0.5;
+    let ct = [1.15_f32, 1.15, 1.2, 1.0];
+    if !left_side {
+        let x_in = wall_x - car_w - 0.03;
+        b.quad(
+            [Vec3::new(x_in, 0.0, z0), Vec3::new(x_in, 0.0, z1),
+             Vec3::new(x_in, car_h, z1), Vec3::new(x_in, car_h, z0)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_SIDE, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x - car_w, 0.0, z1), Vec3::new(wall_x, 0.0, z1),
+             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x - car_w, car_h, z1)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_REAR, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x, 0.0, z0), Vec3::new(wall_x - car_w, 0.0, z0),
+             Vec3::new(wall_x - car_w, car_h, z0), Vec3::new(wall_x, car_h, z0)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_FRONT, ct,
+        );
+    } else {
+        let x_in = wall_x + car_w + 0.03;
+        b.quad(
+            [Vec3::new(x_in, 0.0, z1), Vec3::new(x_in, 0.0, z0),
+             Vec3::new(x_in, car_h, z0), Vec3::new(x_in, car_h, z1)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_SIDE, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x + car_w, 0.0, z1), Vec3::new(wall_x, 0.0, z1),
+             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x + car_w, car_h, z1)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_REAR, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x, 0.0, z0), Vec3::new(wall_x + car_w, 0.0, z0),
+             Vec3::new(wall_x + car_w, car_h, z0), Vec3::new(wall_x, car_h, z0)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_FRONT, ct,
+        );
+    }
+}
 
 fn add_vertical_neon_pair(
     b: &mut LevelBuilder,
@@ -1164,17 +1262,25 @@ impl LevelBuilder {
         Self { verts: Vec::new(), idxs: Vec::new(), batches: Vec::new() }
     }
 
-    /// Box prop against a wall: wall + street faces use full albedo; top and sides
-    /// sample **narrow UV strips** from the same texture (edge/top bands) so walking
-    /// around does not reveal flat solid-color “shoebox” sides.
     fn wall_prop(
         &mut self,
         wall_x: f32, z_mid: f32, left_side: bool,
         hz: f32, depth: f32, h: f32,
         image_index: usize, tint: [f32; 4],
     ) {
-        const EU: f32 = 0.07; // UV width for side strips (texture edge)
-        const TV: f32 = 0.12; // UV height for top band
+        self.wall_prop_y(wall_x, z_mid, left_side, hz, depth, h, 0.0, image_index, tint);
+    }
+
+    /// Stacked crate / second trash cluster: same as [`wall_prop`] but lifted on Y.
+    fn wall_prop_y(
+        &mut self,
+        wall_x: f32, z_mid: f32, left_side: bool,
+        hz: f32, depth: f32, h: f32,
+        y0: f32,
+        image_index: usize, tint: [f32; 4],
+    ) {
+        const EU: f32 = 0.07;
+        const TV: f32 = 0.12;
 
         let z0 = z_mid + hz;
         let z1 = z_mid - hz;
@@ -1189,67 +1295,62 @@ impl LevelBuilder {
 
         let side_t = [tint[0] * 0.62, tint[1] * 0.62, tint[2] * 0.62, tint[3]];
         let top_t = [tint[0] * 0.72, tint[1] * 0.72, tint[2] * 0.72, tint[3]];
+        let y1 = y0 + h;
 
-        // Wall face (textured image, flat against building)
         if left_side {
             self.quad(
-                [Vec3::new(back_x, 0.0, z0), Vec3::new(back_x, 0.0, z1),
-                 Vec3::new(back_x, h, z1), Vec3::new(back_x, h, z0)],
+                [Vec3::new(back_x, y0, z0), Vec3::new(back_x, y0, z1),
+                 Vec3::new(back_x, y1, z1), Vec3::new(back_x, y1, z0)],
                 [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 image_index, tint,
             );
         } else {
             self.quad(
-                [Vec3::new(back_x, 0.0, z1), Vec3::new(back_x, 0.0, z0),
-                 Vec3::new(back_x, h, z0), Vec3::new(back_x, h, z1)],
+                [Vec3::new(back_x, y0, z1), Vec3::new(back_x, y0, z0),
+                 Vec3::new(back_x, y1, z0), Vec3::new(back_x, y1, z1)],
                 [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 image_index, tint,
             );
         }
 
-        // Front face (street) — same art, slightly dimmed (not a flat different color)
         let front_tint = [tint[0] * 0.84, tint[1] * 0.84, tint[2] * 0.84, tint[3]];
         if left_side {
             self.quad(
-                [Vec3::new(front_x, 0.0, z1), Vec3::new(front_x, 0.0, z0),
-                 Vec3::new(front_x, h, z0), Vec3::new(front_x, h, z1)],
+                [Vec3::new(front_x, y0, z1), Vec3::new(front_x, y0, z0),
+                 Vec3::new(front_x, y1, z0), Vec3::new(front_x, y1, z1)],
                 [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
                 image_index, front_tint,
             );
         } else {
             self.quad(
-                [Vec3::new(front_x, 0.0, z0), Vec3::new(front_x, 0.0, z1),
-                 Vec3::new(front_x, h, z1), Vec3::new(front_x, h, z0)],
+                [Vec3::new(front_x, y0, z0), Vec3::new(front_x, y0, z1),
+                 Vec3::new(front_x, y1, z1), Vec3::new(front_x, y1, z0)],
                 [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
                 image_index, front_tint,
             );
         }
 
-        // Top: sample upper band of texture (reads as “stuff on top” not grey slab)
         self.quad(
-            [Vec3::new(x_min, h, z0), Vec3::new(x_max, h, z0),
-             Vec3::new(x_max, h, z1), Vec3::new(x_min, h, z1)],
+            [Vec3::new(x_min, y1, z0), Vec3::new(x_max, y1, z0),
+             Vec3::new(x_max, y1, z1), Vec3::new(x_min, y1, z1)],
             [[0.0, TV], [1.0, TV], [1.0, 0.0], [0.0, 0.0]],
             image_index, top_t,
         );
 
-        // Side at +Z edge of prop: right strip of texture
         self.quad(
-            [Vec3::new(x_min, 0.0, z0), Vec3::new(x_max, 0.0, z0),
-             Vec3::new(x_max, h, z0), Vec3::new(x_min, h, z0)],
+            [Vec3::new(x_min, y0, z0), Vec3::new(x_max, y0, z0),
+             Vec3::new(x_max, y1, z0), Vec3::new(x_min, y1, z0)],
             [[1.0 - EU, 1.0], [1.0, 1.0], [1.0, 0.0], [1.0 - EU, 0.0]],
             image_index, side_t,
         );
-        // Side at -Z edge: left strip
         self.quad(
-            [Vec3::new(x_max, 0.0, z1), Vec3::new(x_min, 0.0, z1),
-             Vec3::new(x_min, h, z1), Vec3::new(x_max, h, z1)],
+            [Vec3::new(x_max, y0, z1), Vec3::new(x_min, y0, z1),
+             Vec3::new(x_min, y1, z1), Vec3::new(x_max, y1, z1)],
             [[0.0, 1.0], [EU, 1.0], [EU, 0.0], [0.0, 0.0]],
             image_index, side_t,
         );
 
-        // Thin ground shadow strip along wall (hides gap / sells contact)
-        let gy = 0.012;
+        let gy = y0.max(0.012);
         let sh_t = [tint[0] * 0.25, tint[1] * 0.25, tint[2] * 0.25, 0.85];
         self.quad(
             [Vec3::new(x_min, gy, z0), Vec3::new(x_max, gy, z0),
@@ -1257,6 +1358,41 @@ impl LevelBuilder {
             [[0.0, 0.85], [1.0, 0.85], [1.0, 1.0], [0.0, 1.0]],
             image_index, sh_t,
         );
+    }
+
+    /// Extra planar “wing” so a bicycle reads as leaning, not a flat poster.
+    fn bike_lean_wing(
+        &mut self,
+        wall_x: f32, z_mid: f32, left_side: bool,
+        hz: f32, depth: f32, h: f32,
+        image_index: usize, tint: [f32; 4],
+    ) {
+        let z0 = z_mid + hz;
+        let z1 = z_mid - hz;
+        let lean = 0.22_f32;
+        let tw = [tint[0] * 0.72, tint[1] * 0.72, tint[2] * 0.72, tint[3]];
+        let (back_x, front_x) = if left_side {
+            (wall_x, wall_x + depth)
+        } else {
+            (wall_x, wall_x - depth)
+        };
+        if left_side {
+            self.quad(
+                [Vec3::new(back_x, 0.0, z0), Vec3::new(back_x, 0.0, z1),
+                 Vec3::new(front_x + lean * 0.12, h * 0.88, z1 - lean),
+                 Vec3::new(front_x + lean * 0.12, h * 0.88, z0 + lean)],
+                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+                image_index, tw,
+            );
+        } else {
+            self.quad(
+                [Vec3::new(back_x, 0.0, z1), Vec3::new(back_x, 0.0, z0),
+                 Vec3::new(front_x - lean * 0.12, h * 0.88, z0 - lean),
+                 Vec3::new(front_x - lean * 0.12, h * 0.88, z1 + lean)],
+                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+                image_index, tw,
+            );
+        }
     }
 
     /// Two perpendicular vertical quads — reads as a hanging lantern from multiple
@@ -1268,26 +1404,26 @@ impl LevelBuilder {
             [Vec3::new(x - half_w, y0, z), Vec3::new(x + half_w, y0, z),
              Vec3::new(x + half_w, y1, z), Vec3::new(x - half_w, y1, z)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            IMG_LANTERN, tint,
+            IMG_LANTERN_PAPER, tint,
         );
         self.quad(
             [Vec3::new(x + half_w, y0, z), Vec3::new(x - half_w, y0, z),
              Vec3::new(x - half_w, y1, z), Vec3::new(x + half_w, y1, z)],
             [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
-            IMG_LANTERN, tint,
+            IMG_LANTERN_PAPER, tint,
         );
         // Panel in Z–Y plane (constant X)
         self.quad(
             [Vec3::new(x, y0, z - half_w), Vec3::new(x, y0, z + half_w),
              Vec3::new(x, y1, z + half_w), Vec3::new(x, y1, z - half_w)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            IMG_LANTERN, tint,
+            IMG_LANTERN_PAPER, tint,
         );
         self.quad(
             [Vec3::new(x, y0, z + half_w), Vec3::new(x, y0, z - half_w),
              Vec3::new(x, y1, z - half_w), Vec3::new(x, y1, z + half_w)],
             [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
-            IMG_LANTERN, tint,
+            IMG_LANTERN_PAPER, tint,
         );
     }
 

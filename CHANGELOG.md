@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-29 — Paper chōchin, R32 triple-panel car, regenerated props (PixelLab)
+
+- **Lanterns**: New **`lantern_paper.png`** (Japanese paper chōchin); wall + cross-alley lanterns use texture **IMG_LANTERN_PAPER** instead of solid orange rects. Utility asphalt stripes still use solid warm index 17 (`IMG_SOLID_WARM`).
+- **Nissan R32**: Generated **`r32_side.png`**, **`r32_front.png`**, **`r32_rear.png`**; **`add_parked_r32`** places three quads (side + bumpers) on the right wall with collision AABB.
+- **Props**: Regenerated **trash_bags**, **beer_crates**, **bicycle** via map-object (deeper shading). **Trash**: second smaller pile offset in Z. **Crates**: stacked second tier via **`wall_prop_y`**. **Bikes**: **`bike_lean_wing`** skew quad for a leaning read.
+- **Docs**: `client/level_textures/tokyo_props/EXPORT.txt` lists assets and regen hints.
+
 ## 2026-03-29 — Arcade alley: wall_prop texture wrap, more signs & lanterns
 
 - **wall_prop**: Top and sides use **UV strips** from the same prop PNG (edge + top bands) instead of flat solid materials; front/wall dimming tuned; thin **ground shadow** quad along the base. Reduces the obvious “shoebox” read when circling props.
