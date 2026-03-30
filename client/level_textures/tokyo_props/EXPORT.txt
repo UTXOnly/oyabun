@@ -17,6 +17,9 @@ Embedded in `client/src/arcade_level.rs` via `include_bytes!`.
 
 Regenerate (requires token in env or `.cursor/mcp.json`):
 
+- Prompt for **pixel art + thick black outline + opaque / hard edges**; avoid “photorealistic” or props read as photo stickers on boxes.
+- Alley props use **solid tinted shells** on top/sides in code (`SHELL_TRASH` / `SHELL_CRATE` / `SHELL_BIKE` + `IMG_PIPE`); only wall + street faces use the PNG.
+
 ```
 python3 tools/pixellab_v2.py map-object --width 96 --height 128 "…chōchin…" client/level_textures/tokyo_props/lantern_paper.png
 python3 tools/pixellab_v2.py map-object --width 200 --height 88 "…R32 side…" client/level_textures/tokyo_props/r32_side.png

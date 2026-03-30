@@ -171,10 +171,14 @@ fn vs_tex(v: Vin) -> Vout {
 @fragment
 fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
     let t = textureSample(albedo, albedo_samp, i.uv) * mu.tint;
+    // Map-object PNGs use transparency; without fill, fringe reads as black on box sides.
+    let alley_fill = vec3<f32>(0.12, 0.11, 0.17);
+    let a = clamp(t.a, 0.0, 1.0);
+    let rgb_in = t.rgb + (1.0 - a) * alley_fill * 0.55;
     let wp = i.world_pos;
-    let lum = t.r * 0.3 + t.g * 0.5 + t.b * 0.2;
-    let mn = min(t.r, min(t.g, t.b));
-    let mx = max(t.r, max(t.g, t.b));
+    let lum = rgb_in.r * 0.3 + rgb_in.g * 0.5 + rgb_in.b * 0.2;
+    let mn = min(rgb_in.r, min(rgb_in.g, rgb_in.b));
+    let mx = max(rgb_in.r, max(rgb_in.g, rgb_in.b));
     let sat = select(0.0, (mx - mn) / max(mx, 0.001), mx > 0.001);
 
     // Warm ambient: overhead orange glow fading toward ground (lanterns / neon from above)
@@ -187,7 +191,7 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
     // Bright / saturated surfaces glow (signs, lanterns, neon shop art)
     let emit_boost = max(lum - 0.30, 0.0) * (1.2 + sat * 1.5);
 
-    let lit = t.rgb * 1.6 + ambient + t.rgb * emit_boost;
+    let lit = rgb_in * 1.6 + ambient + rgb_in * emit_boost;
 
     // Posterize to 24 levels — retro arcade banding
     var q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;

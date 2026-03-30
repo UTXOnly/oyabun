@@ -60,6 +60,11 @@ const NEON_PINK: [u8; 4] = [0xE0, 0x30, 0x80, 0xFF];
 const NEON_BLUE: [u8; 4] = [0x30, 0x60, 0xE0, 0xFF];
 const WET_STREET: [u8; 4] = [0x18, 0x1E, 0x30, 0xFF];
 
+/// Solid shell tint for prop top/sides (1×1 `IMG_PIPE`); reads as painted volume, not black void.
+const SHELL_TRASH: [f32; 4] = [0.24, 0.22, 0.28, 1.0];
+const SHELL_CRATE: [f32; 4] = [0.38, 0.29, 0.22, 1.0];
+const SHELL_BIKE: [f32; 4] = [0.28, 0.28, 0.34, 1.0];
+
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
@@ -716,12 +721,14 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         b.wall_prop(
             wall_x, z_gap, left,
             0.5, 0.55, 0.8,
-            IMG_TRASH, [1.6, 1.5, 1.5, 1.0],
+            IMG_TRASH, [1.5, 1.45, 1.45, 1.0],
+            SHELL_TRASH,
         );
         b.wall_prop(
             wall_x, z_gap + 0.52, left,
             0.36, 0.42, 0.58,
-            IMG_TRASH, [1.45, 1.4, 1.4, 1.0],
+            IMG_TRASH, [1.35, 1.32, 1.32, 1.0],
+            SHELL_TRASH,
         );
     }
 
@@ -739,13 +746,15 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         b.wall_prop(
             wall_x, z_gap, left,
             0.45, 0.5, 1.0,
-            IMG_CRATES, [1.3, 1.2, 1.1, 1.0],
+            IMG_CRATES, [1.25, 1.15, 1.05, 1.0],
+            SHELL_CRATE,
         );
         b.wall_prop_y(
             wall_x, z_gap, left,
             0.38, 0.46, 0.52,
             0.92,
-            IMG_CRATES, [1.15, 1.05, 0.95, 1.0],
+            IMG_CRATES, [1.1, 1.0, 0.92, 1.0],
+            SHELL_CRATE,
         );
     }
 
@@ -827,12 +836,13 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         b.wall_prop(
             wall_x, z_gap, left,
             0.65, 0.5, 0.9,
-            IMG_BICYCLE, [1.3, 1.2, 1.2, 1.0],
+            IMG_BICYCLE, [1.25, 1.18, 1.18, 1.0],
+            SHELL_BIKE,
         );
         b.bike_lean_wing(
             wall_x, z_gap, left,
             0.65, 0.5, 0.9,
-            IMG_BICYCLE, [1.3, 1.2, 1.2, 1.0],
+            IMG_BICYCLE, [1.2, 1.15, 1.15, 1.0],
         );
     }
 
@@ -1060,7 +1070,7 @@ fn add_parked_r32(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_side: b
     let car_h = 1.18_f32;
     let z0 = z_center - car_len * 0.5;
     let z1 = z_center + car_len * 0.5;
-    let ct = [1.15_f32, 1.15, 1.2, 1.0];
+    let ct = [1.05_f32, 1.05, 1.1, 1.0];
     if !left_side {
         let x_in = wall_x - car_w - 0.03;
         b.quad(
@@ -1081,6 +1091,17 @@ fn add_parked_r32(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_side: b
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
             IMG_R32_FRONT, ct,
         );
+        let uv_g = [[0.0_f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let gsh = [0.14_f32, 0.13, 0.17, 1.0];
+        b.quad(
+            [Vec3::new(wall_x - car_w - 0.02, 0.018, z0 - 0.1),
+             Vec3::new(wall_x + 0.05, 0.018, z0 - 0.1),
+             Vec3::new(wall_x + 0.05, 0.018, z1 + 0.1),
+             Vec3::new(wall_x - car_w - 0.02, 0.018, z1 + 0.1)],
+            uv_g,
+            IMG_PIPE,
+            gsh,
+        );
     } else {
         let x_in = wall_x + car_w + 0.03;
         b.quad(
@@ -1100,6 +1121,17 @@ fn add_parked_r32(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_side: b
              Vec3::new(wall_x + car_w, car_h, z0), Vec3::new(wall_x, car_h, z0)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
             IMG_R32_FRONT, ct,
+        );
+        let uv_g = [[0.0_f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let gsh = [0.14_f32, 0.13, 0.17, 1.0];
+        b.quad(
+            [Vec3::new(wall_x + car_w + 0.02, 0.018, z0 - 0.1),
+             Vec3::new(wall_x - 0.05, 0.018, z0 - 0.1),
+             Vec3::new(wall_x - 0.05, 0.018, z1 + 0.1),
+             Vec3::new(wall_x + car_w + 0.02, 0.018, z1 + 0.1)],
+            uv_g,
+            IMG_PIPE,
+            gsh,
         );
     }
 }
@@ -1267,8 +1299,11 @@ impl LevelBuilder {
         wall_x: f32, z_mid: f32, left_side: bool,
         hz: f32, depth: f32, h: f32,
         image_index: usize, tint: [f32; 4],
+        shell_tint: [f32; 4],
     ) {
-        self.wall_prop_y(wall_x, z_mid, left_side, hz, depth, h, 0.0, image_index, tint);
+        self.wall_prop_y(
+            wall_x, z_mid, left_side, hz, depth, h, 0.0, image_index, tint, shell_tint,
+        );
     }
 
     /// Stacked crate / second trash cluster: same as [`wall_prop`] but lifted on Y.
@@ -1278,9 +1313,9 @@ impl LevelBuilder {
         hz: f32, depth: f32, h: f32,
         y0: f32,
         image_index: usize, tint: [f32; 4],
+        shell_tint: [f32; 4],
     ) {
-        const EU: f32 = 0.07;
-        const TV: f32 = 0.12;
+        let uv1 = [[0.0_f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
 
         let z0 = z_mid + hz;
         let z1 = z_mid - hz;
@@ -1293,8 +1328,18 @@ impl LevelBuilder {
 
         let (x_min, x_max) = if left_side { (back_x, front_x) } else { (front_x, back_x) };
 
-        let side_t = [tint[0] * 0.62, tint[1] * 0.62, tint[2] * 0.62, tint[3]];
-        let top_t = [tint[0] * 0.72, tint[1] * 0.72, tint[2] * 0.72, tint[3]];
+        let top_c = [
+            shell_tint[0] * 1.06,
+            shell_tint[1] * 1.06,
+            shell_tint[2] * 1.04,
+            shell_tint[3],
+        ];
+        let side_c = [
+            shell_tint[0] * 0.82,
+            shell_tint[1] * 0.80,
+            shell_tint[2] * 0.88,
+            shell_tint[3],
+        ];
         let y1 = y0 + h;
 
         if left_side {
@@ -1333,30 +1378,39 @@ impl LevelBuilder {
         self.quad(
             [Vec3::new(x_min, y1, z0), Vec3::new(x_max, y1, z0),
              Vec3::new(x_max, y1, z1), Vec3::new(x_min, y1, z1)],
-            [[0.0, TV], [1.0, TV], [1.0, 0.0], [0.0, 0.0]],
-            image_index, top_t,
+            uv1,
+            IMG_PIPE,
+            top_c,
         );
 
         self.quad(
             [Vec3::new(x_min, y0, z0), Vec3::new(x_max, y0, z0),
              Vec3::new(x_max, y1, z0), Vec3::new(x_min, y1, z0)],
-            [[1.0 - EU, 1.0], [1.0, 1.0], [1.0, 0.0], [1.0 - EU, 0.0]],
-            image_index, side_t,
+            uv1,
+            IMG_PIPE,
+            side_c,
         );
         self.quad(
             [Vec3::new(x_max, y0, z1), Vec3::new(x_min, y0, z1),
              Vec3::new(x_min, y1, z1), Vec3::new(x_max, y1, z1)],
-            [[0.0, 1.0], [EU, 1.0], [EU, 0.0], [0.0, 0.0]],
-            image_index, side_t,
+            uv1,
+            IMG_PIPE,
+            side_c,
         );
 
         let gy = y0.max(0.012);
-        let sh_t = [tint[0] * 0.25, tint[1] * 0.25, tint[2] * 0.25, 0.85];
+        let sh_c = [
+            shell_tint[0] * 0.38,
+            shell_tint[1] * 0.36,
+            shell_tint[2] * 0.42,
+            0.88,
+        ];
         self.quad(
             [Vec3::new(x_min, gy, z0), Vec3::new(x_max, gy, z0),
              Vec3::new(x_max, gy, z1), Vec3::new(x_min, gy, z1)],
-            [[0.0, 0.85], [1.0, 0.85], [1.0, 1.0], [0.0, 1.0]],
-            image_index, sh_t,
+            uv1,
+            IMG_PIPE,
+            sh_c,
         );
     }
 

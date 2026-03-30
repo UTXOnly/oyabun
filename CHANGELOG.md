@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-29 — Props: pixel-art regen, solid shells, alpha fringe in `fs_tex`
+
+- **Art**: Re-ran PixelLab map-object for **trash, crates, bike, R32×3, lantern** with prompts demanding **chunky pixel art, thick black outline, flat cel, no photograph** so props match the arcade alley instead of photo decals.
+- **Geometry**: `wall_prop` / `wall_prop_y` **top, Z-sides, and ground shadow** now use tinted **`IMG_PIPE`** (`SHELL_*` constants), not UV strips into transparent PNG edges — reads as a small painted volume instead of a black hole.
+- **Shader**: `fs_tex` blends **alley night fill** into low-alpha samples so transparent fringe is not pitch black.
+- **R32**: Ground **contact shadow** slab under the car; slightly lower emissive tint on panels.
+
 ## 2026-03-29 — Paper chōchin, R32 triple-panel car, regenerated props (PixelLab)
 
 - **Lanterns**: New **`lantern_paper.png`** (Japanese paper chōchin); wall + cross-alley lanterns use texture **IMG_LANTERN_PAPER** instead of solid orange rects. Utility asphalt stripes still use solid warm index 17 (`IMG_SOLID_WARM`).
