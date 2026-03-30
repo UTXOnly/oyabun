@@ -576,6 +576,11 @@ def _launch_docker(ns: argparse.Namespace) -> None:
         sys.stderr.write("note: --docker starts relay only; run web with launch --web-only or another server\n")
 
 
+def cmd_build_arcade_r32_prop(_ns: argparse.Namespace) -> None:
+    script = ROOT / "tools" / "build_arcade_r32_prop.py"
+    subprocess.run([sys.executable, str(script)], cwd=ROOT, check=True)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="oyabaunctl", description="Control Oyabaun dev processes")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -728,6 +733,12 @@ def main() -> None:
         help="run wasm-pack after copy (needed for include_bytes! embedded level)",
     )
     sp.set_defaults(func=cmd_import_glb)
+
+    sp = sub.add_parser(
+        "build-arcade-r32-prop",
+        help="derive 3 R32 prop PNGs + client/props/arcade_r32_prop.glb (Pillow; run wasm-pack after)",
+    )
+    sp.set_defaults(func=cmd_build_arcade_r32_prop)
 
     sp = sub.add_parser("launch", help="start relay binary + static client (http.server)")
     sp.add_argument("--docker", action="store_true", help="docker compose relay instead of local binary")

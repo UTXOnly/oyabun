@@ -15,6 +15,8 @@ Embedded in `client/src/arcade_level.rs` via `include_bytes!`.
 | r32_front.png | R32 front bumper quad |
 | r32_rear.png | R32 rear bumper quad |
 
+**Parked car in arcade:** `python3 tools/build_arcade_r32_prop.py` reads the three `r32_*.png` files above, writes **`client/props/generated/arcade_r32_{1,2,3}_*.png`** and embeds them in **`client/props/arcade_r32_prop.glb`** (merged into the level). Same via `python3 tools/oyabaunctl.py build-arcade-r32-prop`.
+
 Regenerate (requires token in env or `.cursor/mcp.json`):
 
 - Prompt for **pixel art + thick black outline + opaque / hard edges**; avoid “photorealistic” or props read as photo stickers on boxes.
