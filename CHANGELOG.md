@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-03-29 — Arcade R32: faceted body shell instead of three flat posters
+
+- **`add_parked_r32`**: Narrow **front/rear** panels use only the **lower UV band** of the pixel PNGs (bumper slice); **hood**, **roof**, **trunk deck**, and **windshield / rear glass** are separate quads (`IMG_PIPE` / `IMG_WINDOW`) so silhouette breaks out of a shoebox. Collision AABB extended for hood/trunk overhang in Z.
+
 ## 2026-03-29 — R32: drop camera-facing prop billboard; restore fixed geometry + roof
 
 - **Removed** **`PropBillboardCpu`**, **`prop_r32_atlas`**, and prop draw pass — parked cars must not use NPC-style yaw billboards (they spun to face the player).

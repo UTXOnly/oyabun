@@ -4,7 +4,7 @@
 //! - Narrow alley lined with Kabukicho shop facades (PixelLab pixel art)
 //! - Vertical neon signs mounted on buildings
 //! - Vending machines, awnings, lanterns, overhead wire tangles
-//! - Parked R32: fixed world-space quads (side + bumpers) + roof slab — no camera-facing billboards
+//! - Parked R32: faceted shell (hood / roof / trunk / glass) + narrow bumper pixel panels — no camera billboards
 //! - Dense, atmospheric, 90s arcade feel
 //!
 //! No Blender GLB required.
@@ -65,6 +65,8 @@ const SHELL_TRASH: [f32; 4] = [0.24, 0.22, 0.28, 1.0];
 const SHELL_CRATE: [f32; 4] = [0.38, 0.29, 0.22, 1.0];
 const SHELL_BIKE: [f32; 4] = [0.28, 0.28, 0.34, 1.0];
 const SHELL_CAR: [f32; 4] = [0.30, 0.30, 0.35, 1.0];
+const GLASS_CAR: [f32; 4] = [0.42, 0.58, 0.88, 0.78];
+const GLASS_CAR_REAR: [f32; 4] = [0.35, 0.48, 0.72, 0.72];
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -1022,8 +1024,8 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     }
 
     solids.push(Aabb {
-        min: Vec3::new(STREET_HW - 1.76, 0.0, z_r32 - 2.12),
-        max: Vec3::new(STREET_HW + 0.06, 1.24, z_r32 + 2.12),
+        min: Vec3::new(STREET_HW - 1.76, 0.0, z_r32 - 2.38),
+        max: Vec3::new(STREET_HW + 0.06, 1.30, z_r32 + 2.38),
     });
 
     // Vending machine collision
@@ -1064,8 +1066,8 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
 // Vertical neon (double-sided quad on wall plane X)
 // ---------------------------------------------------------------------------
 
-/// Parked Nissan R32: side + front + rear (world-fixed), horizontal roof slab, ground shadow.
-/// Bumper toward -Z when `left_side` is false.
+/// Parked R32: **faceted** shell (hood / roof / trunk / glass) + **narrow** pixel panels on bumpers
+/// so it reads as volume, not three posters on a box. World-fixed; bumper toward -Z when `left_side` is false.
 fn add_parked_r32(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_side: bool) {
     let car_len = 4.05_f32;
     let car_w = 1.68_f32;
@@ -1075,79 +1077,176 @@ fn add_parked_r32(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_side: b
     let ct = [1.05_f32, 1.05, 1.1, 1.0];
     let uv_g = [[0.0_f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let gsh = [0.14_f32, 0.13, 0.17, 1.0];
+    // Lower slice of front/rear PNG (grille / bumper).
+    let uv_bumper = [[0.0_f32, 1.0], [1.0, 1.0], [1.0, 0.62], [0.0, 0.62]];
+    let y_bumper = 0.36_f32;
+    let hood_z = 0.34_f32;
+    let trunk_z = 0.28_f32;
+
+    let (xa, xb, side_x, sh_x0, sh_x1) = if !left_side {
+        let xa = wall_x - car_w;
+        let xb = wall_x;
+        let side_x = xa - 0.03;
+        (xa, xb, side_x, wall_x - car_w - 0.02, wall_x + 0.05)
+    } else {
+        let xa = wall_x;
+        let xb = wall_x + car_w;
+        let side_x = xb + 0.03;
+        (xa, xb, side_x, wall_x - 0.05, wall_x + car_w + 0.02)
+    };
+
+    // Street-facing side (full pixel read along the alley)
     if !left_side {
-        let x_in = wall_x - car_w - 0.03;
         b.quad(
-            [Vec3::new(x_in, 0.0, z0), Vec3::new(x_in, 0.0, z1),
-             Vec3::new(x_in, car_h, z1), Vec3::new(x_in, car_h, z0)],
+            [Vec3::new(side_x, 0.0, z0), Vec3::new(side_x, 0.0, z1),
+             Vec3::new(side_x, car_h, z1), Vec3::new(side_x, car_h, z0)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            IMG_R32_SIDE, ct,
-        );
-        b.quad(
-            [Vec3::new(wall_x - car_w, 0.0, z1), Vec3::new(wall_x, 0.0, z1),
-             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x - car_w, car_h, z1)],
-            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            IMG_R32_REAR, ct,
-        );
-        b.quad(
-            [Vec3::new(wall_x, 0.0, z0), Vec3::new(wall_x - car_w, 0.0, z0),
-             Vec3::new(wall_x - car_w, car_h, z0), Vec3::new(wall_x, car_h, z0)],
-            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            IMG_R32_FRONT, ct,
-        );
-        b.quad(
-            [Vec3::new(wall_x - car_w, car_h, z0), Vec3::new(wall_x, car_h, z0),
-             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x - car_w, car_h, z1)],
-            uv_g,
-            IMG_PIPE,
-            SHELL_CAR,
-        );
-        b.quad(
-            [Vec3::new(wall_x - car_w - 0.02, 0.018, z0 - 0.1),
-             Vec3::new(wall_x + 0.05, 0.018, z0 - 0.1),
-             Vec3::new(wall_x + 0.05, 0.018, z1 + 0.1),
-             Vec3::new(wall_x - car_w - 0.02, 0.018, z1 + 0.1)],
-            uv_g,
-            IMG_PIPE,
-            gsh,
+            IMG_R32_SIDE,
+            ct,
         );
     } else {
-        let x_in = wall_x + car_w + 0.03;
         b.quad(
-            [Vec3::new(x_in, 0.0, z1), Vec3::new(x_in, 0.0, z0),
-             Vec3::new(x_in, car_h, z0), Vec3::new(x_in, car_h, z1)],
+            [Vec3::new(side_x, 0.0, z1), Vec3::new(side_x, 0.0, z0),
+             Vec3::new(side_x, car_h, z0), Vec3::new(side_x, car_h, z1)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            IMG_R32_SIDE, ct,
+            IMG_R32_SIDE,
+            ct,
+        );
+    }
+
+    // Front: short textured bumper + angled hood (body shell)
+    if !left_side {
+        b.quad(
+            [Vec3::new(xb, 0.0, z0), Vec3::new(xa, 0.0, z0), Vec3::new(xa, y_bumper, z0), Vec3::new(xb, y_bumper, z0)],
+            uv_bumper,
+            IMG_R32_FRONT,
+            ct,
         );
         b.quad(
-            [Vec3::new(wall_x + car_w, 0.0, z1), Vec3::new(wall_x, 0.0, z1),
-             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x + car_w, car_h, z1)],
-            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            IMG_R32_REAR, ct,
-        );
-        b.quad(
-            [Vec3::new(wall_x, 0.0, z0), Vec3::new(wall_x + car_w, 0.0, z0),
-             Vec3::new(wall_x + car_w, car_h, z0), Vec3::new(wall_x, car_h, z0)],
-            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            IMG_R32_FRONT, ct,
-        );
-        b.quad(
-            [Vec3::new(wall_x + car_w, car_h, z0), Vec3::new(wall_x, car_h, z0),
-             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x + car_w, car_h, z1)],
+            [Vec3::new(xa, y_bumper, z0),
+             Vec3::new(xb, y_bumper, z0),
+             Vec3::new(xb, 0.66, z0 - hood_z),
+             Vec3::new(xa, 0.70, z0 - hood_z)],
             uv_g,
             IMG_PIPE,
             SHELL_CAR,
         );
         b.quad(
-            [Vec3::new(wall_x + car_w + 0.02, 0.018, z0 - 0.1),
-             Vec3::new(wall_x - 0.05, 0.018, z0 - 0.1),
-             Vec3::new(wall_x - 0.05, 0.018, z1 + 0.1),
-             Vec3::new(wall_x + car_w + 0.02, 0.018, z1 + 0.1)],
+            [Vec3::new(xa + 0.03, 0.64, z0 - 0.05),
+             Vec3::new(xb - 0.03, 0.62, z0 - 0.03),
+             Vec3::new(xb - 0.04, car_h + 0.03, z0 + 0.54),
+             Vec3::new(xa + 0.06, car_h + 0.05, z0 + 0.51)],
+            uv_g,
+            IMG_WINDOW,
+            GLASS_CAR,
+        );
+        b.quad(
+            [Vec3::new(xa + 0.07, car_h + 0.03, z0 + 0.51),
+             Vec3::new(xb - 0.04, car_h + 0.02, z0 + 0.53),
+             Vec3::new(xb - 0.04, car_h + 0.02, z1 - 0.40),
+             Vec3::new(xa + 0.07, car_h + 0.03, z1 - 0.43)],
             uv_g,
             IMG_PIPE,
-            gsh,
+            SHELL_CAR,
+        );
+    } else {
+        b.quad(
+            [Vec3::new(xb, 0.0, z0), Vec3::new(xa, 0.0, z0), Vec3::new(xa, y_bumper, z0), Vec3::new(xb, y_bumper, z0)],
+            uv_bumper,
+            IMG_R32_FRONT,
+            ct,
+        );
+        b.quad(
+            [Vec3::new(xa, y_bumper, z0),
+             Vec3::new(xb, y_bumper, z0),
+             Vec3::new(xb, 0.66, z0 - hood_z),
+             Vec3::new(xa, 0.70, z0 - hood_z)],
+            uv_g,
+            IMG_PIPE,
+            SHELL_CAR,
+        );
+        b.quad(
+            [Vec3::new(xb - 0.03, 0.64, z0 - 0.05),
+             Vec3::new(xa + 0.03, 0.62, z0 - 0.03),
+             Vec3::new(xa + 0.04, car_h + 0.03, z0 + 0.54),
+             Vec3::new(xb - 0.06, car_h + 0.05, z0 + 0.51)],
+            uv_g,
+            IMG_WINDOW,
+            GLASS_CAR,
+        );
+        b.quad(
+            [Vec3::new(xb - 0.07, car_h + 0.03, z0 + 0.51),
+             Vec3::new(xa + 0.04, car_h + 0.02, z0 + 0.53),
+             Vec3::new(xa + 0.04, car_h + 0.02, z1 - 0.40),
+             Vec3::new(xb - 0.07, car_h + 0.03, z1 - 0.43)],
+            uv_g,
+            IMG_PIPE,
+            SHELL_CAR,
         );
     }
+
+    // Rear: glass + trunk deck + short textured tail
+    if !left_side {
+        b.quad(
+            [Vec3::new(xa + 0.06, car_h + 0.02, z1 - 0.43),
+             Vec3::new(xb - 0.04, car_h, z1 - 0.40),
+             Vec3::new(xb - 0.02, 0.58, z1 + 0.07),
+             Vec3::new(xa + 0.04, 0.56, z1 + 0.05)],
+            uv_g,
+            IMG_WINDOW,
+            GLASS_CAR_REAR,
+        );
+        b.quad(
+            [Vec3::new(xa, 0.38, z1),
+             Vec3::new(xb, 0.38, z1),
+             Vec3::new(xb, 0.70, z1 + trunk_z),
+             Vec3::new(xa, 0.68, z1 + trunk_z)],
+            uv_g,
+            IMG_PIPE,
+            SHELL_CAR,
+        );
+        b.quad(
+            [Vec3::new(xb, 0.0, z1), Vec3::new(xa, 0.0, z1), Vec3::new(xa, y_bumper, z1), Vec3::new(xb, y_bumper, z1)],
+            uv_bumper,
+            IMG_R32_REAR,
+            ct,
+        );
+    } else {
+        b.quad(
+            [Vec3::new(xb - 0.06, car_h + 0.02, z1 - 0.43),
+             Vec3::new(xa + 0.04, car_h, z1 - 0.40),
+             Vec3::new(xa + 0.02, 0.58, z1 + 0.07),
+             Vec3::new(xb - 0.04, 0.56, z1 + 0.05)],
+            uv_g,
+            IMG_WINDOW,
+            GLASS_CAR_REAR,
+        );
+        b.quad(
+            [Vec3::new(xa, 0.38, z1),
+             Vec3::new(xb, 0.38, z1),
+             Vec3::new(xb, 0.70, z1 + trunk_z),
+             Vec3::new(xa, 0.68, z1 + trunk_z)],
+            uv_g,
+            IMG_PIPE,
+            SHELL_CAR,
+        );
+        b.quad(
+            [Vec3::new(xb, 0.0, z1), Vec3::new(xa, 0.0, z1), Vec3::new(xa, y_bumper, z1), Vec3::new(xb, y_bumper, z1)],
+            uv_bumper,
+            IMG_R32_REAR,
+            ct,
+        );
+    }
+
+    b.quad(
+        [Vec3::new(sh_x0, 0.018, z0 - 0.1),
+         Vec3::new(sh_x1, 0.018, z0 - 0.1),
+         Vec3::new(sh_x1, 0.018, z1 + 0.1),
+         Vec3::new(sh_x0, 0.018, z1 + 0.1)],
+        uv_g,
+        IMG_PIPE,
+        gsh,
+    );
 }
 
 fn add_vertical_neon_pair(
