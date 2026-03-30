@@ -76,4 +76,5 @@ NPCs use:
 
 | Date | |
 |------|---|
+| 2026-03-30 | Link parked car merge path to `arcade_r32_prop.glb` + [`CURSOR_ARCADE_PARKED_VEHICLE.md`](./CURSOR_ARCADE_PARKED_VEHICLE.md). |
 | 2026-03-30 | Initial doc: MCP limits + billboard reuse plan. |
