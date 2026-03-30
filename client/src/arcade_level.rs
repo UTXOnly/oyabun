@@ -243,60 +243,33 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // VERTICAL NEON SIGNS (mounted on building faces, jutting into alley)
+    // VERTICAL NEON SIGNS (wall-mounted + upper-story stack)
     // ══════════════════════════════════════════════════════════════════
-    let signs = [
-        (IMG_SIGN_YAKINIKU, 0, true,  0.6, 2.5),  // left side, shop 0
-        (IMG_SIGN_KARAOKE,  2, true,  0.4, 3.0),  // left side, shop 2
-        (IMG_SIGN_SAKE,     1, false, 0.5, 2.0),  // right side, shop 1
-        (IMG_SIGN_MAHJONG,  4, false, 0.6, 2.5),  // right side, shop 4
-        (IMG_SIGN_YAKINIKU, 3, false, 0.5, 2.2),  // right side, shop 3
-        (IMG_SIGN_KARAOKE,  5, true,  0.4, 2.8),  // left side, shop 5
+    // (tex, shop_idx, left, half_width_along_z, height, base_y, z_offset_from_shop_mid)
+    // span_z = full width of sign along alley (Z); sign_y = bottom Y
+    let signs: [(usize, usize, bool, f32, f32, f32, f32); 18] = [
+        (IMG_SIGN_YAKINIKU, 0, true, 0.6, 2.5, SHOP_H + 0.3, 0.0),
+        (IMG_SIGN_KARAOKE, 2, true, 0.4, 3.0, SHOP_H + 0.25, 0.0),
+        (IMG_SIGN_SAKE, 1, false, 0.5, 2.0, SHOP_H + 0.35, 0.0),
+        (IMG_SIGN_MAHJONG, 4, false, 0.6, 2.5, SHOP_H + 0.28, 0.0),
+        (IMG_SIGN_YAKINIKU, 3, false, 0.5, 2.2, SHOP_H + 0.32, 0.0),
+        (IMG_SIGN_KARAOKE, 5, true, 0.4, 2.8, SHOP_H + 0.3, 0.0),
+        (IMG_SIGN_SAKE, 0, true, 0.56, 2.0, SHOP_H + 0.2, -1.1),
+        (IMG_SIGN_MAHJONG, 1, true, 0.64, 2.3, SHOP_H + 0.22, 1.0),
+        (IMG_SIGN_YAKINIKU, 4, true, 0.7, 2.4, SHOP_H + 0.18, -0.9),
+        (IMG_SIGN_KARAOKE, 3, false, 0.6, 2.6, SHOP_H + 0.2, 1.05),
+        (IMG_SIGN_SAKE, 5, false, 0.68, 2.1, SHOP_H + 0.25, -1.0),
+        (IMG_SIGN_MAHJONG, 2, false, 0.76, 2.2, SHOP_H + 0.24, 0.85),
+        (IMG_SIGN_KARAOKE, 1, true, 0.52, 1.9, SHOP_H + UPPER_H + 0.35, 0.0),
+        (IMG_SIGN_SAKE, 3, true, 0.6, 2.1, SHOP_H + UPPER_H * 1.6 + 0.2, -0.4),
+        (IMG_SIGN_YAKINIKU, 2, false, 0.56, 2.0, SHOP_H + UPPER_H + 0.4, 0.2),
+        (IMG_SIGN_MAHJONG, 0, false, 0.64, 1.85, SHOP_H + UPPER_H * 1.4 + 0.15, 0.5),
+        (IMG_SIGN_KARAOKE, 4, false, 0.54, 2.2, SHOP_H + UPPER_H * 1.8 + 0.1, -0.35),
+        (IMG_SIGN_YAKINIKU, 5, true, 0.58, 1.95, SHOP_H + UPPER_H * 1.5 + 0.25, 0.45),
     ];
-
-    for &(tex, shop_idx, left_side, sign_w, sign_h) in &signs {
-        let z_mid = Z_START - SHOP_GAP - (shop_idx as f32) * SHOP_STEP - SHOP_W * 0.5;
-        let sign_y = SHOP_H + 0.3;
-
-        if left_side {
-            let x = -STREET_HW + 0.15;
-            // Sign faces +X (into alley), hangs perpendicular to wall
-            b.quad(
-                [Vec3::new(x, sign_y, z_mid - sign_w * 0.5),
-                 Vec3::new(x, sign_y, z_mid + sign_w * 0.5),
-                 Vec3::new(x, sign_y + sign_h, z_mid + sign_w * 0.5),
-                 Vec3::new(x, sign_y + sign_h, z_mid - sign_w * 0.5)],
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                tex, [2.0, 1.8, 1.6, 1.0], // emissive boost
-            );
-            // Back side
-            b.quad(
-                [Vec3::new(x, sign_y, z_mid + sign_w * 0.5),
-                 Vec3::new(x, sign_y, z_mid - sign_w * 0.5),
-                 Vec3::new(x, sign_y + sign_h, z_mid - sign_w * 0.5),
-                 Vec3::new(x, sign_y + sign_h, z_mid + sign_w * 0.5)],
-                [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
-                tex, [2.0, 1.8, 1.6, 1.0],
-            );
-        } else {
-            let x = STREET_HW - 0.15;
-            b.quad(
-                [Vec3::new(x, sign_y, z_mid + sign_w * 0.5),
-                 Vec3::new(x, sign_y, z_mid - sign_w * 0.5),
-                 Vec3::new(x, sign_y + sign_h, z_mid - sign_w * 0.5),
-                 Vec3::new(x, sign_y + sign_h, z_mid + sign_w * 0.5)],
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                tex, [2.0, 1.8, 1.6, 1.0],
-            );
-            b.quad(
-                [Vec3::new(x, sign_y, z_mid - sign_w * 0.5),
-                 Vec3::new(x, sign_y, z_mid + sign_w * 0.5),
-                 Vec3::new(x, sign_y + sign_h, z_mid + sign_w * 0.5),
-                 Vec3::new(x, sign_y + sign_h, z_mid - sign_w * 0.5)],
-                [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
-                tex, [2.0, 1.8, 1.6, 1.0],
-            );
-        }
+    let sign_tint = [2.0_f32, 1.85, 1.65, 1.0];
+    for &(tex, shop_idx, left_side, span_z, sign_h, sign_y, z_off) in &signs {
+        add_vertical_neon_pair(&mut b, tex, shop_idx, left_side, span_z, sign_h, sign_y, z_off, sign_tint);
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -380,27 +353,41 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         let lw = 0.3;
         let ly = SHOP_H - 0.7;
 
-        // Left lanterns (two per shop)
+        // Left lanterns (pairs flanking façade + center chōchin)
         let lx = -STREET_HW + 0.06;
-        for &z_off in &[-0.8, 0.8] {
+        for &z_off in &[-0.85_f32, 0.0_f32, 0.85_f32] {
+            let ll = if z_off.abs() < 0.05 { lw * 0.85 } else { lw };
             b.quad(
-                [Vec3::new(lx, ly, z_mid + z_off - lw), Vec3::new(lx, ly, z_mid + z_off + lw),
-                 Vec3::new(lx, ly + lh, z_mid + z_off + lw), Vec3::new(lx, ly + lh, z_mid + z_off - lw)],
+                [Vec3::new(lx, ly, z_mid + z_off - ll), Vec3::new(lx, ly, z_mid + z_off + ll),
+                 Vec3::new(lx, ly + lh, z_mid + z_off + ll), Vec3::new(lx, ly + lh, z_mid + z_off - ll)],
                 [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 IMG_LANTERN, [2.8, 2.0, 0.7, 1.0],
             );
+            b.lantern_cord(lx, z_mid + z_off, SHOP_H - 0.06, ly + lh);
         }
 
         // Right lanterns
         let rx = STREET_HW - 0.06;
-        for &z_off in &[-0.8, 0.8] {
+        for &z_off in &[-0.85_f32, 0.0_f32, 0.85_f32] {
+            let ll = if z_off.abs() < 0.05 { lw * 0.85 } else { lw };
             b.quad(
-                [Vec3::new(rx, ly, z_mid + z_off + lw), Vec3::new(rx, ly, z_mid + z_off - lw),
-                 Vec3::new(rx, ly + lh, z_mid + z_off - lw), Vec3::new(rx, ly + lh, z_mid + z_off + lw)],
+                [Vec3::new(rx, ly, z_mid + z_off + ll), Vec3::new(rx, ly, z_mid + z_off - ll),
+                 Vec3::new(rx, ly + lh, z_mid + z_off - ll), Vec3::new(rx, ly + lh, z_mid + z_off + ll)],
                 [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 IMG_LANTERN, [2.8, 2.0, 0.7, 1.0],
             );
+            b.lantern_cord(rx, z_mid + z_off, SHOP_H - 0.06, ly + lh);
         }
+    }
+
+    // Cross-shaped lanterns mid-alley (visible when looking along ±Z or ±X)
+    for i in [0usize, 2, 3, 5] {
+        let z_mid = Z_START - SHOP_GAP - (i as f32) * SHOP_STEP - SHOP_W * 0.5;
+        let y0 = SHOP_H + UPPER_H * 0.55 + (i % 3) as f32 * 0.1;
+        let hang = 0.4;
+        let wire_y = (SHOP_H + UPPER_H * 2.15 + (i % 2) as f32 * 0.25).min(SHOP_H + UPPER_H * 3.2);
+        b.cross_lantern(0.0, z_mid, y0, 0.17, hang, [2.75, 2.05, 0.78, 1.0]);
+        b.lantern_cord(0.0, z_mid, wire_y, y0 + hang);
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -553,10 +540,16 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     // ══════════════════════════════════════════════════════════════════
     // These use existing sign textures but are mounted perpendicular to the wall
     let blade_signs = [
-        (1, true, IMG_SIGN_SAKE, 0.5, 1.5),      // left shop 1
-        (3, false, IMG_SIGN_KARAOKE, 0.5, 1.8),   // right shop 3
-        (4, true, IMG_SIGN_MAHJONG, 0.5, 1.5),    // left shop 4
-        (5, false, IMG_SIGN_YAKINIKU, 0.5, 1.6),  // right shop 5
+        (1, true, IMG_SIGN_SAKE, 0.5, 1.5),
+        (3, false, IMG_SIGN_KARAOKE, 0.5, 1.8),
+        (4, true, IMG_SIGN_MAHJONG, 0.5, 1.5),
+        (5, false, IMG_SIGN_YAKINIKU, 0.5, 1.6),
+        (0, false, IMG_SIGN_KARAOKE, 0.48, 1.45),
+        (2, true, IMG_SIGN_YAKINIKU, 0.52, 1.55),
+        (0, true, IMG_SIGN_MAHJONG, 0.44, 1.32),
+        (5, true, IMG_SIGN_SAKE, 0.46, 1.48),
+        (2, false, IMG_SIGN_MAHJONG, 0.5, 1.62),
+        (4, false, IMG_SIGN_SAKE, 0.47, 1.38),
     ];
     for &(shop_idx, left, tex, blade_w, blade_h) in &blade_signs {
         let z_edge = Z_START - SHOP_GAP - (shop_idx as f32) * SHOP_STEP - 0.3;
@@ -711,7 +704,6 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
             wall_x, z_gap, left,
             0.5, 0.55, 0.8,
             IMG_TRASH, [1.6, 1.5, 1.5, 1.0],
-            IMG_VERY_DARK, [0.8, 0.8, 0.8, 1.0],
         );
     }
 
@@ -730,7 +722,6 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
             wall_x, z_gap, left,
             0.45, 0.5, 1.0,
             IMG_CRATES, [1.3, 1.2, 1.1, 1.0],
-            IMG_WARM_ACCENT, [0.4, 0.3, 0.2, 1.0],
         );
     }
 
@@ -813,7 +804,6 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
             wall_x, z_gap, left,
             0.65, 0.5, 0.9,
             IMG_BICYCLE, [1.3, 1.2, 1.2, 1.0],
-            IMG_PIPE, [0.5, 0.5, 0.5, 1.0],
         );
     }
 
@@ -1013,6 +1003,63 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Vertical neon (double-sided quad on wall plane X)
+// ---------------------------------------------------------------------------
+
+fn add_vertical_neon_pair(
+    b: &mut LevelBuilder,
+    tex: usize,
+    shop_idx: usize,
+    left_side: bool,
+    span_z: f32,
+    sign_h: f32,
+    sign_y: f32,
+    z_off: f32,
+    tint: [f32; 4],
+) {
+    let z_mid = Z_START - SHOP_GAP - (shop_idx as f32) * SHOP_STEP - SHOP_W * 0.5 + z_off;
+    let hz = span_z * 0.5;
+
+    if left_side {
+        let x = -STREET_HW + 0.15;
+        b.quad(
+            [Vec3::new(x, sign_y, z_mid - hz),
+             Vec3::new(x, sign_y, z_mid + hz),
+             Vec3::new(x, sign_y + sign_h, z_mid + hz),
+             Vec3::new(x, sign_y + sign_h, z_mid - hz)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            tex, tint,
+        );
+        b.quad(
+            [Vec3::new(x, sign_y, z_mid + hz),
+             Vec3::new(x, sign_y, z_mid - hz),
+             Vec3::new(x, sign_y + sign_h, z_mid - hz),
+             Vec3::new(x, sign_y + sign_h, z_mid + hz)],
+            [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
+            tex, tint,
+        );
+    } else {
+        let x = STREET_HW - 0.15;
+        b.quad(
+            [Vec3::new(x, sign_y, z_mid + hz),
+             Vec3::new(x, sign_y, z_mid - hz),
+             Vec3::new(x, sign_y + sign_h, z_mid - hz),
+             Vec3::new(x, sign_y + sign_h, z_mid + hz)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            tex, tint,
+        );
+        b.quad(
+            [Vec3::new(x, sign_y, z_mid - hz),
+             Vec3::new(x, sign_y, z_mid + hz),
+             Vec3::new(x, sign_y + sign_h, z_mid + hz),
+             Vec3::new(x, sign_y + sign_h, z_mid - hz)],
+            [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
+            tex, tint,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Building block
 // ---------------------------------------------------------------------------
 
@@ -1117,19 +1164,18 @@ impl LevelBuilder {
         Self { verts: Vec::new(), idxs: Vec::new(), batches: Vec::new() }
     }
 
-    /// Place a 3D box-shaped prop against a wall. Builds 5 visible faces of a
-    /// box: the **wall face** (textured, against the building), **top** face,
-    /// **front** face (facing the player in the street), and two **side** faces.
-    /// `wall_x` is the wall plane. `left_side` = true means the wall is at -X
-    /// (prop extends into +X). `z_mid` is the centre along Z. `hz` is half-width
-    /// along Z, `depth` is how far it sticks out from the wall, `h` is height.
+    /// Box prop against a wall: wall + street faces use full albedo; top and sides
+    /// sample **narrow UV strips** from the same texture (edge/top bands) so walking
+    /// around does not reveal flat solid-color “shoebox” sides.
     fn wall_prop(
         &mut self,
         wall_x: f32, z_mid: f32, left_side: bool,
         hz: f32, depth: f32, h: f32,
         image_index: usize, tint: [f32; 4],
-        side_img: usize, side_tint: [f32; 4],
     ) {
+        const EU: f32 = 0.07; // UV width for side strips (texture edge)
+        const TV: f32 = 0.12; // UV height for top band
+
         let z0 = z_mid + hz;
         let z1 = z_mid - hz;
 
@@ -1138,6 +1184,11 @@ impl LevelBuilder {
         } else {
             (wall_x, wall_x - depth)
         };
+
+        let (x_min, x_max) = if left_side { (back_x, front_x) } else { (front_x, back_x) };
+
+        let side_t = [tint[0] * 0.62, tint[1] * 0.62, tint[2] * 0.62, tint[3]];
+        let top_t = [tint[0] * 0.72, tint[1] * 0.72, tint[2] * 0.72, tint[3]];
 
         // Wall face (textured image, flat against building)
         if left_side {
@@ -1156,8 +1207,8 @@ impl LevelBuilder {
             );
         }
 
-        // Front face (facing the player, same texture but darker)
-        let front_tint = [tint[0] * 0.7, tint[1] * 0.7, tint[2] * 0.7, tint[3]];
+        // Front face (street) — same art, slightly dimmed (not a flat different color)
+        let front_tint = [tint[0] * 0.84, tint[1] * 0.84, tint[2] * 0.84, tint[3]];
         if left_side {
             self.quad(
                 [Vec3::new(front_x, 0.0, z1), Vec3::new(front_x, 0.0, z0),
@@ -1174,28 +1225,83 @@ impl LevelBuilder {
             );
         }
 
-        // Top face
-        let (x_min, x_max) = if left_side { (back_x, front_x) } else { (front_x, back_x) };
+        // Top: sample upper band of texture (reads as “stuff on top” not grey slab)
         self.quad(
             [Vec3::new(x_min, h, z0), Vec3::new(x_max, h, z0),
              Vec3::new(x_max, h, z1), Vec3::new(x_min, h, z1)],
-            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            side_img, side_tint,
+            [[0.0, TV], [1.0, TV], [1.0, 0.0], [0.0, 0.0]],
+            image_index, top_t,
         );
 
-        // Side faces (z0 and z1)
+        // Side at +Z edge of prop: right strip of texture
         self.quad(
             [Vec3::new(x_min, 0.0, z0), Vec3::new(x_max, 0.0, z0),
              Vec3::new(x_max, h, z0), Vec3::new(x_min, h, z0)],
-            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            side_img, side_tint,
+            [[1.0 - EU, 1.0], [1.0, 1.0], [1.0, 0.0], [1.0 - EU, 0.0]],
+            image_index, side_t,
         );
+        // Side at -Z edge: left strip
         self.quad(
             [Vec3::new(x_max, 0.0, z1), Vec3::new(x_min, 0.0, z1),
              Vec3::new(x_min, h, z1), Vec3::new(x_max, h, z1)],
-            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            side_img, side_tint,
+            [[0.0, 1.0], [EU, 1.0], [EU, 0.0], [0.0, 0.0]],
+            image_index, side_t,
         );
+
+        // Thin ground shadow strip along wall (hides gap / sells contact)
+        let gy = 0.012;
+        let sh_t = [tint[0] * 0.25, tint[1] * 0.25, tint[2] * 0.25, 0.85];
+        self.quad(
+            [Vec3::new(x_min, gy, z0), Vec3::new(x_max, gy, z0),
+             Vec3::new(x_max, gy, z1), Vec3::new(x_min, gy, z1)],
+            [[0.0, 0.85], [1.0, 0.85], [1.0, 1.0], [0.0, 1.0]],
+            image_index, sh_t,
+        );
+    }
+
+    /// Two perpendicular vertical quads — reads as a hanging lantern from multiple
+    /// viewing angles (alley center or offset).
+    fn cross_lantern(&mut self, x: f32, z: f32, y0: f32, half_w: f32, h: f32, tint: [f32; 4]) {
+        let y1 = y0 + h;
+        // Panel in X–Y plane (constant Z)
+        self.quad(
+            [Vec3::new(x - half_w, y0, z), Vec3::new(x + half_w, y0, z),
+             Vec3::new(x + half_w, y1, z), Vec3::new(x - half_w, y1, z)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_LANTERN, tint,
+        );
+        self.quad(
+            [Vec3::new(x + half_w, y0, z), Vec3::new(x - half_w, y0, z),
+             Vec3::new(x - half_w, y1, z), Vec3::new(x + half_w, y1, z)],
+            [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
+            IMG_LANTERN, tint,
+        );
+        // Panel in Z–Y plane (constant X)
+        self.quad(
+            [Vec3::new(x, y0, z - half_w), Vec3::new(x, y0, z + half_w),
+             Vec3::new(x, y1, z + half_w), Vec3::new(x, y1, z - half_w)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_LANTERN, tint,
+        );
+        self.quad(
+            [Vec3::new(x, y0, z + half_w), Vec3::new(x, y0, z - half_w),
+             Vec3::new(x, y1, z - half_w), Vec3::new(x, y1, z + half_w)],
+            [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
+            IMG_LANTERN, tint,
+        );
+    }
+
+    /// Short vertical cord + optional tiny ceiling hook (dark quads).
+    fn lantern_cord(&mut self, x: f32, z: f32, y_top: f32, y_lantern_top: f32) {
+        let t = 0.02;
+        if y_top > y_lantern_top + 0.05 {
+            self.quad(
+                [Vec3::new(x - t, y_lantern_top, z), Vec3::new(x + t, y_lantern_top, z),
+                 Vec3::new(x + t, y_top, z), Vec3::new(x - t, y_top, z)],
+                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+                IMG_VERY_DARK, [1.0, 1.0, 1.0, 1.0],
+            );
+        }
     }
 
     fn quad(&mut self, corners: [Vec3; 4], uvs: [[f32; 2]; 4], image_index: usize, tint: [f32; 4]) {

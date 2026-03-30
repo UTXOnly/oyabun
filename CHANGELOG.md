@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-29 — Arcade alley: wall_prop texture wrap, more signs & lanterns
+
+- **wall_prop**: Top and sides use **UV strips** from the same prop PNG (edge + top bands) instead of flat solid materials; front/wall dimming tuned; thin **ground shadow** quad along the base. Reduces the obvious “shoebox” read when circling props.
+- **Vertical neon**: **18** paired wall signs (was 6) — second column along façades, **upper-story** blades, varied Z offsets.
+- **Blade signs**: **10** jutting signs (was 4).
+- **Lanterns**: **Third** wall lantern per shop (center), **cord** quads up toward awning line; **mid-alley cross lanterns** (two perpendicular panels + cord) at four depths so hanging lights read from multiple horizontal viewing angles.
+
 ## 2026-03-29 — 3D box-shaped wall props replace flat billboards
 
 - **Props**: Trash bags, beer crates, and bicycles now use **wall_prop** — a 5-face box (wall face textured, front face darkened, top + two sides solid-color) that sits against the building wall. Creates real parallax and depth as you walk past, unlike flat billboards or same-image cross-billboards.
