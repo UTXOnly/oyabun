@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-29 — Cross-billboard props for 3D feel; brighter trash bags; prop collision
+
+- **Props**: Trash bags, beer crates, and bicycles now use **cross-billboard** technique (two quads at 90° forming an X shape + ground shadow plane) instead of flat wall-hugging billboards. Looks volumetric from any angle.
+- **Fix**: Trash bags brightened (tint 1.6×) so they're visible in the dark alley.
+- **Collision**: All ground-level props (trash, crates, bikes) now have AABB collision so the player bumps into them.
+
 ## 2026-03-29 — Arcade alley detail pass: 5 new PixelLab props + dense geometry
 
 - **Props**: Generated & integrated 5 new pixel-art prop textures via PixelLab MCP — trash bags, beer crates, neon arrow, noren curtain, bicycle (image indices 23–27).

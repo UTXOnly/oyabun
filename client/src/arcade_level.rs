@@ -697,65 +697,41 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // TRASH BAGS (piled against walls in gaps between shops)
+    // TRASH BAGS (cross-billboard, piled in gaps between shops)
     // ══════════════════════════════════════════════════════════════════
-    let trash_spots = [
+    let trash_spots: [(usize, bool); 3] = [
         (0, true),   // left gap after shop 0
         (3, false),  // right gap after shop 3
         (5, true),   // left gap after shop 5
     ];
     for &(gap_idx, left) in &trash_spots {
         let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W - SHOP_GAP * 0.5;
-        let tw = 1.0;
-        let th = 0.8;
-        if left {
-            let tx = -STREET_HW + 0.03;
-            b.quad(
-                [Vec3::new(tx, 0.0, z_gap + tw * 0.5), Vec3::new(tx, 0.0, z_gap - tw * 0.5),
-                 Vec3::new(tx, th, z_gap - tw * 0.5), Vec3::new(tx, th, z_gap + tw * 0.5)],
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                IMG_TRASH, [1.0, 1.0, 1.0, 1.0],
-            );
-        } else {
-            let tx = STREET_HW - 0.03;
-            b.quad(
-                [Vec3::new(tx, 0.0, z_gap - tw * 0.5), Vec3::new(tx, 0.0, z_gap + tw * 0.5),
-                 Vec3::new(tx, th, z_gap + tw * 0.5), Vec3::new(tx, th, z_gap - tw * 0.5)],
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                IMG_TRASH, [1.0, 1.0, 1.0, 1.0],
-            );
-        }
+        let offset_x = if left { -STREET_HW + 0.45 } else { STREET_HW - 0.45 };
+        b.cross_prop(
+            Vec3::new(offset_x, 0.0, z_gap),
+            0.5, 0.4, 0.8,
+            IMG_TRASH, [1.6, 1.5, 1.5, 1.0], // brightened so visible at night
+            IMG_VERY_DARK,
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // BEER CRATES (stacked near izakaya / bars)
+    // BEER CRATES (cross-billboard, stacked near izakaya / bars)
     // ══════════════════════════════════════════════════════════════════
-    let crate_spots = [
-        (0, false),  // right side, near izakaya (shop 0 = izakaya on right)
+    let crate_spots: [(usize, bool); 3] = [
+        (0, false),  // right side, near izakaya
         (2, true),   // left side, near konbini gap
         (4, false),  // right side, near izakaya2
     ];
     for &(gap_idx, left) in &crate_spots {
         let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W + 0.3;
-        let cw = 0.9;
-        let ch = 1.0;
-        if left {
-            let cx = -STREET_HW + 0.03;
-            b.quad(
-                [Vec3::new(cx, 0.0, z_gap + cw * 0.5), Vec3::new(cx, 0.0, z_gap - cw * 0.5),
-                 Vec3::new(cx, ch, z_gap - cw * 0.5), Vec3::new(cx, ch, z_gap + cw * 0.5)],
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                IMG_CRATES, [1.0, 1.0, 1.0, 1.0],
-            );
-        } else {
-            let cx = STREET_HW - 0.03;
-            b.quad(
-                [Vec3::new(cx, 0.0, z_gap - cw * 0.5), Vec3::new(cx, 0.0, z_gap + cw * 0.5),
-                 Vec3::new(cx, ch, z_gap + cw * 0.5), Vec3::new(cx, ch, z_gap - cw * 0.5)],
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                IMG_CRATES, [1.0, 1.0, 1.0, 1.0],
-            );
-        }
+        let offset_x = if left { -STREET_HW + 0.45 } else { STREET_HW - 0.45 };
+        b.cross_prop(
+            Vec3::new(offset_x, 0.0, z_gap),
+            0.45, 0.4, 1.0,
+            IMG_CRATES, [1.3, 1.2, 1.1, 1.0],
+            IMG_VERY_DARK,
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -824,33 +800,21 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // BICYCLES (parked against walls)
+    // BICYCLES (cross-billboard, parked in gaps)
     // ══════════════════════════════════════════════════════════════════
-    let bike_spots = [
+    let bike_spots: [(usize, bool); 2] = [
         (2, false),  // right side, gap after arcade shop
         (1, true),   // left side, gap after pachinko
     ];
     for &(gap_idx, left) in &bike_spots {
         let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W - SHOP_GAP * 0.5;
-        let bw = 1.3;
-        let bh = 0.9;
-        if left {
-            let bx = -STREET_HW + 0.04;
-            b.quad(
-                [Vec3::new(bx, 0.0, z_gap + bw * 0.5), Vec3::new(bx, 0.0, z_gap - bw * 0.5),
-                 Vec3::new(bx, bh, z_gap - bw * 0.5), Vec3::new(bx, bh, z_gap + bw * 0.5)],
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                IMG_BICYCLE, [1.0, 1.0, 1.0, 1.0],
-            );
-        } else {
-            let bx = STREET_HW - 0.04;
-            b.quad(
-                [Vec3::new(bx, 0.0, z_gap - bw * 0.5), Vec3::new(bx, 0.0, z_gap + bw * 0.5),
-                 Vec3::new(bx, bh, z_gap + bw * 0.5), Vec3::new(bx, bh, z_gap - bw * 0.5)],
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                IMG_BICYCLE, [1.0, 1.0, 1.0, 1.0],
-            );
-        }
+        let offset_x = if left { -STREET_HW + 0.55 } else { STREET_HW - 0.55 };
+        b.cross_prop(
+            Vec3::new(offset_x, 0.0, z_gap),
+            0.65, 0.35, 0.9,
+            IMG_BICYCLE, [1.3, 1.2, 1.2, 1.0],
+            IMG_VERY_DARK,
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -997,6 +961,32 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         max: Vec3::new(wall_x1, max_h, Z_START + 1.5),
     });
 
+    // Ground prop collision (trash bags, crates, bikes)
+    for &(gap_idx, left) in &trash_spots {
+        let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W - SHOP_GAP * 0.5;
+        let offset_x = if left { -STREET_HW + 0.45 } else { STREET_HW - 0.45 };
+        solids.push(Aabb {
+            min: Vec3::new(offset_x - 0.4, 0.0, z_gap - 0.4),
+            max: Vec3::new(offset_x + 0.4, 0.7, z_gap + 0.4),
+        });
+    }
+    for &(gap_idx, left) in &crate_spots {
+        let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W + 0.3;
+        let offset_x = if left { -STREET_HW + 0.45 } else { STREET_HW - 0.45 };
+        solids.push(Aabb {
+            min: Vec3::new(offset_x - 0.4, 0.0, z_gap - 0.35),
+            max: Vec3::new(offset_x + 0.4, 0.9, z_gap + 0.35),
+        });
+    }
+    for &(gap_idx, left) in &bike_spots {
+        let z_gap = Z_START - SHOP_GAP - (gap_idx as f32) * SHOP_STEP - SHOP_W - SHOP_GAP * 0.5;
+        let offset_x = if left { -STREET_HW + 0.55 } else { STREET_HW - 0.55 };
+        solids.push(Aabb {
+            min: Vec3::new(offset_x - 0.5, 0.0, z_gap - 0.3),
+            max: Vec3::new(offset_x + 0.5, 0.8, z_gap + 0.3),
+        });
+    }
+
     // Vending machine collision
     for &(x, z, left) in &vm_positions {
         let d = 0.5;
@@ -1134,6 +1124,62 @@ struct LevelBuilder {
 impl LevelBuilder {
     fn new() -> Self {
         Self { verts: Vec::new(), idxs: Vec::new(), batches: Vec::new() }
+    }
+
+    /// Place a cross-billboard prop: two textured quads at 90° forming an X,
+    /// plus a dark ground-shadow oval beneath. Gives flat sprites a 3D feel.
+    /// `center` is the ground-level center point, `hw`/`hd` are half-extents
+    /// along X and Z, `h` is height.
+    fn cross_prop(
+        &mut self,
+        center: Vec3,
+        hw: f32, hd: f32, h: f32,
+        image_index: usize, tint: [f32; 4],
+        shadow_img: usize,
+    ) {
+        let cx = center.x;
+        let cy = center.y;
+        let cz = center.z;
+
+        // Quad 1: aligned along X axis (faces Z)
+        self.quad(
+            [Vec3::new(cx - hw, cy, cz), Vec3::new(cx + hw, cy, cz),
+             Vec3::new(cx + hw, cy + h, cz), Vec3::new(cx - hw, cy + h, cz)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            image_index, tint,
+        );
+        // Back face of quad 1
+        self.quad(
+            [Vec3::new(cx + hw, cy, cz), Vec3::new(cx - hw, cy, cz),
+             Vec3::new(cx - hw, cy + h, cz), Vec3::new(cx + hw, cy + h, cz)],
+            [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
+            image_index, tint,
+        );
+
+        // Quad 2: aligned along Z axis (faces X), perpendicular
+        self.quad(
+            [Vec3::new(cx, cy, cz - hd), Vec3::new(cx, cy, cz + hd),
+             Vec3::new(cx, cy + h, cz + hd), Vec3::new(cx, cy + h, cz - hd)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            image_index, tint,
+        );
+        // Back face of quad 2
+        self.quad(
+            [Vec3::new(cx, cy, cz + hd), Vec3::new(cx, cy, cz - hd),
+             Vec3::new(cx, cy + h, cz - hd), Vec3::new(cx, cy + h, cz + hd)],
+            [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
+            image_index, tint,
+        );
+
+        // Ground shadow (dark ellipse on floor)
+        let sw = hw * 1.2;
+        let sd = hd * 1.2;
+        self.quad(
+            [Vec3::new(cx - sw, cy + 0.003, cz - sd), Vec3::new(cx + sw, cy + 0.003, cz - sd),
+             Vec3::new(cx + sw, cy + 0.003, cz + sd), Vec3::new(cx - sw, cy + 0.003, cz + sd)],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            shadow_img, [0.5, 0.5, 0.5, 0.4],
+        );
     }
 
     fn quad(&mut self, corners: [Vec3; 4], uvs: [[f32; 2]; 4], image_index: usize, tint: [f32; 4]) {
