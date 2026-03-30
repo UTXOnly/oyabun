@@ -4,6 +4,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+mod arcade_level;
 mod game;
 mod gltf_level;
 mod input;
@@ -276,7 +277,7 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
     let mural_z = mesh::mural_z_plane(&bounds, spawn);
     let mut arena = mesh::empty_arena();
     let mut solids = cpu.solids.clone();
-    if gltf_needs_floor_slab(&solids, &bounds) {
+    if !cpu.skip_floor_slab && gltf_needs_floor_slab(&solids, &bounds) {
         solids.push(mesh::Aabb {
             min: Vec3::new(bounds.min.x - 120.0, bounds.min.y - 0.25, bounds.min.z - 120.0),
             max: Vec3::new(bounds.max.x + 120.0, bounds.min.y + 0.12, bounds.max.z + 120.0),
@@ -311,6 +312,22 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
 }
 
 async fn load_game_init() -> GameInit {
+    // ── Arcade 2.5D level (primary path on this branch) ──────────────
+    match arcade_level::build_arcade_level() {
+        Ok(cpu) => {
+            #[cfg(target_arch = "wasm32")]
+            wasm_log("oyabaun: loaded arcade 2.5D backdrop level");
+            let mut gi = game_init_from_gltf(cpu);
+            gi.level_label = String::from("arcade 2.5D tokyo");
+            return gi;
+        }
+        Err(e) => {
+            #[cfg(target_arch = "wasm32")]
+            wasm_warn(&format!("oyabaun: arcade level build failed ({e}), falling back to GLB"));
+        }
+    }
+
+    // ── Fallback: Blender GLB / JSON / procedural ────────────────────
     #[cfg(target_arch = "wasm32")]
     {
         const EMBEDDED_GLB: &[u8] = include_bytes!("../levels/tokyo_alley.glb");
@@ -940,7 +957,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         last_kill: String::new(),
         blood_splats: Vec::new(),
         hud_shells: Vec::new(),
-        clear: Vec3::new(0.14, 0.12, 0.20),
+        clear: Vec3::new(0.047, 0.059, 0.133),
         level_bounds: boot.level_bounds,
         mural_z: boot.mural_z,
         level_label: gi.level_label,

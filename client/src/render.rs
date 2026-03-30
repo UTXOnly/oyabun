@@ -13,12 +13,12 @@ fn warn_str(s: &str) {
     web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(s));
 }
 
-/// Exponential fog `1 - exp(-dist * density)`, capped by [`FOG_MAX_BLEND`] (passed as `fog_params.y`).
-const FOG_DENSITY: f32 = 0.00030;
-/// Upper bound on fog mix so distant alley stays readable (arcade refs: crisp signage).
-const FOG_MAX_BLEND: f32 = 0.28;
-/// Haze tint — slightly neutral vs old heavy purple so signs/neon stay saturated when fogged.
-const FOG_COLOR_RGBA: [f32; 4] = [0.10, 0.095, 0.135, 1.0];
+/// Gentle distance darkening — the reference image is clear; depth is value/hue not murk.
+const FOG_DENSITY: f32 = 0.00012;
+/// Low cap — backdrop should read clearly even at the far wall.
+const FOG_MAX_BLEND: f32 = 0.15;
+/// Near-black tint (dark navy from palette, not purple haze).
+const FOG_COLOR_RGBA: [f32; 4] = [0.047, 0.059, 0.133, 1.0];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -136,7 +136,8 @@ fn fs_main(i: Vout) -> @location(0) vec4<f32> {
 }
 "#;
 
-/// Textured world: albedo × tint, **posterized** in fragment; sampler is nearest (non-filterable).
+/// Arcade Tokyo shader: texture × tint with warm ambient, emissive boost, posterize.
+/// No procedural brick — art carries detail. Warm overhead + gentle fog.
 const SHADER_WORLD_TEX: &str = r#"
 struct Globals {
   view_proj: mat4x4<f32>,
@@ -166,12 +167,6 @@ fn vs_tex(v: Vin) -> Vout {
     o.uv = v.uv;
     return o;
 }
-// Hash for procedural detail
-fn oya_hash(p: vec2<f32>) -> f32 {
-    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
-    p3 = p3 + dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
 
 @fragment
 fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
@@ -182,49 +177,28 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
     let mx = max(t.r, max(t.g, t.b));
     let sat = select(0.0, (mx - mn) / max(mx, 0.001), mx > 0.001);
 
-    // Procedural brick only on dull dark surfaces (skip signage / saturated neons)
-    var detail = 1.0;
-    if (lum < 0.45 && sat < 0.12) {
-        let wall_uv = vec2<f32>(wp.x + wp.z, wp.y);
-        let bp = wall_uv * vec2<f32>(1.5, 3.0);
-        let row = floor(bp.y);
-        var bx = bp.x;
-        if (fract(row * 0.5) > 0.25) { bx = bx + 0.5; }
-        let cell = fract(vec2<f32>(bx, bp.y));
-        let mortar = 0.06;
-        let brick = step(mortar, cell.x) * step(mortar, 1.0 - cell.x)
-                   * step(mortar, cell.y) * step(mortar, 1.0 - cell.y);
-        let grime = oya_hash(floor(wall_uv * 4.0)) * 0.10;
-        let streak = oya_hash(vec2<f32>(floor(wall_uv.x * 8.0), 0.5))
-                   * step(fract(wall_uv.y * 2.0), 0.3) * 0.08;
-        detail = mix(0.82, 1.0, brick) * (1.0 - grime) * (1.0 - streak);
-    }
-
-    // Cyberpunk ambient: warm overhead + cool neon bounce
-    let h_norm = clamp((wp.y - 0.0) / 6.0, 0.0, 1.0);
-    let ambient_warm = vec3<f32>(0.30, 0.22, 0.16) * (0.5 + 0.5 * h_norm);
-    let ambient_cool = vec3<f32>(0.12, 0.20, 0.26) * (1.0 - h_norm * 0.5);
-    let amb_dim = (0.52 + 0.48 * lum) * (0.68 + 0.32 * (1.0 - min(sat * 1.75, 1.0)));
+    // Warm ambient: overhead orange glow fading toward ground (lanterns / neon from above)
+    let h_norm = clamp((wp.y - 0.0) / 7.0, 0.0, 1.0);
+    let ambient_warm = vec3<f32>(0.22, 0.14, 0.08) * (0.4 + 0.6 * (1.0 - h_norm));
+    let ambient_cool = vec3<f32>(0.06, 0.10, 0.16) * h_norm;
+    let amb_dim = 0.55 + 0.45 * lum;
     let ambient = (ambient_warm + ambient_cool) * amb_dim;
 
-    // Fake neon spill: sinusoidal color bands along the alley
-    let neon_phase = wp.x * 0.15 + wp.z * 0.12;
-    let neon_r = 0.14 * max(sin(neon_phase * 2.1 + 1.0), 0.0);
-    let neon_g = 0.09 * max(sin(neon_phase * 1.7 + 3.5), 0.0);
-    let neon_b = 0.15 * max(sin(neon_phase * 2.8 + 5.2), 0.0);
-    let neon_spill = vec3<f32>(neon_r, neon_g, neon_b) * (1.0 - h_norm * 0.35) * (0.88 + 0.22 * min(sat * 2.5, 1.0));
+    // Bright / saturated surfaces glow (signs, lanterns, neon shop art)
+    let emit_boost = max(lum - 0.30, 0.0) * (1.2 + sat * 1.5);
 
-    // Bright / saturated surfaces glow extra (signs, neons)
-    let emit_boost = max(lum - 0.28, 0.0) * (1.28 + sat * 1.65);
+    let lit = t.rgb * 1.6 + ambient + t.rgb * emit_boost;
 
-    let lit = t.rgb * detail * 2.0 + ambient + neon_spill + t.rgb * emit_boost;
-
-    // Posterize to 24 levels; mild contrast + vibrance before fog (reference-style pop)
+    // Posterize to 24 levels — retro arcade banding
     var q = floor(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)) * 24.0) / 24.0;
-    q = clamp((q - 0.5) * 1.09 + 0.5, vec3<f32>(0.0), vec3<f32>(1.0));
+
+    // Mild contrast + vibrance pop
+    q = clamp((q - 0.5) * 1.08 + 0.5, vec3<f32>(0.0), vec3<f32>(1.0));
     let luma_q = q.r * 0.299 + q.g * 0.587 + q.b * 0.114;
-    q = mix(vec3<f32>(luma_q), q, 1.11);
+    q = mix(vec3<f32>(luma_q), q, 1.10);
     q = clamp(q, vec3<f32>(0.0), vec3<f32>(1.0));
+
+    // Gentle distance darkening
     let dist = length(wp - g.cam_pos.xyz);
     let fog_amt = min(1.0 - exp(-dist * g.fog_params.x), g.fog_params.y);
     let fc = g.fog_color.rgb;

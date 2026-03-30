@@ -29,3 +29,4 @@ web-sys = { version = "0.3", features = [
   "Response",
 ] }
 gltf = { version = "1.4.1", features = ["import", "names", "KHR_texture_transform"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

@@ -135,6 +135,9 @@ pub struct GltfLevelCpu {
     pub spawn: Vec3,
     pub spawn_yaw: f32,
     pub solids: Vec<Aabb>,
+    /// When true, `game_init_from_gltf` will not add a giant floor slab
+    /// (the level already provides its own floor collision).
+    pub skip_floor_slab: bool,
 }
 
 impl GltfLevelCpu {
@@ -283,6 +286,7 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
         spawn: spawn_pt,
         spawn_yaw,
         solids,
+        skip_floor_slab: false,
     })
 }
 
