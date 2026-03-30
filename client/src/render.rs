@@ -416,12 +416,11 @@ fn fs_bill_blood(i: Bout) -> @location(0) vec4<f32> {
 }
 "#;
 
-const MAX_BILL_QUADS: usize = 96;
+const MAX_BILL_QUADS: usize = 64;
 const BILL_VERTS: usize = MAX_BILL_QUADS * 4;
 const BILL_IDX: usize = MAX_BILL_QUADS * 6;
 /// Boss + rival + remotes + offline demos (see draw_world batching).
 const MAX_CHARACTER_INSTANCES: usize = 32;
-const MAX_PROP_BILLBOARD_INSTANCES: usize = 16;
 /// PixelLab atlas cells often have transparent padding under the soles; lower the quad so feet sit on `foot.y`.
 const CHAR_BILLBOARD_FEET_DROP: f32 = 0.40;
 const CHAR_BILLBOARD_ATLAS_COLS: u32 = 8;
@@ -964,10 +963,6 @@ pub struct Gpu {
     char_sprite_atlas_rows: u32,
     /// Row count in the rival atlas; 0 if missing.
     char_sprite_atlas_rows_rival: u32,
-    prop_billboards: Vec<crate::gltf_level::PropBillboardCpu>,
-    prop_sprite_bg: Option<wgpu::BindGroup>,
-    _prop_sprite_tex: Option<wgpu::Texture>,
-    prop_sprite_atlas_rows: u32,
     diag_last_surface_ok: bool,
     diag_last_surface_error: String,
     diag_frames_submitted: u64,
@@ -1072,11 +1067,6 @@ impl Gpu {
                 resource: uniform.as_entire_binding(),
             }],
         });
-
-        let prop_billboards = gltf_level
-            .as_ref()
-            .map(|c| c.prop_billboards.clone())
-            .unwrap_or_default();
 
         let world = if let Some(cpu) = gltf_level {
             if cpu.vertices.is_empty() {
@@ -1551,15 +1541,6 @@ impl Gpu {
                 RIVAL_ATLAS_RGBA,
             );
 
-        const PROP_ATLAS_RGBA: &[u8] = include_bytes!("../characters/prop_r32_atlas.rgba");
-        let (prop_sprite_bg, _prop_sprite_tex, prop_sprite_atlas_rows) = upload_rgba_atlas(
-            &device,
-            &queue,
-            &sprite_layout,
-            "prop-sprite",
-            PROP_ATLAS_RGBA,
-        );
-
         let (depth, depth_view) = create_depth(&device, width, height);
 
         Ok(Gpu {
@@ -1615,10 +1596,6 @@ impl Gpu {
             _char_sprite_tex_rival,
             char_sprite_atlas_rows,
             char_sprite_atlas_rows_rival,
-            prop_billboards,
-            prop_sprite_bg,
-            _prop_sprite_tex,
-            prop_sprite_atlas_rows,
             diag_last_surface_ok: true,
             diag_last_surface_error: String::new(),
             diag_frames_submitted: 0,
@@ -2874,58 +2851,6 @@ impl Gpu {
         }
         let char_rival_quad_vert_end = bill_cpu.len();
 
-        let prop_quad_vert_start = bill_cpu.len();
-        if self.prop_sprite_bg.is_some() {
-            let rows_p = self.prop_sprite_atlas_rows.max(1) as f32;
-            for p in self
-                .prop_billboards
-                .iter()
-                .take(MAX_PROP_BILLBOARD_INSTANCES)
-            {
-                let foot = p.foot;
-                let foot_vis = foot - Vec3::new(0.0, p.feet_drop, 0.0);
-                let center = foot_vis + Vec3::new(0.0, p.half_height, 0.0);
-                let to_cam = cam_pos - center;
-                let to_cam_xz = Vec3::new(to_cam.x, 0.0, to_cam.z);
-                let len_xz = to_cam_xz.length();
-                let right = if len_xz > 0.001 {
-                    Vec3::new(-to_cam_xz.z, 0.0, to_cam_xz.x) / len_xz
-                } else {
-                    Vec3::new(1.0, 0.0, 0.0)
-                };
-                let up = Vec3::new(0.0, 1.0, 0.0);
-                let bl = center - right * p.half_width - up * p.half_height;
-                let br = center + right * p.half_width - up * p.half_height;
-                let tr = center + right * p.half_width + up * p.half_height;
-                let tl = center - right * p.half_width + up * p.half_height;
-                let cam_bearing = (cam_pos.x - foot_vis.x).atan2(-(cam_pos.z - foot_vis.z));
-                let rel = cam_bearing - p.mesh_yaw;
-                let rel_norm = ((rel % (2.0 * std::f32::consts::PI)) + 2.0 * std::f32::consts::PI)
-                    % (2.0 * std::f32::consts::PI);
-                let col = ((rel_norm + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as u32
-                    % 8;
-                let rows_i = rows_p.max(1.0) as u32;
-                let max_r = rows_i.saturating_sub(1);
-                let row = p.anim_row.min(max_r);
-                let rows = rows_p.max(1.0);
-                let u0 = col as f32 / CHAR_BILLBOARD_ATLAS_COLS as f32;
-                let u1 = (col as f32 + 1.0) / CHAR_BILLBOARD_ATLAS_COLS as f32;
-                let v0 = row as f32 / rows;
-                let v1 = (row as f32 + 1.0) / rows;
-                let corners = [bl, br, tr, tl];
-                let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
-                let tt = p.tint;
-                for j in 0..4 {
-                    bill_cpu.push(BillVertex {
-                        pos: corners[j].to_array(),
-                        uv: uvs[j],
-                        tint: tt,
-                    });
-                }
-            }
-        }
-        let prop_quad_vert_end = bill_cpu.len();
-
         let splat_vert_start = bill_cpu.len();
         for s in blood_splats {
             if s.life <= 0.008 {
@@ -2984,9 +2909,6 @@ impl Gpu {
         let char_rival_idx_start = (char_rival_quad_vert_start / 4 * 6) as u32;
         let char_rival_idx_count =
             ((char_rival_quad_vert_end - char_rival_quad_vert_start) / 4 * 6) as u32;
-
-        let prop_idx_start = (prop_quad_vert_start / 4 * 6) as u32;
-        let prop_idx_count = ((prop_quad_vert_end - prop_quad_vert_start) / 4 * 6) as u32;
 
         let bill_idx_count: u32 = (bill_cpu.len() / 4 * 6) as u32;
 
@@ -3160,12 +3082,6 @@ impl Gpu {
                         0,
                         0..1,
                     );
-                }
-            }
-            if prop_idx_count > 0 {
-                if let Some(ref bg) = self.prop_sprite_bg {
-                    pass.set_bind_group(1, bg, &[]);
-                    pass.draw_indexed(prop_idx_start..prop_idx_start + prop_idx_count, 0, 0..1);
                 }
             }
             if splat_idx_count > 0 {

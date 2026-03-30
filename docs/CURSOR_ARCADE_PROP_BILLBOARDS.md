@@ -1,5 +1,19 @@
 # Arcade props: multi-angle & animation (PixelLab MCP reality + engine path)
 
+## Parked cars / static props: **do not** use camera-facing billboards
+
+A sprite quad that **yaw-bills toward the camera** (same path as NPCs) makes a parked car **spin to face the player** — it reads as a HUD sticker, not geometry. **Removed from the engine:** `PropBillboardCpu` / prop atlas draw for the R32.
+
+**Use instead:**
+
+- **Fixed world quads** (what the arcade R32 does now): side + front + rear textures locked in alley space, optional **roof / shell** quads (`IMG_PIPE`) for volume.
+- **`wall_prop`-style boxes** for small props (trash, crates, bikes).
+- **Real 3D:** model in **Blender**, bake **pixel / nearest** textures, export **`.glb`** per `level-design.mdc` and ship with the level (or merge into the arcade pipeline later).
+
+The sections below still apply when you **want** camera-facing sprites — e.g. **moving** entities or distant impostors — not for a static parked vehicle.
+
+---
+
 ## What the PixelLab MCP **cannot** do for props
 
 | Tool | What it does | Props / cars? |
@@ -32,10 +46,9 @@ NPCs use:
    - **B)** Hand-draw in Aseprite (best control, thick outlines, no photo creep).
    - **C)** Blender render ortho **8 views** → downscale/posterize → atlas (actual 3D, more work).
 
-3. **Engine work** (not done yet — design only here):
-   - Add **`PropBillboardInstance`** (or reuse a slim `CharacterInstance` with a `skin` enum value `PropCar`, etc.): `foot`/`center` position, **`mesh_yaw`** (car long axis along alley = `0` or `±π/2`), **`anim_frame`** row, **width/height** in meters (R32 wider than a trash pile).
-   - In **`Gpu::draw_world`**, after character quads, call a sibling of `push_char_sprite_quad` that uses a **prop atlas bind group** (third atlas: `prop_atlas.rgba`) or a **small array of atlases** by prop type.
-   - **Collision**: keep **AABB** from `arcade_level` (or JSON); rendering is decoupled from the old `wall_prop` boxes.
+3. **Engine work** (optional — only if you add **moving** prop billboards later):
+   - A sibling of `push_char_sprite_quad` + a dedicated prop atlas bind group (same UV/column math as NPCs).
+   - **Do not** use this for **parked** cars in the arcade alley; keep them as **fixed meshes** or glTF.
 
 4. **Animation**:
    - **Simple:** increment `anim_frame` / row on a timer in `OyabaunApp` update (same as walk row for NPCs).

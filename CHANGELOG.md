@@ -1,10 +1,11 @@
 # Changelog
 
-## 2026-03-29 — R32 eight-direction prop billboard (atlas + `PropBillboardCpu`)
+## 2026-03-29 — R32: drop camera-facing prop billboard; restore fixed geometry + roof
 
-- **`GltfLevelCpu::prop_billboards`**: arcade registers one **`PropBillboardCpu`** for the parked R32; **`Gpu`** uploads **`prop_r32_atlas.rgba`** and draws billboards after rival sprites using the same 8-column camera-bearing UV math as NPCs.
-- **Art**: **`tools/stitch_prop_r32_atlas.py`** builds **`client/characters/prop_r32_atlas.png`** from **`r32_side/front/rear.png`** (rear / side / front / mirrored side columns); **`export_character_atlas_to_rgba.py`** emits **`.rgba`**. Level mesh keeps only the R32 ground shadow quad (no three world-texture panels).
-- **Render**: **`MAX_BILL_QUADS`** increased to **96** so mural + character billboards + props + blood splats fit the billboard vertex buffer.
+- **Removed** **`PropBillboardCpu`**, **`prop_r32_atlas`**, and prop draw pass — parked cars must not use NPC-style yaw billboards (they spun to face the player).
+- **Arcade**: R32 again uses **world-fixed** side + front + rear **`r32_*.png`** quads, **horizontal roof** quad (`IMG_PIPE`, `SHELL_CAR`), and ground shadow. **`tools/stitch_prop_r32_atlas.py`** and **`prop_r32_atlas.{png,rgba}`** removed.
+- **Docs**: **`CURSOR_ARCADE_PROP_BILLBOARDS.md`** warns against camera billboards for static vehicles; points to fixed quads / **`wall_prop`** / Blender **`.glb`**.
+- **`MAX_BILL_QUADS`** back to **64**.
 
 ## 2026-03-30 — Doc: PixelLab MCP limits + prop billboard atlas plan
 

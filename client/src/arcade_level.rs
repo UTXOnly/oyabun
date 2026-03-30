@@ -4,14 +4,14 @@
 //! - Narrow alley lined with Kabukicho shop facades (PixelLab pixel art)
 //! - Vertical neon signs mounted on buildings
 //! - Vending machines, awnings, lanterns, overhead wire tangles
-//! - Parked R32 as an eight-direction sprite billboard (`prop_r32_atlas`) plus ground shadow
+//! - Parked R32: fixed world-space quads (side + bumpers) + roof slab — no camera-facing billboards
 //! - Dense, atmospheric, 90s arcade feel
 //!
 //! No Blender GLB required.
 
 use glam::Vec3;
 
-use crate::gltf_level::{GltfBatchCpu, GltfLevelCpu, PropBillboardCpu, WorldVertex};
+use crate::gltf_level::{GltfBatchCpu, GltfLevelCpu, WorldVertex};
 use crate::mesh::Aabb;
 
 // ---------------------------------------------------------------------------
@@ -42,6 +42,9 @@ const NEON_ARROW: &[u8] = include_bytes!("../level_textures/tokyo_props/neon_arr
 const NOREN_CURTAIN: &[u8] = include_bytes!("../level_textures/tokyo_props/noren_curtain.png");
 const BICYCLE: &[u8] = include_bytes!("../level_textures/tokyo_props/bicycle.png");
 const LANTERN_PAPER: &[u8] = include_bytes!("../level_textures/tokyo_props/lantern_paper.png");
+const R32_SIDE: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_side.png");
+const R32_FRONT: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_front.png");
+const R32_REAR: &[u8] = include_bytes!("../level_textures/tokyo_props/r32_rear.png");
 // ---------------------------------------------------------------------------
 // Palette
 // ---------------------------------------------------------------------------
@@ -61,6 +64,7 @@ const WET_STREET: [u8; 4] = [0x18, 0x1E, 0x30, 0xFF];
 const SHELL_TRASH: [f32; 4] = [0.24, 0.22, 0.28, 1.0];
 const SHELL_CRATE: [f32; 4] = [0.38, 0.29, 0.22, 1.0];
 const SHELL_BIKE: [f32; 4] = [0.28, 0.28, 0.34, 1.0];
+const SHELL_CAR: [f32; 4] = [0.30, 0.30, 0.35, 1.0];
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -83,7 +87,7 @@ const Z_START: f32 = 4.0;
 // 0..7 = shop textures
 // 8..11 = sign textures
 // 12 = vending machine
-// 13..22 = solid colors; 23..27 props; 28+ lanterns & vehicle
+// 13..22 = solid colors; 23..27 props; 28–31 lanterns & R32
 const IMG_SIGN_YAKINIKU: usize = 8;
 const IMG_SIGN_KARAOKE: usize = 9;
 const IMG_SIGN_SAKE: usize = 10;
@@ -106,6 +110,9 @@ const IMG_ARROW: usize = 25;
 const IMG_NOREN: usize = 26;
 const IMG_BICYCLE: usize = 27;
 const IMG_LANTERN_PAPER: usize = 28;
+const IMG_R32_SIDE: usize = 29;
+const IMG_R32_FRONT: usize = 30;
+const IMG_R32_REAR: usize = 31;
 
 // ---------------------------------------------------------------------------
 // Public entry
@@ -146,9 +153,11 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
     images.push(decode_png(NOREN_CURTAIN)?);       // 26
     images.push(decode_png(BICYCLE)?);             // 27
     images.push(decode_png(LANTERN_PAPER)?);       // 28
+    images.push(decode_png(R32_SIDE)?);            // 29
+    images.push(decode_png(R32_FRONT)?);           // 30
+    images.push(decode_png(R32_REAR)?);            // 31
 
     let mut b = LevelBuilder::new();
-    let mut prop_billboards: Vec<PropBillboardCpu> = Vec::new();
 
     let alley_len = SHOPS_PER_SIDE as f32 * SHOP_STEP + SHOP_GAP;
     let z_far = Z_START - alley_len;
@@ -838,20 +847,9 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         );
     }
 
-    // Parked R32: 8-dir sprite billboard + ground shadow (see prop_r32_atlas)
+    // Parked R32: fixed quads in world space (not camera billboards) + roof volume read
     let z_r32 = Z_START - SHOP_GAP - 2.85_f32 * SHOP_STEP - SHOP_W * 0.5;
-    add_r32_ground_shadow(&mut b, STREET_HW, z_r32, false);
-    let car_len = 4.05_f32;
-    let x_foot = STREET_HW - 0.85;
-    prop_billboards.push(PropBillboardCpu {
-        foot: Vec3::new(x_foot, 0.0, z_r32),
-        mesh_yaw: 0.0,
-        half_width: car_len * 0.5 + 0.12,
-        half_height: 1.24 * 0.5,
-        feet_drop: 0.05,
-        anim_row: 0,
-        tint: [1.05, 1.05, 1.1, 1.0],
-    });
+    add_parked_r32(&mut b, STREET_HW, z_r32, false);
 
     // ══════════════════════════════════════════════════════════════════
     // PUDDLE REFLECTIONS (additional wet spots near vending machines)
@@ -1059,7 +1057,6 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         spawn_yaw,
         solids,
         skip_floor_slab: true,
-        prop_billboards,
     })
 }
 
@@ -1067,15 +1064,44 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
 // Vertical neon (double-sided quad on wall plane X)
 // ---------------------------------------------------------------------------
 
-/// Ground shadow under parked R32 (bumper toward -Z when `left_side` is false).
-fn add_r32_ground_shadow(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_side: bool) {
+/// Parked Nissan R32: side + front + rear (world-fixed), horizontal roof slab, ground shadow.
+/// Bumper toward -Z when `left_side` is false.
+fn add_parked_r32(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_side: bool) {
     let car_len = 4.05_f32;
     let car_w = 1.68_f32;
+    let car_h = 1.18_f32;
     let z0 = z_center - car_len * 0.5;
     let z1 = z_center + car_len * 0.5;
+    let ct = [1.05_f32, 1.05, 1.1, 1.0];
     let uv_g = [[0.0_f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let gsh = [0.14_f32, 0.13, 0.17, 1.0];
     if !left_side {
+        let x_in = wall_x - car_w - 0.03;
+        b.quad(
+            [Vec3::new(x_in, 0.0, z0), Vec3::new(x_in, 0.0, z1),
+             Vec3::new(x_in, car_h, z1), Vec3::new(x_in, car_h, z0)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_SIDE, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x - car_w, 0.0, z1), Vec3::new(wall_x, 0.0, z1),
+             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x - car_w, car_h, z1)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_REAR, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x, 0.0, z0), Vec3::new(wall_x - car_w, 0.0, z0),
+             Vec3::new(wall_x - car_w, car_h, z0), Vec3::new(wall_x, car_h, z0)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_FRONT, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x - car_w, car_h, z0), Vec3::new(wall_x, car_h, z0),
+             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x - car_w, car_h, z1)],
+            uv_g,
+            IMG_PIPE,
+            SHELL_CAR,
+        );
         b.quad(
             [Vec3::new(wall_x - car_w - 0.02, 0.018, z0 - 0.1),
              Vec3::new(wall_x + 0.05, 0.018, z0 - 0.1),
@@ -1086,6 +1112,32 @@ fn add_r32_ground_shadow(b: &mut LevelBuilder, wall_x: f32, z_center: f32, left_
             gsh,
         );
     } else {
+        let x_in = wall_x + car_w + 0.03;
+        b.quad(
+            [Vec3::new(x_in, 0.0, z1), Vec3::new(x_in, 0.0, z0),
+             Vec3::new(x_in, car_h, z0), Vec3::new(x_in, car_h, z1)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_SIDE, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x + car_w, 0.0, z1), Vec3::new(wall_x, 0.0, z1),
+             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x + car_w, car_h, z1)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_REAR, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x, 0.0, z0), Vec3::new(wall_x + car_w, 0.0, z0),
+             Vec3::new(wall_x + car_w, car_h, z0), Vec3::new(wall_x, car_h, z0)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_R32_FRONT, ct,
+        );
+        b.quad(
+            [Vec3::new(wall_x + car_w, car_h, z0), Vec3::new(wall_x, car_h, z0),
+             Vec3::new(wall_x, car_h, z1), Vec3::new(wall_x + car_w, car_h, z1)],
+            uv_g,
+            IMG_PIPE,
+            SHELL_CAR,
+        );
         b.quad(
             [Vec3::new(wall_x + car_w + 0.02, 0.018, z0 - 0.1),
              Vec3::new(wall_x - 0.05, 0.018, z0 - 0.1),
