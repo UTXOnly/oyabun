@@ -188,8 +188,10 @@ fn fs_tex(i: Vout) -> @location(0) vec4<f32> {
     let amb_dim = 0.55 + 0.45 * lum;
     let ambient = (ambient_warm + ambient_cool) * amb_dim;
 
-    // Bright / saturated surfaces glow (signs, lanterns, neon shop art)
-    let emit_boost = max(lum - 0.30, 0.0) * (1.2 + sat * 1.5);
+    // Bright / saturated surfaces glow (signs, lanterns). Achromatic mats (white paint,
+    // factor-only glTF × white tex) have sat≈0 — skip boost or they blow out to white.
+    let emit_sat = clamp((sat - 0.06) / 0.26, 0.0, 1.0);
+    let emit_boost = max(lum - 0.30, 0.0) * (1.2 + sat * 1.5) * emit_sat;
 
     let lit = rgb_in * 1.6 + ambient + rgb_in * emit_boost;
 
