@@ -6,9 +6,10 @@ A sprite quad that **yaw-bills toward the camera** (same path as NPCs) makes a p
 
 **Use instead:**
 
-- **Fixed world quads** (what the arcade R32 does now): side + front + rear textures locked in alley space, optional **roof / shell** quads (`IMG_PIPE`) for volume.
+- **Merged `.glb` props** (what the arcade **parked car slot** does now): `gltf_level::append_glb_transform` appends mesh + materials after procedural `GltfLevelCpu` build; ship **`client/props/arcade_parked_car_blockout.glb`** or replace it with a Blender export (pixel textures, nearest).
+- **Fixed world quads** for flat signage only — not for a walk-around vehicle silhouette.
 - **`wall_prop`-style boxes** for small props (trash, crates, bikes).
-- **Real 3D:** model in **Blender**, bake **pixel / nearest** textures, export **`.glb`** per `level-design.mdc` and ship with the level (or merge into the arcade pipeline later).
+- **Full levels:** model in **Blender**, export **`.glb`** per `level-design.mdc`.
 
 The sections below still apply when you **want** camera-facing sprites — e.g. **moving** entities or distant impostors — not for a static parked vehicle.
 

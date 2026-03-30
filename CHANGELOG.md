@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-29 — Arcade parked vehicle: merge real glTF mesh (drop R32 PNG quads)
+
+- **Different method**: Pixel art on quads cannot read as a solid car; the arcade slot now **`include_bytes!` merges** `client/props/arcade_parked_car_blockout.glb` after procedural geometry via **`gltf_level::append_glb_transform`** (rebases image indices, applies `Mat4` placement).
+- **Shipped blockout**: gray PBR box (stdlib Python **`tools/write_arcade_parked_car_blockout_glb.py`**) — replace with a Blender export (same path/name) for a textured low-poly car per `level-design.mdc`.
+- **Removed** `r32_side/front/rear` from the arcade texture table and deleted **`add_parked_r32`**.
+
 ## 2026-03-29 — Arcade R32: faceted body shell instead of three flat posters
 
 - **`add_parked_r32`**: Narrow **front/rear** panels use only the **lower UV band** of the pixel PNGs (bumper slice); **hood**, **roof**, **trunk deck**, and **windshield / rear glass** are separate quads (`IMG_PIPE` / `IMG_WINDOW`) so silhouette breaks out of a shoebox. Collision AABB extended for hood/trunk overhang in Z.

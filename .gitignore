@@ -12,3 +12,4 @@ tools/_audit_out/
 tools/_pixellab_tmp/
 **/__pycache__/
 *.blend1
+.venv-glb/

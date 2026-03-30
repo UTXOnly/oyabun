@@ -247,6 +247,7 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
             &mut batches,
             &mut spawn,
             &mut collision_boxes,
+            0,
         );
     }
 
@@ -288,6 +289,48 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
         solids,
         skip_floor_slab: false,
     })
+}
+
+/// Merge a second `.glb` into an existing level (vertices, indices, batches, images).
+/// Use for arcade procedural mesh + Blender blockout props. Geometry is transformed by `root` (Y-up, same as Blender export).
+/// `image_index` in appended batches is offset by the pre-append image count.
+/// Returns extra collision AABBs from collider-named meshes in the appended file (often empty).
+pub fn append_glb_transform(
+    cpu: &mut GltfLevelCpu,
+    bytes: &[u8],
+    root: Mat4,
+) -> Result<Vec<Aabb>, String> {
+    let (document, buffers, images) =
+        gltf::import_slice(bytes).map_err(|e| format!("append glb import: {e}"))?;
+
+    let scene = document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+        .ok_or_else(|| "append glb has no scenes".to_string())?;
+
+    let image_base = cpu.images_rgba8.len();
+    for img in &images {
+        let rgba = image_data_to_rgba(img)?;
+        cpu.images_rgba8.push((img.width, img.height, rgba));
+    }
+
+    let mut extra_colliders = Vec::new();
+    let mut spawn_dummy: Option<(Vec3, Mat4)> = None;
+    for root_node in scene.nodes() {
+        visit_node(
+            root_node,
+            root,
+            &buffers,
+            &document,
+            &mut cpu.vertices,
+            &mut cpu.indices,
+            &mut cpu.batches,
+            &mut spawn_dummy,
+            &mut extra_colliders,
+            image_base,
+        );
+    }
+    Ok(extra_colliders)
 }
 
 /// Minimal glTF (single mesh or small prop) for **playable / NPC 3D bodies**.
@@ -511,6 +554,7 @@ fn visit_node(
     batches: &mut Vec<GltfBatchCpu>,
     spawn: &mut Option<(Vec3, Mat4)>,
     collision_boxes: &mut Vec<Aabb>,
+    image_index_base: usize,
 ) {
     let world = parent * mat_from_transform(node.transform());
     let name = node.name().unwrap_or("");
@@ -638,10 +682,15 @@ fn visit_node(
             }
             let index_count = prim_indices.len() as u32;
 
+            let img_out = if image_index == usize::MAX {
+                usize::MAX
+            } else {
+                image_index.saturating_add(image_index_base)
+            };
             batches.push(GltfBatchCpu {
                 first_index,
                 index_count,
-                image_index,
+                image_index: img_out,
                 tint,
             });
         }
@@ -658,6 +707,7 @@ fn visit_node(
             batches,
             spawn,
             collision_boxes,
+            image_index_base,
         );
     }
 }
