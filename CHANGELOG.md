@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-29 — Arcade alley detail pass: 5 new PixelLab props + dense geometry
+
+- **Props**: Generated & integrated 5 new pixel-art prop textures via PixelLab MCP — trash bags, beer crates, neon arrow, noren curtain, bicycle (image indices 23–27).
+- **Level**: Added trash bags (3 spots), beer crates (3 spots), neon arrows (4 entrances), noren curtains (3 doorways), bicycles (2 gaps), puddle reflections near vending machines, vertical neon strips in every shop gap, cross-alley cloth banners (3), yellow utility markings (4), curbs, drain gutter, blade signs, horizontal banners, manhole covers, rooftop lips, shop doorsteps.
+- **Build**: Clean `wasm-pack build` with all 28 image slots.
+
 ## 2026-03-29 — Rival atlas: full 8-dir walk; SMG character pipeline + prompts
 
 - **Art**: Re-downloaded Rival v3 ZIP (complete **8-direction walking**); rebuilt `rival_v3_atlas.rgba` via `pixellab_zip_to_atlas.py` (no idle-padding for missing dirs).
