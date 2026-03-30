@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-29 — R32 eight-direction prop billboard (atlas + `PropBillboardCpu`)
+
+- **`GltfLevelCpu::prop_billboards`**: arcade registers one **`PropBillboardCpu`** for the parked R32; **`Gpu`** uploads **`prop_r32_atlas.rgba`** and draws billboards after rival sprites using the same 8-column camera-bearing UV math as NPCs.
+- **Art**: **`tools/stitch_prop_r32_atlas.py`** builds **`client/characters/prop_r32_atlas.png`** from **`r32_side/front/rear.png`** (rear / side / front / mirrored side columns); **`export_character_atlas_to_rgba.py`** emits **`.rgba`**. Level mesh keeps only the R32 ground shadow quad (no three world-texture panels).
+- **Render**: **`MAX_BILL_QUADS`** increased to **96** so mural + character billboards + props + blood splats fit the billboard vertex buffer.
+
 ## 2026-03-30 — Doc: PixelLab MCP limits + prop billboard atlas plan
 
 - **`docs/CURSOR_ARCADE_PROP_BILLBOARDS.md`**: `create_character` / `animate_character` are **not** for vehicles or static props; multi-angle props should reuse **8-column atlases + `SHADER_BILL`** like NPCs. Linked from `CURSOR_ARCADE_TOKYO_LEVEL.md`.

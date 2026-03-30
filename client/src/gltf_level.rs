@@ -127,6 +127,18 @@ pub struct GltfBatchCpu {
     pub tint: [f32; 4],
 }
 
+/// 8-direction sprite billboard (same atlas layout as character billboards: 8 columns × N rows).
+#[derive(Clone, Copy, Debug)]
+pub struct PropBillboardCpu {
+    pub foot: Vec3,
+    pub mesh_yaw: f32,
+    pub half_width: f32,
+    pub half_height: f32,
+    pub feet_drop: f32,
+    pub anim_row: u32,
+    pub tint: [f32; 4],
+}
+
 pub struct GltfLevelCpu {
     pub vertices: Vec<WorldVertex>,
     pub indices: Vec<u32>,
@@ -138,6 +150,7 @@ pub struct GltfLevelCpu {
     /// When true, `game_init_from_gltf` will not add a giant floor slab
     /// (the level already provides its own floor collision).
     pub skip_floor_slab: bool,
+    pub prop_billboards: Vec<PropBillboardCpu>,
 }
 
 impl GltfLevelCpu {
@@ -287,6 +300,7 @@ pub fn parse_glb(bytes: &[u8]) -> Result<GltfLevelCpu, String> {
         spawn_yaw,
         solids,
         skip_floor_slab: false,
+        prop_billboards: Vec::new(),
     })
 }
 
