@@ -833,9 +833,8 @@ impl CharacterDraw {
     }
 }
 
-/// World matrix for the FPS M4: **do not** use `inverse(view) * local` — glam `look_at_rh` + GPU row/column
-/// conventions mis-aligned the bore (barrel shot up the screen). Build an explicit camera basis instead.
-/// Prop mesh bore is along **−Z**; we map +Z column to **−forward** so **−Z → +forward** (down the sight).
+/// World matrix for the FPS M4.  Prop vertex extent confirms barrel along **+Z** (thinnest cross-section
+/// at max-Z).  Build camera-basis rotation: prop +Z → camera forward, +Y → up.
 pub fn weapon_fps_world_model(game: &crate::game::GameState) -> Mat4 {
     let eye = game.eye_pos();
     let forward = game.view_forward();
@@ -846,28 +845,34 @@ pub fn weapon_fps_world_model(game: &crate::game::GameState) -> Mat4 {
         right = right.normalize();
     }
     let up = right.cross(forward).normalize();
+
     let rot = Mat4::from_cols(
-        right.extend(0.0),
-        up.extend(0.0),
-        (-forward).extend(0.0),
+        (-right).extend(0.0),     // prop +X → camera left  (RH: up × forward)
+        up.extend(0.0),           // prop +Y → camera up
+        forward.extend(0.0),      // prop +Z (barrel) → camera forward
         Vec4::new(0.0, 0.0, 0.0, 1.0),
     );
-    let scale = Mat4::from_scale(Vec3::splat(0.46));
-    // Offsets in camera-local axes (right / up / forward into the world).
-    let local = Mat4::from_translation(Vec3::new(0.12, -0.14, -0.44));
+    let scale = Mat4::from_scale(Vec3::splat(0.14));
+    // In prop space: -X → camera right, -Y → camera down, +Z → camera forward.
+    let local = Mat4::from_translation(Vec3::new(-0.16, -0.10, 0.38));
     let tilt = Mat4::from_quat(
-        Quat::from_rotation_x(0.04) * Quat::from_rotation_y(-0.03) * Quat::from_rotation_z(0.02),
+        Quat::from_rotation_z(0.02) * Quat::from_rotation_y(0.03),
     );
     Mat4::from_translation(eye) * rot * local * tilt * scale
 }
 
-/// Prop **−Z** = muzzle. Mixamo `RightHand` local **+Y** is roughly along the palm / forearm exit; rotate +90° X
-/// maps mesh −Z into +Y so the rifle lays along the grip axis, then nudge toward the palm.
+/// Barrel is along **+Z** in the prop mesh (confirmed by vertex extent).
+/// Mixamo `RightHand` during `rifle_aiming_idle`: +Y ≈ aim forward, +X ≈ up.
+/// Rotate so prop +Z→hand +Y (aim), prop +Y→hand +X (up), prop +X→hand +Z.
 fn weapon_hand_to_prop_transform() -> Mat4 {
-    use std::f32::consts::FRAC_PI_2;
-    let scale = Mat4::from_scale(Vec3::splat(0.42));
-    let align = Mat4::from_quat(Quat::from_rotation_x(FRAC_PI_2));
-    Mat4::from_translation(Vec3::new(0.0, 0.1, 0.02)) * align * scale
+    let scale = Mat4::from_scale(Vec3::splat(0.38));
+    let barrel_align = Mat4::from_cols(
+        Vec4::new(0.0, 0.0, 1.0, 0.0), // prop +X → hand +Z
+        Vec4::new(1.0, 0.0, 0.0, 0.0), // prop +Y → hand +X (up)
+        Vec4::new(0.0, 1.0, 0.0, 0.0), // prop +Z → hand +Y (aim)
+        Vec4::new(0.0, 0.0, 0.0, 1.0),
+    );
+    Mat4::from_translation(Vec3::new(0.0, 0.06, -0.04)) * barrel_align * scale
 }
 
 struct WeaponAttachPass<'a> {
@@ -977,6 +982,19 @@ fn draw_character_instances_3d(
             let joint_i = skinned_cpu.weapon_attach_joint.map(|j| j as usize);
             let do_attach = weapon_attach.is_some() && joint_i.is_some();
             let mut attached: Vec<Mat4> = Vec::new();
+            #[cfg(target_arch = "wasm32")]
+            {
+                use std::sync::atomic::{AtomicU32, Ordering};
+                static ATTACH_DIAG: AtomicU32 = AtomicU32::new(0);
+                let c = ATTACH_DIAG.fetch_add(1, Ordering::Relaxed);
+                if c < 5 {
+                    let msg = format!(
+                        "[weapon-attach-diag] weapon_attach={} joint_i={:?} do_attach={} node_n={} instances={}",
+                        weapon_attach.is_some(), joint_i, do_attach, node_n, list.len(),
+                    );
+                    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
+                }
+            }
 
             pass.set_pipeline(pipeline);
             pass.set_vertex_buffer(0, vb.slice(..));
@@ -1019,6 +1037,26 @@ fn draw_character_instances_3d(
                         if jnode < node_n {
                             let hand = skinned_node_world_scratch[jnode];
                             let wm = inst.model * hand * wa.hand_to_prop;
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                use std::sync::atomic::{AtomicU32, Ordering};
+                                static NPC_LOG: AtomicU32 = AtomicU32::new(0);
+                                let c = NPC_LOG.fetch_add(1, Ordering::Relaxed);
+                                if c < 3 {
+                                    let hp = hand.to_cols_array();
+                                    let wp = wm.to_cols_array();
+                                    let msg = format!(
+                                        "[weapon-attach] ji={} jnode={} hand_col0=[{:.3},{:.3},{:.3}] hand_col1=[{:.3},{:.3},{:.3}] hand_col2=[{:.3},{:.3},{:.3}] hand_t=[{:.3},{:.3},{:.3}] wm_t=[{:.3},{:.3},{:.3}]",
+                                        ji, jnode,
+                                        hp[0], hp[1], hp[2],
+                                        hp[4], hp[5], hp[6],
+                                        hp[8], hp[9], hp[10],
+                                        hp[12], hp[13], hp[14],
+                                        wp[12], wp[13], wp[14],
+                                    );
+                                    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
+                                }
+                            }
                             attached.push(wm);
                         }
                     }
@@ -1027,6 +1065,21 @@ fn draw_character_instances_3d(
 
             if do_attach {
                 if let Some(wa) = weapon_attach {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        use std::sync::atomic::{AtomicU32, Ordering};
+                        static DRAW_DIAG: AtomicU32 = AtomicU32::new(0);
+                        let c = DRAW_DIAG.fetch_add(1, Ordering::Relaxed);
+                        if c < 5 {
+                            let has_pipe = wa.weapon_cd.world_attach_pipeline.is_some();
+                            let is_rigid = matches!(&wa.weapon_cd.geometry, CharacterGeometry::Rigid { .. });
+                            let msg = format!(
+                                "[weapon-draw-diag] attached={} has_attach_pipe={} is_rigid={}",
+                                attached.len(), has_pipe, is_rigid,
+                            );
+                            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
+                        }
+                    }
                     if !attached.is_empty() {
                         let bytes = fill_char_uniform_bytes_for_world_models(
                             &attached,
@@ -2056,7 +2109,7 @@ impl Gpu {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth24Plus,
                     depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::Less,
+                    depth_compare: wgpu::CompareFunction::Always,
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
@@ -2096,12 +2149,12 @@ impl Gpu {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth24Plus,
                     depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState {
-                        constant: -40,
-                        slope_scale: -6.0,
-                        clamp: -1.0,
+                        constant: -200,
+                        slope_scale: -8.0,
+                        clamp: 0.0,
                     },
                 }),
                 multisample: wgpu::MultisampleState::default(),
@@ -3670,6 +3723,12 @@ impl Gpu {
             }
         };
 
+        // FPS weapon writes to a RESERVED high slot in the weapon_prop uniform buffer
+        // so it does not overwrite the NPC weapon-attach data at offset 0.
+        // wgpu stages all write_buffer calls before submit, so the last write wins
+        // for any given byte range — using separate slots avoids the conflict.
+        const FPS_WEAPON_SLOT: usize = MAX_CHARACTER_INSTANCES - 1;
+
         let draw_fps_weapon_3d = |pass: &mut wgpu::RenderPass<'_>, gpu: &Gpu| {
             if let Some(model) = weapon_hud.fps_weapon_model {
                 if let Some(wpn) = gpu.weapon_prop.as_ref() {
@@ -3681,8 +3740,28 @@ impl Gpu {
                             view_proj,
                             cam_pos,
                         );
-                        gpu.queue.write_buffer(&wpn.char_uniform, 0, bytes.as_slice());
-                        draw_rigid_character_batch_with_pipeline(pass, wpn, pipe, 1);
+                        let fps_byte_offset =
+                            wpn.char_uniform_stride as u64 * FPS_WEAPON_SLOT as u64;
+                        gpu.queue
+                            .write_buffer(&wpn.char_uniform, fps_byte_offset, bytes.as_slice());
+
+                        // Draw one instance at the reserved slot's dynamic offset.
+                        let CharacterGeometry::Rigid { vb, ib, .. } = &wpn.geometry else {
+                            return;
+                        };
+                        pass.set_pipeline(pipe);
+                        pass.set_vertex_buffer(0, vb.slice(..));
+                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.set_bind_group(
+                            0,
+                            &wpn.char_globals_bg,
+                            &[wpn.char_uniform_stride * FPS_WEAPON_SLOT as u32],
+                        );
+                        for b in &wpn.batches {
+                            pass.set_bind_group(1, &b.bind_group, &[]);
+                            let end = b.first_index.saturating_add(b.index_count);
+                            pass.draw_indexed(b.first_index..end, 0, 0..1);
+                        }
                     }
                 }
             }

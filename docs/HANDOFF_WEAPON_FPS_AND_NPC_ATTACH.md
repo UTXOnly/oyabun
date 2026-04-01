@@ -28,7 +28,7 @@ This document is for a fresh investigator (e.g. Claude). **Cursor agents iterate
 | `client/props/m4a1_prop.glb` | Rigid M4 mesh; exported by `tools/blender_m4a1_export_assets.py` from `m4a13d/base.obj`. Vertices are **baked with node world** in `gltf_level::visit_character_node` (`world.transform_point3`). Root node is identity in the shipped file. |
 | `client/characters/yakuza_shooter.glb` | Skinned Mixamo body; skin joint **index 18** = `mixamorig:RightHand` (node index 15). |
 
-**Measured mesh extent (Python on accessor):** dominant span is **Z** (~1.81 m); PCA longest axis ≈ **−Z** (treat **−Z as muzzle direction** in file space unless baking changes that).
+**Measured mesh extent (Python on accessor):** dominant span is **Z** (~1.81 m); cross-section analysis confirms the **+Z** end is thinner (muzzle), **−Z** is wider (stock/receiver). Barrel direction is **+Z** in file space.
 
 ---
 
