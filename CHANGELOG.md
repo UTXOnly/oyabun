@@ -1,6 +1,147 @@
 # Changelog
 
-## 2026-03-29 — 3D character overhaul: skin modifier models replace sprite billboards
+## 2026-03-29 — Arcade parked vehicle: merge real glTF mesh (drop R32 PNG quads)
+
+- **Different method**: Pixel art on quads cannot read as a solid car; the arcade slot now **`include_bytes!` merges** `client/props/arcade_parked_car_blockout.glb` after procedural geometry via **`gltf_level::append_glb_transform`** (rebases image indices, applies `Mat4` placement).
+- **Shipped blockout**: gray PBR box (stdlib Python **`tools/write_arcade_parked_car_blockout_glb.py`**) — replace with a Blender export (same path/name) for a textured low-poly car per `level-design.mdc`.
+- **Removed** `r32_side/front/rear` from the arcade texture table and deleted **`add_parked_r32`**.
+
+## 2026-03-29 — Arcade R32: faceted body shell instead of three flat posters
+
+- **`add_parked_r32`**: Narrow **front/rear** panels use only the **lower UV band** of the pixel PNGs (bumper slice); **hood**, **roof**, **trunk deck**, and **windshield / rear glass** are separate quads (`IMG_PIPE` / `IMG_WINDOW`) so silhouette breaks out of a shoebox. Collision AABB extended for hood/trunk overhang in Z.
+
+## 2026-03-29 — R32: drop camera-facing prop billboard; restore fixed geometry + roof
+
+- **Removed** **`PropBillboardCpu`**, **`prop_r32_atlas`**, and prop draw pass — parked cars must not use NPC-style yaw billboards (they spun to face the player).
+- **Arcade**: R32 again uses **world-fixed** side + front + rear **`r32_*.png`** quads, **horizontal roof** quad (`IMG_PIPE`, `SHELL_CAR`), and ground shadow. **`tools/stitch_prop_r32_atlas.py`** and **`prop_r32_atlas.{png,rgba}`** removed.
+- **Docs**: **`CURSOR_ARCADE_PROP_BILLBOARDS.md`** warns against camera billboards for static vehicles; points to fixed quads / **`wall_prop`** / Blender **`.glb`**.
+- **`MAX_BILL_QUADS`** back to **64**.
+
+## 2026-03-30 — Doc: PixelLab MCP limits + prop billboard atlas plan
+
+- **`docs/CURSOR_ARCADE_PROP_BILLBOARDS.md`**: `create_character` / `animate_character` are **not** for vehicles or static props; multi-angle props should reuse **8-column atlases + `SHADER_BILL`** like NPCs. Linked from `CURSOR_ARCADE_TOKYO_LEVEL.md`.
+
+## 2026-03-29 — Props: pixel-art regen, solid shells, alpha fringe in `fs_tex`
+
+- **Art**: Re-ran PixelLab map-object for **trash, crates, bike, R32×3, lantern** with prompts demanding **chunky pixel art, thick black outline, flat cel, no photograph** so props match the arcade alley instead of photo decals.
+- **Geometry**: `wall_prop` / `wall_prop_y` **top, Z-sides, and ground shadow** now use tinted **`IMG_PIPE`** (`SHELL_*` constants), not UV strips into transparent PNG edges — reads as a small painted volume instead of a black hole.
+- **Shader**: `fs_tex` blends **alley night fill** into low-alpha samples so transparent fringe is not pitch black.
+- **R32**: Ground **contact shadow** slab under the car; slightly lower emissive tint on panels.
+
+## 2026-03-29 — Paper chōchin, R32 triple-panel car, regenerated props (PixelLab)
+
+- **Lanterns**: New **`lantern_paper.png`** (Japanese paper chōchin); wall + cross-alley lanterns use texture **IMG_LANTERN_PAPER** instead of solid orange rects. Utility asphalt stripes still use solid warm index 17 (`IMG_SOLID_WARM`).
+- **Nissan R32**: Generated **`r32_side.png`**, **`r32_front.png`**, **`r32_rear.png`**; **`add_parked_r32`** places three quads (side + bumpers) on the right wall with collision AABB.
+- **Props**: Regenerated **trash_bags**, **beer_crates**, **bicycle** via map-object (deeper shading). **Trash**: second smaller pile offset in Z. **Crates**: stacked second tier via **`wall_prop_y`**. **Bikes**: **`bike_lean_wing`** skew quad for a leaning read.
+- **Docs**: `client/level_textures/tokyo_props/EXPORT.txt` lists assets and regen hints.
+
+## 2026-03-29 — Arcade alley: wall_prop texture wrap, more signs & lanterns
+
+- **wall_prop**: Top and sides use **UV strips** from the same prop PNG (edge + top bands) instead of flat solid materials; front/wall dimming tuned; thin **ground shadow** quad along the base. Reduces the obvious “shoebox” read when circling props.
+- **Vertical neon**: **18** paired wall signs (was 6) — second column along façades, **upper-story** blades, varied Z offsets.
+- **Blade signs**: **10** jutting signs (was 4).
+- **Lanterns**: **Third** wall lantern per shop (center), **cord** quads up toward awning line; **mid-alley cross lanterns** (two perpendicular panels + cord) at four depths so hanging lights read from multiple horizontal viewing angles.
+
+## 2026-03-29 — 3D box-shaped wall props replace flat billboards
+
+- **Props**: Trash bags, beer crates, and bicycles now use **wall_prop** — a 5-face box (wall face textured, front face darkened, top + two sides solid-color) that sits against the building wall. Creates real parallax and depth as you walk past, unlike flat billboards or same-image cross-billboards.
+- **Fix**: Trash bags brightened (tint 1.6×) so visible in dark alley.
+- **Collision**: All ground props have wall-aligned AABB collision boxes.
+
+## 2026-03-29 — Arcade alley detail pass: 5 new PixelLab props + dense geometry
+
+- **Props**: Generated & integrated 5 new pixel-art prop textures via PixelLab MCP — trash bags, beer crates, neon arrow, noren curtain, bicycle (image indices 23–27).
+- **Level**: Added trash bags (3 spots), beer crates (3 spots), neon arrows (4 entrances), noren curtains (3 doorways), bicycles (2 gaps), puddle reflections near vending machines, vertical neon strips in every shop gap, cross-alley cloth banners (3), yellow utility markings (4), curbs, drain gutter, blade signs, horizontal banners, manhole covers, rooftop lips, shop doorsteps.
+- **Build**: Clean `wasm-pack build` with all 28 image slots.
+
+## 2026-03-29 — Rival atlas: full 8-dir walk; SMG character pipeline + prompts
+
+- **Art**: Re-downloaded Rival v3 ZIP (complete **8-direction walking**); rebuilt `rival_v3_atlas.rgba` via `pixellab_zip_to_atlas.py` (no idle-padding for missing dirs).
+- **SMG**: `create8` still fails `bone_scaling`; queued **create4** Uzi-style wakashu `dee01186-8482-431e-ada3-3a00f1101d01` — expand to 8 dirs on PixelLab web, walk, zip, atlas. Docs/rules updated for **MP5/Uzi** prompt targets and boss replacement path.
+
+## 2026-03-29 — Rival v3 sprite atlas in-game; zip→atlas tool; dual billboard bind groups
+
+- **Client**: `rival_v3_atlas.rgba` embedded; **Rival** skin uses rival atlas, Boss/Remote use boss atlas (two billboard draw ranges + bind groups). `upload_rgba_atlas` helper in `render.rs`.
+- **Tools**: `tools/pixellab_zip_to_atlas.py` builds 8×(idle+6 walk) atlas from PixelLab ZIP (fills missing walk dirs with idle). `tools/pixellab_v2.py zip <id> out.zip` downloads character ZIP.
+- **Note**: Partial PixelLab walk export only had 4 directions; script pads other columns with idle for those frames.
+
+## 2026-03-29 — PixelLab check-in: rival walk ZIP ready; v2 create8 / player animate blocked server-side
+
+- **Rival v3** `dabe33dd-…`: ZIP export **200** (~90 KB) — ready for `build_game_atlas` / `.rgba`.
+- **v2 `create8`**: fails with `'bone_scaling'` (PixelLab API).
+- **Player Ronin v3** `fe8d4102-…`: v2 animate endpoints return *Failed to start any animation jobs* — use web UI or support.
+
+## 2026-03-29 — PixelLab v2 CLI (`pixellab_v2.py`) — fixes Cursor MCP JSON bug
+
+- **Tooling**: `tools/pixellab_v2.py` calls `https://api.pixellab.ai/v2` with correct JSON (`balance`, `list`, `get`, `animate`, `create8`). Uses `PIXELLAB_API_TOKEN` or Bearer from `.cursor/mcp.json`.
+- **Cause**: Cursor’s HTTP MCP layer can emit invalid JSON for string tool args (e.g. unquoted `template_animation_id`), so jobs never start — unrelated to token mismatch.
+- **Art**: Queued **walking** template for **Yakuza Rival v3** `dabe33dd-b9d5-481c-9413-402cd0002747` (8 background jobs). New `create8` yakuza+pistol deferred until those slots free (Tier 1 = 8 concurrent jobs).
+- **Docs**: `docs/CURSOR_CHARACTER_IMPROVEMENT.md`, `character-gen.mdc`, `SKILL.md` updated.
+
+## 2026-03-29 — NPC sprite walk frames; no bob on billboards; PixelLab MCP notes
+
+- **Client**: NPCs use `walk_anim_frame` for atlas rows 1–6 when moving; vertical **bob is disabled** when sprite billboards are active (walk legs carry motion). Dead NPCs stay on idle row.
+- **Docs**: PixelLab **API key vs web app** (why creates may not show in the browser), `list_characters` as key truth, and **`animate_character` via website** when Cursor MCP breaks string JSON.
+
+## 2026-03-29 — Sprite billboard ground alignment + atlas UV rows
+
+- **Client**: Character billboards use `CHAR_BILLBOARD_FEET_DROP` so feet sit on terrain despite transparent padding in atlas cells; atlas **row count** for UVs is derived from embedded width/height (8 columns).
+- **Tooling**: `tools/export_character_atlas_to_rgba.py` embeds PNG atlases as `.rgba` for `include_bytes!`.
+- **Docs / rules**: Character art direction (yakuza + guns), canvas sizes, and export path updated in `character-gen` rule and `docs/CURSOR_CHARACTER_IMPROVEMENT.md`.
+
+## 2026-03-29 — Pixel art sprite billboards replace 3D models (PixelLab v3 pro)
+
+### Reverted: 3D Blender skin-modifier characters → PixelLab pixel art sprites
+
+The procedural 3D character approach could not match the neo-noir pixel art reference style despite multiple iterations (audit tool, texture tweaks, shader tuning). Characters are now **PixelLab pro-mode pixel art sprites** rendered as camera-facing billboard quads.
+
+### New character pipeline
+
+```
+PixelLab MCP (pro mode, 64px canvas, 8 directions)
+    → walk animation (6 frames × 8 dirs)
+    → download ZIP → extract
+    → build_game_atlas.py → 896×784 atlas (8 cols × 7 rows, 112×112 cells)
+    → convert to .rgba binary (width + height header + raw RGBA)
+    → embed via include_bytes! in render.rs
+    → billboard quads generated per-character per-frame
+    → SHADER_BILL renders with alpha discard + fog
+```
+
+### Character art repo
+
+Dedicated repo at `~/Desktop/oyabaun-characters/` for character art production:
+- `reference/` — style target images + extracted palettes
+- `prompts/` — generation prompts per character
+- `tools/` — atlas builder, palette extractor, comparison tool, game export
+- `raw/` → `refined/` → `export/` pipeline
+
+### Characters (v3 pro mode)
+
+| Character | PixelLab ID | Canvas | Status |
+|-----------|-------------|--------|--------|
+| Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | ✅ Atlas in-game |
+| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | Rotations only, walk TODO |
+| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | Rotations only, walk TODO |
+
+### Rendering changes (render.rs)
+
+- **Added**: Embedded sprite atlas loading (raw RGBA → GPU texture → bind group)
+- **Added**: Camera-facing billboard quad generation per character
+- **Added**: 8-direction selection from camera-character relative angle
+- **Added**: Walk animation row selection from `anim_frame`
+- **Preserved**: 3D GLB path (bypassed when sprite atlas present)
+- **Shader**: Reuses `SHADER_BILL` (alpha discard at 0.35, nearest sampling)
+
+### Files changed
+
+- `client/src/render.rs` — char_sprite_bg fields, atlas loading, billboard quad gen, draw calls
+- `client/characters/boss_v3_atlas.rgba` — Embedded sprite atlas (896×784, 2.8MB)
+- `client/characters/boss_v3_atlas.png` — Visual reference copy
+
+---
+
+## 2026-03-29 (earlier) — 3D character overhaul: skin modifier models replace sprite billboards
 
 ### Breaking change: Deprecated PixelLab sprite pipeline
 

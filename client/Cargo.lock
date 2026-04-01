@@ -672,6 +672,7 @@ dependencies = [
  "console_error_panic_hook",
  "glam",
  "gltf",
+ "image",
  "js-sys",
  "serde",
  "serde_json",

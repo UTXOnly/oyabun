@@ -233,7 +233,7 @@
       </div>
     </div>
     <script type="module">
-      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260328e";
+      import init, { createOyabaunApp } from "./pkg/oyabaun_client.js?v=20260329b";
 
       function relayWsUrl() {
         const p = location.protocol === "https:" ? "wss" : "ws";
@@ -300,6 +300,46 @@
           app.uploadArmsSprite(img);
         } catch (e) {
           console.warn("fpsweapons/arms.png", e);
+        }
+      }
+
+      async function loadVfxSprites(app) {
+        const v = Date.now();
+        try {
+          const m = document.createElement("img");
+          m.crossOrigin = "anonymous";
+          m.src = "./vfx/muzzle_flash.png?v=" + v;
+          await new Promise((res, rej) => {
+            m.onload = res;
+            m.onerror = rej;
+          });
+          app.uploadVfxMuzzleSprite(m);
+        } catch (e) {
+          console.warn("vfx/muzzle_flash.png", e);
+        }
+        try {
+          const b = document.createElement("img");
+          b.crossOrigin = "anonymous";
+          b.src = "./vfx/blood_overlay.png?v=" + v;
+          await new Promise((res, rej) => {
+            b.onload = res;
+            b.onerror = rej;
+          });
+          app.uploadVfxBloodSprite(b);
+        } catch (e) {
+          console.warn("vfx/blood_overlay.png", e);
+        }
+        try {
+          const sh = document.createElement("img");
+          sh.crossOrigin = "anonymous";
+          sh.src = "./vfx/shell_brass.png?v=" + v;
+          await new Promise((res, rej) => {
+            sh.onload = res;
+            sh.onerror = rej;
+          });
+          app.uploadVfxShellSprite(sh);
+        } catch (e) {
+          console.warn("vfx/shell_brass.png", e);
         }
       }
 
@@ -379,6 +419,11 @@
           await loadArmsSprite(app);
         } catch (e) {
           console.warn("arms sprite", e);
+        }
+        try {
+          await loadVfxSprites(app);
+        } catch (e) {
+          console.warn("vfx sprites", e);
         }
 
         const ws = new WebSocket(relayWsUrl());

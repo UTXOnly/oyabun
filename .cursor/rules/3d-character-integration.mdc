@@ -1,0 +1,259 @@
+---
+description: Integrate Mixamo-rigged 3D character (yakuza_shooter.glb) with skeletal animation into the wgpu renderer
+globs: client/src/render.rs, client/src/gltf_level.rs, client/src/lib.rs, client/src/game.rs
+alwaysApply: false
+---
+
+# 3D Animated Character Integration (yakuza_shooter.glb)
+
+## Overview
+
+In-world **boss, rival, and remote players** use this single Mixamo-rigged glTF with embedded clips (no NPC pixel atlases). Murals/blood still use the separate billboard pass in `render.rs`.
+
+**Asset location:** `client/characters/yakuza_shooter.glb` (~30 MB)
+
+## Asset Details
+
+- **Mesh:** ~250k verts, single mesh, PBR textured (diffuse, normal, roughness, metallic)
+- **Skeleton:** 33 Mixamo bones (`mixamorig:Hips`, `mixamorig:Spine`, etc.)
+- **Skin weights:** 4 joints per vertex (glTF standard)
+- **Coordinate system:** Y-up (glTF standard), character faces +Z in rest pose
+- **Scale:** 1 unit = 1 meter, character ~1.87m tall
+
+### Animations (embedded in glb)
+
+| Action Name | Frames | Loop? | Use Case |
+|---|---|---|---|
+| `t_pose` | 1-2 | No | Reference only |
+| `rifle_aiming_idle` | 1-91 | Yes | Standing idle with rifle |
+| `firing_rifle` | 1-29 | No | Shooting (play once per shot) |
+| `rifle_run` | 1-22 | Yes | Running with weapon |
+| `walking` | 1-42 | Yes | Normal walk |
+| `start_walking` | 1-43 | No | Idle→walk transition |
+| `stop_walking` | 1-75 | No | Walk→idle transition |
+| `walking_backwards` | 1-43 | Yes | Reverse walk |
+| `start_walking_backwards` | 1-61 | No | Idle→reverse transition |
+| `walk_backwards_stop` | 1-39 | No | Reverse→idle transition |
+| `run_backwards` | 1-17 | Yes | Reverse run |
+| `strafe_left` | 1-21 | Yes | Sidestep left |
+| `strafe_right` | 1-17 | Yes | Sidestep right |
+| `jump_forward` | 1-28 | No | Forward jump |
+| `jump_backward` | 1-28 | No | Backward jump |
+| `walking_to_dying` | 1-93 | No | Death animation |
+
+## Implementation Plan
+
+### Phase 1: Parse Skeleton & Skin Data from glTF
+
+**File: `gltf_level.rs`**
+
+The existing `parse_character_glb()` only extracts position/uv/normal. Extend it to also extract:
+
+1. **Joint indices** (`JOINTS_0` accessor) — `[u16; 4]` per vertex
+2. **Joint weights** (`WEIGHTS_0` accessor) — `[f32; 4]` per vertex
+3. **Inverse bind matrices** — from the glTF `skin` object
+4. **Joint hierarchy** — parent indices for each bone
+5. **Animation tracks** — per-bone rotation/translation/scale keyframes from glTF `animations[]`
+
+```rust
+// New vertex struct replacing CharacterVertex
+pub struct SkinnedVertex {
+    pub pos: [f32; 3],
+    pub uv: [f32; 2],
+    pub nrm: [f32; 3],
+    pub joints: [u32; 4],   // bone indices
+    pub weights: [f32; 4],  // blend weights (sum to 1.0)
+}
+
+// Skeleton data
+pub struct Skeleton {
+    pub joint_count: usize,
+    pub inverse_bind_matrices: Vec<Mat4>,  // one per joint
+    pub parent_indices: Vec<Option<usize>>, // bone hierarchy
+}
+
+// Animation clip
+pub struct AnimationClip {
+    pub name: String,
+    pub duration: f32,
+    pub channels: Vec<AnimationChannel>,
+}
+
+pub struct AnimationChannel {
+    pub joint_index: usize,
+    pub property: AnimProperty, // Translation, Rotation, Scale
+    pub times: Vec<f32>,
+    pub values: Vec<[f32; 4]>, // quat for rotation, vec3+pad for trans/scale
+}
+```
+
+**glTF parsing notes:**
+- Access `skin.joints()` for the joint node list
+- Access `skin.inverse_bind_matrices()` for the IBM accessor
+- For each `mesh.primitive()`, read `JOINTS_0` (u8 or u16) and `WEIGHTS_0` (f32)
+- Parse `document.animations()` for keyframe data
+- The `gltf` crate (already in Cargo.toml v1.4.1) supports all of this
+
+### Phase 2: GPU Bone Matrix Buffer
+
+**File: `render.rs`**
+
+Create a uniform/storage buffer for the bone matrices that the vertex shader will sample.
+
+```rust
+// Max 64 bones (Mixamo uses 33, leaves headroom)
+const MAX_JOINTS: usize = 64;
+
+// Per-frame bone matrices uploaded to GPU
+// Each matrix = inverse_bind * joint_world_transform
+pub struct BoneBuffer {
+    pub buffer: wgpu::Buffer, // MAX_JOINTS * 64 bytes (Mat4)
+    pub bind_group: wgpu::BindGroup,
+}
+```
+
+Upload updated bone matrices every frame after computing animation pose.
+
+### Phase 3: Vertex Skinning Shader
+
+**File: `render.rs` (SHADER_CHAR_TEX replacement)**
+
+Replace the current character shader with one that does linear blend skinning:
+
+```wgsl
+struct SkinnedVin {
+    @location(0) pos: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) norm: vec3<f32>,
+    @location(3) joints: vec4<u32>,
+    @location(4) weights: vec4<f32>,
+};
+
+@group(1) @binding(0) var<storage, read> bone_matrices: array<mat4x4<f32>>;
+
+@vertex fn vs_skinned(v: SkinnedVin) -> Vout {
+    // Linear blend skinning
+    let skin_mat =
+        bone_matrices[v.joints.x] * v.weights.x +
+        bone_matrices[v.joints.y] * v.weights.y +
+        bone_matrices[v.joints.z] * v.weights.z +
+        bone_matrices[v.joints.w] * v.weights.w;
+
+    let world_pos = (cu.model * skin_mat * vec4<f32>(v.pos, 1.0)).xyz;
+    let world_n = normalize((cu.model * skin_mat * vec4<f32>(v.norm, 0.0)).xyz);
+
+    var o: Vout;
+    o.clip = cu.vp * vec4<f32>(world_pos, 1.0);
+    o.uv = v.uv;
+    o.world_n = world_n;
+    o.world_pos = world_pos;
+    return o;
+}
+
+// Fragment shader stays the same (cel-shading, neon spill, etc.)
+```
+
+### Phase 4: Animation Playback (CPU-side)
+
+**New file: `client/src/animation.rs`**
+
+Compute bone matrices each frame on CPU, upload to GPU buffer.
+
+```rust
+pub struct AnimationState {
+    pub current_clip: usize,
+    pub time: f32,
+    pub speed: f32,
+    pub looping: bool,
+}
+
+impl AnimationState {
+    /// Sample all bone transforms at current time, compute final matrices
+    pub fn compute_bone_matrices(
+        &self,
+        skeleton: &Skeleton,
+        clips: &[AnimationClip],
+    ) -> Vec<Mat4> {
+        let clip = &clips[self.current_clip];
+        let t = if self.looping {
+            self.time % clip.duration
+        } else {
+            self.time.min(clip.duration)
+        };
+
+        // 1. Sample each channel at time t (lerp translation, slerp rotation)
+        // 2. Build local transforms per joint
+        // 3. Walk hierarchy: world_transform[i] = world_transform[parent] * local[i]
+        // 4. Final matrix[i] = world_transform[i] * inverse_bind_matrices[i]
+        // 5. Return vec of Mat4 to upload to GPU
+    }
+}
+```
+
+**Animation state machine** (integrate into `lib.rs` game loop):
+
+```rust
+// Map game state to animation clip
+fn pick_animation(velocity: Vec3, is_shooting: bool, is_dead: bool) -> &str {
+    if is_dead { return "walking_to_dying"; }
+    if is_shooting { return "firing_rifle"; }
+    let speed = velocity.length();
+    if speed < 0.1 { return "rifle_aiming_idle"; }
+    if speed > 5.0 { return "rifle_run"; }
+    // Check direction relative to facing for strafe/backwards
+    "walking"
+}
+```
+
+### Phase 5: Wire Into Existing Systems
+
+**File: `lib.rs`**
+
+1. Load `yakuza_shooter.glb` via `include_bytes!()` or fetch
+2. Parse skeleton + animations + skinned mesh using extended `parse_character_glb()`
+3. Create `BoneBuffer` on GPU
+4. Each frame:
+   - Update `AnimationState` based on player/NPC movement
+   - Call `compute_bone_matrices()`
+   - Upload matrices to GPU buffer
+   - Draw with skinned shader pipeline
+
+**File: `render.rs`**
+
+1. Add `SkinnedVertex` to vertex buffer layout (pos + uv + norm + joints + weights)
+2. Create new render pipeline with skinned vertex shader
+3. Add bone matrix storage buffer bind group
+4. In `draw_world()`, render skinned character instead of billboard when 3D mode active
+
+### CharacterSkin (no extra variant)
+
+`Boss`, `Rival`, and `Remote` are **logical** roles only; all use the same `yakuza_shooter.glb` mesh when skinned. Optional second `CharacterDraw` (`character_rival`) is unused in the default app (`None`).
+
+## Performance Notes
+
+- 250k verts is high for WASM. Consider decimating to ~20k in Blender before export for production. The Blender file at `tokyo-theme/newchar1/character_shooter.blend` has the undecimated mesh — add a Decimate modifier (ratio ~0.08) and re-export.
+- Bone matrix computation is cheap (33 bones × Mat4 multiply per frame)
+- Storage buffer for bones is tiny (~2KB)
+- The expensive part is the extra vertex attributes (joints + weights) increasing vertex buffer size
+
+## File Locations
+
+| Asset | Path |
+|---|---|
+| Game-ready glb | `client/characters/yakuza_shooter.glb` |
+| Blender source | `~/Desktop/tokyo-theme/newchar1/character_shooter.blend` |
+| Original Mixamo FBX (base) | `~/Desktop/tokyo-theme/base.fbx` |
+| Animation FBX files | `~/Desktop/tokyo-theme/*.fbx` (15 files) |
+| Hyper3D textures | `~/Desktop/tokyo-theme/newchar1/texture_*.png` |
+
+## Dependencies
+
+The `gltf` crate (already in Cargo.toml) supports skin/animation parsing. No new crates needed. For quaternion slerp, `glam` (already used) provides `Quat::slerp()`.
+
+## Key Gotchas
+
+1. **Blender → glTF coordinate flip**: Blender exports Y-up for glTF. The existing `character_model()` function in lib.rs adds PI rotation for the -Y→+Z flip — keep this for the new character.
+2. **Joint indices**: glTF can encode JOINTS_0 as u8 or u16. Check accessor component type and handle both.
+3. **Animation names**: The glTF animation names match the action names from Blender (e.g. `"rifle_aiming_idle"`). Parse `animation.name()` to build a name→index map.
+4. **Root motion**: Some Mixamo animations include hip translation (root motion). For `walking` and `rifle_run`, you may want to strip the root bone's XZ translation and drive movement from game physics instead.
+5. **No NPC billboards**: Do not add sprite-atlas NPC rendering; hit feedback uses `char_params.w` hit-flash encoding in `fs_char`.

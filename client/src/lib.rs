@@ -4,6 +4,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+mod arcade_level;
 mod game;
 mod gltf_level;
 mod input;
@@ -20,7 +21,7 @@ use loadout::{Loadout, WEAPONS};
 use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
 use net::NetController;
 use render::WeaponHudParams;
-pub use render::{CharacterInstance, CharacterSkin, Gpu, Vertex};
+pub use render::{BloodSplat, CharacterInstance, CharacterSkin, Gpu, HudShell, Vertex};
 
 use serde_json::json;
 
@@ -39,26 +40,53 @@ fn make_character(foot: Vec3, facing_yaw: f32, scale: f32, skin: CharacterSkin) 
         mesh_yaw: facing_yaw,
         skin,
         anim_frame: 0.0,
+        skinned_clip: 0,
+        skinned_anim_time: 0.0,
     }
 }
 
-/// Compute walk animation frame (1.0–6.0) from time, or 0.0 for idle.
-/// `speed` is the character's XZ movement speed; below threshold → idle.
-const WALK_FRAME_COUNT: f32 = 6.0;
-const WALK_FPS: f32 = 8.0;
-const WALK_SPEED_THRESHOLD: f32 = 0.3;
-
-fn walk_anim_frame(time: f32, speed: f32) -> f32 {
-    if speed < WALK_SPEED_THRESHOLD {
-        return 0.0; // idle
+/// Encode hit flash for `fs_char` via `char_params.w` (`100.0 + amount`, amount ∈ [0,1]).
+fn char_hit_anim_frame(hit_flash: f32) -> f32 {
+    if hit_flash <= 0.0 {
+        0.0
+    } else {
+        100.0 + hit_flash.min(1.0)
     }
-    // Cycle through frames 1-6 based on time, scale rate by speed
-    let rate = WALK_FPS * (speed / 3.0).max(0.6);
-    let frame = (time * rate) % WALK_FRAME_COUNT;
-    frame.floor() + 1.0 // rows 1-6 in the atlas
+}
+
+const MAX_HUD_SHELLS: usize = 14;
+
+fn push_hud_shell(shells: &mut Vec<HudShell>, s: HudShell) {
+    if shells.len() >= MAX_HUD_SHELLS {
+        shells.remove(0);
+    }
+    shells.push(s);
+}
+
+/// Brass eject in HUD weapon space (matches `vs_hud` before clip).
+fn spawn_hud_shells_for_weapon(wi: usize, shells: &mut Vec<HudShell>) {
+    match wi {
+        0 => push_hud_shell(
+            shells,
+            HudShell::new(0.38, -0.64, 0.46, 0.52, 15.0),
+        ),
+        1 => {
+            push_hud_shell(shells, HudShell::new(0.36, -0.58, 0.40, 0.50, 11.0));
+            push_hud_shell(shells, HudShell::new(0.34, -0.62, 0.36, 0.46, -9.0));
+        }
+        2 => push_hud_shell(
+            shells,
+            HudShell::new(0.42, -0.66, 0.52, 0.42, 24.0),
+        ),
+        _ => {}
+    }
 }
 
 /// Vertical walk bob (sinusoidal bounce) to prevent floating/sliding look.
+const WALK_SPEED_THRESHOLD: f32 = 0.3;
+const WALK_FPS: f32 = 8.0;
+const WALK_FRAME_COUNT: f32 = 6.0;
+
 fn walk_bob_y(time: f32, speed: f32) -> f32 {
     if speed < WALK_SPEED_THRESHOLD {
         return 0.0;
@@ -169,7 +197,7 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
     let mural_z = mesh::mural_z_plane(&bounds, spawn);
     let mut arena = mesh::empty_arena();
     let mut solids = cpu.solids.clone();
-    if gltf_needs_floor_slab(&solids, &bounds) {
+    if !cpu.skip_floor_slab && gltf_needs_floor_slab(&solids, &bounds) {
         solids.push(mesh::Aabb {
             min: Vec3::new(bounds.min.x - 120.0, bounds.min.y - 0.25, bounds.min.z - 120.0),
             max: Vec3::new(bounds.max.x + 120.0, bounds.min.y + 0.12, bounds.max.z + 120.0),
@@ -204,6 +232,22 @@ fn game_init_from_gltf(cpu: gltf_level::GltfLevelCpu) -> GameInit {
 }
 
 async fn load_game_init() -> GameInit {
+    // ── Arcade 2.5D level (primary path on this branch) ──────────────
+    match arcade_level::build_arcade_level() {
+        Ok(cpu) => {
+            #[cfg(target_arch = "wasm32")]
+            wasm_log("oyabaun: loaded arcade 2.5D backdrop level");
+            let mut gi = game_init_from_gltf(cpu);
+            gi.level_label = String::from("arcade 2.5D tokyo");
+            return gi;
+        }
+        Err(e) => {
+            #[cfg(target_arch = "wasm32")]
+            wasm_warn(&format!("oyabaun: arcade level build failed ({e}), falling back to GLB"));
+        }
+    }
+
+    // ── Fallback: Blender GLB / JSON / procedural ────────────────────
     #[cfg(target_arch = "wasm32")]
     {
         const EMBEDDED_GLB: &[u8] = include_bytes!("../levels/tokyo_alley.glb");
@@ -298,6 +342,10 @@ pub struct OyabaunApp {
     last_hit: bool,
     /// Name of last killed NPC (empty if none this frame).
     last_kill: String,
+    /// Pixel blood splats at hit locations in world space (fade over time).
+    blood_splats: Vec<BloodSplat>,
+    /// First-person ejected brass (HUD space, same transform as weapon).
+    hud_shells: Vec<HudShell>,
     clear: Vec3,
     level_bounds: mesh::Aabb,
     mural_z: f32,
@@ -523,6 +571,18 @@ impl OyabaunApp {
         if dt > 0.0 {
             self.loadout.tick(dt);
             self.game.tick(dt, &mut self.input);
+            for s in &mut self.blood_splats {
+                s.life -= dt * 3.2;
+            }
+            self.blood_splats.retain(|s| s.life > 0.02);
+            for s in &mut self.hud_shells {
+                s.vy -= dt * 1.9;
+                s.x += s.vx * dt;
+                s.y += s.vy * dt;
+                s.rot += s.spin * dt;
+                s.life -= dt * 1.15;
+            }
+            self.hud_shells.retain(|s| s.life > 0.03);
         }
 
         let (wp, wn, pick, rel) = self.input.take_weapon_edges();
@@ -541,13 +601,37 @@ impl OyabaunApp {
         }
         if shot_fired {
             let wi = self.loadout.current_idx();
+            spawn_hud_shells_for_weapon(wi, &mut self.hud_shells);
             // Check HP before and after to detect hits and kills
             let hp_before: Vec<(f32, bool)> = self.npcs.npcs.iter()
                 .map(|n| (n.hp, n.alive()))
                 .collect();
-            let hit = self.npcs.register_shot(&self.game, wi);
-            if hit {
+            let impact_opt = self.npcs.register_shot(&self.game, wi);
+            if let Some(impact) = impact_opt {
                 self.last_hit = true;
+                const MAX_SPLATS: usize = 30;
+                while self.blood_splats.len() + 3 > MAX_SPLATS {
+                    self.blood_splats.remove(0);
+                }
+                let t = self.game_time;
+                let frac = |n: f32| -> f32 {
+                    ((t * 19.17 + n).sin() * 8341.37).fract().abs()
+                };
+                for k in 0u32..3 {
+                    let yaw = frac(k as f32 * 4.13 + 1.1) * std::f32::consts::TAU;
+                    let scale = 0.5 + frac(k as f32 * 11.9) * 0.95;
+                    let j = 0.022 + frac(k as f32 * 6.2) * 0.048;
+                    let a = frac(k as f32 * 8.4) * std::f32::consts::TAU;
+                    let ox = a.cos() * j;
+                    let oz = a.sin() * j;
+                    let oy = (frac(k as f32 * 3.7) - 0.5) * 0.04;
+                    self.blood_splats.push(BloodSplat {
+                        pos: impact + Vec3::new(ox, oy, oz),
+                        life: 1.0,
+                        yaw,
+                        scale,
+                    });
+                }
             }
             // Check for kills
             for (i, npc) in self.npcs.npcs.iter().enumerate() {
@@ -555,7 +639,6 @@ impl OyabaunApp {
                     self.last_kill = npc.def.label.to_uppercase();
                 }
             }
-            // Debug log every shot
             #[cfg(target_arch = "wasm32")]
             {
                 let eye = self.game.eye_pos();
@@ -563,7 +646,10 @@ impl OyabaunApp {
                 let alive = self.npcs.alive_count();
                 let msg = format!(
                     "SHOT wi={} hit={} alive={} wave={} eye=({:.1},{:.1},{:.1}) dir=({:.2},{:.2},{:.2})",
-                    wi, hit, alive, self.npcs.wave + 1,
+                    wi,
+                    impact_opt.is_some(),
+                    alive,
+                    self.npcs.wave + 1,
                     eye.x, eye.y, eye.z, dir.x, dir.y, dir.z
                 );
                 web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
@@ -576,6 +662,12 @@ impl OyabaunApp {
             // Sync NPC foot.y with terrain so hitboxes match visual positions
             for npc in &mut self.npcs.npcs {
                 npc.foot.y = self.game.feet_draw_y(npc.foot.x, npc.foot.z);
+            }
+            if !self.net.joined {
+                let d = self.npcs.offline_shoot_damage_per_tick(dt);
+                if d > 0 {
+                    self.net.self_health = (self.net.self_health - d).max(0);
+                }
             }
         }
     }
@@ -596,6 +688,21 @@ impl OyabaunApp {
     #[wasm_bindgen(js_name = uploadArmsSprite)]
     pub fn upload_arms_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
         self.gpu.upload_arms_sprite(&img)
+    }
+
+    #[wasm_bindgen(js_name = uploadVfxMuzzleSprite)]
+    pub fn upload_vfx_muzzle_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
+        self.gpu.upload_vfx_muzzle_sprite(&img)
+    }
+
+    #[wasm_bindgen(js_name = uploadVfxBloodSprite)]
+    pub fn upload_vfx_blood_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
+        self.gpu.upload_vfx_blood_sprite(&img)
+    }
+
+    #[wasm_bindgen(js_name = uploadVfxShellSprite)]
+    pub fn upload_vfx_shell_sprite(&mut self, img: web_sys::HtmlImageElement) -> Result<(), JsValue> {
+        self.gpu.upload_vfx_shell_sprite(&img)
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -627,20 +734,33 @@ impl OyabaunApp {
                     npc::NpcSkin::Rival => CharacterSkin::Rival,
                     npc::NpcSkin::Boss => CharacterSkin::Boss,
                 };
-                // Scale shrinks as NPC dies (collapse effect)
-                let death_scale = if npc.state == npc::NpcState::Dead {
-                    1.0 - npc.death_timer * 0.7
-                } else {
-                    1.0
-                };
                 let mut ch = make_character(
                     Vec3::new(f.x, foot_y, f.z),
                     facing_yaw,
-                    0.72 * npc.scale() * death_scale,
+                    0.78 * npc.scale(),
                     skin,
                 );
-                // Pass hit flash through anim_frame (>100 signals flash to shader)
-                ch.anim_frame = if npc.hit_flash > 0.0 { 100.0 + npc.hit_flash } else { 0.0 };
+                ch.anim_frame = char_hit_anim_frame(npc.hit_flash);
+                if self.gpu.skinned_character_active() {
+                    if let Some(ids) = self.gpu.skinned_anim_ids() {
+                        let (clip, t) = if npc.state == npc::NpcState::Dead {
+                            (
+                                ids.die,
+                                npc.death_timer * ids.die_duration,
+                            )
+                        } else if npc.shooting_at_player() {
+                            (ids.fire, npc.shoot_anim_t)
+                        } else if npc.state == npc::NpcState::Chase && npc.speed > 2.2 {
+                            (ids.run, self.game_time)
+                        } else if npc.speed > 0.12 {
+                            (ids.walk, self.game_time)
+                        } else {
+                            (ids.idle, self.game_time)
+                        };
+                        ch.skinned_clip = clip;
+                        ch.skinned_anim_time = t;
+                    }
+                }
                 characters.push(ch);
             }
             if self.net.joined {
@@ -652,7 +772,7 @@ impl OyabaunApp {
                         continue;
                     }
                     let foot_y = self.game.feet_draw_y(p.x, p.z);
-                    let sc = 0.66 + (p.id % 3) as f32 * 0.04;
+                    let sc = 0.72 + (p.id % 3) as f32 * 0.04;
                     let mesh_yaw = yaw_face_cam_xz(
                         Vec3::new(p.x, 0.0, p.z),
                         Vec3::new(cam.x, 0.0, cam.z),
@@ -663,8 +783,12 @@ impl OyabaunApp {
                         sc,
                         CharacterSkin::Remote,
                     );
-                    // Remote players are only visible when moving, so walk anim
-                    ch.anim_frame = walk_anim_frame(self.game_time, 1.0);
+                    if self.gpu.skinned_character_active() {
+                        if let Some(ids) = self.gpu.skinned_anim_ids() {
+                            ch.skinned_clip = ids.run;
+                            ch.skinned_anim_time = self.game_time;
+                        }
+                    }
                     characters.push(ch);
                 }
             }
@@ -677,6 +801,7 @@ impl OyabaunApp {
             flash: self.loadout.muzzle_flash,
             recoil: self.loadout.recoil,
             reload: self.loadout.reload_anim,
+            anim_t: self.game_time,
         };
         self.gpu.draw_world(
             vp,
@@ -684,6 +809,8 @@ impl OyabaunApp {
             cam,
             &characters,
             weapon_hud,
+            &self.blood_splats,
+            &self.hud_shells,
             &self.level_bounds,
             self.mural_z,
         );
@@ -699,9 +826,9 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
     let solids = boot.arena.solids.clone();
     #[cfg(target_arch = "wasm32")]
     let character_cpu = {
-        const EMB_CHAR: &[u8] = include_bytes!("../characters/oyabaun_player.glb");
+        const EMB_CHAR: &[u8] = include_bytes!("../characters/yakuza_shooter.glb");
         let mut c = gltf_level::parse_character_glb(EMB_CHAR).ok();
-        let char_url = format!("./characters/oyabaun_player.glb?v={}", js_sys::Date::now() as u64);
+        let char_url = format!("./characters/yakuza_shooter.glb?v={}", js_sys::Date::now() as u64);
         if let Some(bytes) = fetch_bytes(&char_url).await {
             if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
                 c = Some(x);
@@ -711,28 +838,8 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
     };
     #[cfg(not(target_arch = "wasm32"))]
     let character_cpu = {
-        const EMB_CHAR: &[u8] = include_bytes!("../characters/oyabaun_player.glb");
+        const EMB_CHAR: &[u8] = include_bytes!("../characters/yakuza_shooter.glb");
         gltf_level::parse_character_glb(EMB_CHAR).ok()
-    };
-    #[cfg(target_arch = "wasm32")]
-    let character_rival_cpu = {
-        const EMB_RIVAL: &[u8] = include_bytes!("../characters/oyabaun_rival.glb");
-        let mut c = gltf_level::parse_character_glb(EMB_RIVAL).ok();
-        let url = format!(
-            "./characters/oyabaun_rival.glb?v={}",
-            js_sys::Date::now() as u64
-        );
-        if let Some(bytes) = fetch_bytes(&url).await {
-            if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
-                c = Some(x);
-            }
-        }
-        c
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let character_rival_cpu = {
-        const EMB_RIVAL: &[u8] = include_bytes!("../characters/oyabaun_rival.glb");
-        gltf_level::parse_character_glb(EMB_RIVAL).ok()
     };
     let gpu = Gpu::new(
         canvas,
@@ -740,7 +847,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         &boot.arena.indices,
         gi.gltf,
         character_cpu,
-        character_rival_cpu,
+        None,
     )
     .await?;
     let game = GameState::new(
@@ -766,7 +873,9 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         game_time: 0.0,
         last_hit: false,
         last_kill: String::new(),
-        clear: Vec3::new(0.14, 0.12, 0.20),
+        blood_splats: Vec::new(),
+        hud_shells: Vec::new(),
+        clear: Vec3::new(0.047, 0.059, 0.133),
         level_bounds: boot.level_bounds,
         mural_z: boot.mural_z,
         level_label: gi.level_label,

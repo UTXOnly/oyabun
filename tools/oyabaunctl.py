@@ -230,6 +230,52 @@ def _default_tokyo_blend() -> Path:
     return (ROOT / "client" / "levels" / "tokyo_alley.blend").resolve()
 
 
+def cmd_fix_tokyo_shopfront_materials(ns: argparse.Namespace) -> None:
+    """Run tools/blender_fix_shopfront_materials.py (recess/awning materials on existing phase1 geo)."""
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"fix-tokyo-shopfront-materials: blend not found: {blend}\n")
+        sys.exit(1)
+    script = ROOT / "tools" / "blender_fix_shopfront_materials.py"
+    if not script.is_file():
+        sys.stderr.write(f"fix-tokyo-shopfront-materials: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    print(f"fix-tokyo-shopfront-materials: {blend}", flush=True)
+    subprocess.run(
+        [exe, str(blend), "--background", "--python", str(script)],
+        cwd=ROOT,
+        check=True,
+    )
+    print(
+        "fix-tokyo-shopfront-materials: done (run export-world --force-all to repack textures)",
+        flush=True,
+    )
+
+
+def cmd_apply_tokyo_shop_textures(ns: argparse.Namespace) -> None:
+    """Run tools/blender_apply_tokyo_shop_textures.py (PixelLab PNGs on ShopFront recess backs)."""
+    blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
+    if not blend.is_file():
+        sys.stderr.write(f"apply-tokyo-shop-textures: blend not found: {blend}\n")
+        sys.exit(1)
+    script = ROOT / "tools" / "blender_apply_tokyo_shop_textures.py"
+    if not script.is_file():
+        sys.stderr.write(f"apply-tokyo-shop-textures: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    print(f"apply-tokyo-shop-textures: {blend}", flush=True)
+    subprocess.run(
+        [exe, str(blend), "--background", "--python", str(script)],
+        cwd=ROOT,
+        check=True,
+    )
+    print(
+        "apply-tokyo-shop-textures: done (run export-world --force-all to repack + GLB)",
+        flush=True,
+    )
+
+
 def cmd_redesign_tokyo_phase1(ns: argparse.Namespace) -> None:
     """Run tools/blender_redesign_tokyo_alley_phase1.py (shop recess + awnings + blade signs)."""
     blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
@@ -530,6 +576,11 @@ def _launch_docker(ns: argparse.Namespace) -> None:
         sys.stderr.write("note: --docker starts relay only; run web with launch --web-only or another server\n")
 
 
+def cmd_build_arcade_r32_prop(_ns: argparse.Namespace) -> None:
+    script = ROOT / "tools" / "build_arcade_r32_prop.py"
+    subprocess.run([sys.executable, str(script)], cwd=ROOT, check=True)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="oyabaunctl", description="Control Oyabaun dev processes")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -656,6 +707,22 @@ def main() -> None:
     sp.set_defaults(func=cmd_redesign_tokyo_phase1, export_after=False)
 
     sp = sub.add_parser(
+        "apply-tokyo-shop-textures",
+        help="place client/level_textures/tokyo_shops PNGs on ShopFront_*_recess panels (then export-world --enhance)",
+    )
+    sp.add_argument("--blend", default=None, help="path to .blend (default: client/levels/tokyo_alley.blend)")
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.set_defaults(func=cmd_apply_tokyo_shop_textures)
+
+    sp = sub.add_parser(
+        "fix-tokyo-shopfront-materials",
+        help="assign OYA_Recess + awning-only mats to existing ShopFront_* meshes (then export-world --force-all)",
+    )
+    sp.add_argument("--blend", default=None, help="path to .blend (default: client/levels/tokyo_alley.blend)")
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.set_defaults(func=cmd_fix_tokyo_shopfront_materials)
+
+    sp = sub.add_parser(
         "import-glb",
         help="copy an existing .glb to client/levels/tokyo_alley.glb (then rebuild wasm to refresh embed)",
     )
@@ -666,6 +733,12 @@ def main() -> None:
         help="run wasm-pack after copy (needed for include_bytes! embedded level)",
     )
     sp.set_defaults(func=cmd_import_glb)
+
+    sp = sub.add_parser(
+        "build-arcade-r32-prop",
+        help="derive 3 R32 prop PNGs + client/props/arcade_r32_prop.glb (Pillow; run wasm-pack after)",
+    )
+    sp.set_defaults(func=cmd_build_arcade_r32_prop)
 
     sp = sub.add_parser("launch", help="start relay binary + static client (http.server)")
     sp.add_argument("--docker", action="store_true", help="docker compose relay instead of local binary")

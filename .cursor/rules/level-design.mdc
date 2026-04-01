@@ -43,7 +43,7 @@ alwaysApply: true
 - **Neon spill**: Sinusoidal colored light bands along alley (procedural, no light objects needed).
 - **Emissive boost**: Bright surfaces (lum > 0.5) get extra glow.
 - **Posterization**: 24 color levels (arcade CRT look).
-- **Fog**: Purple haze, density 0.015, color `(0.10, 0.06, 0.16)`.
+- **Fog**: Light depth haze only — `render.rs` `FOG_DENSITY` / `FOG_MAX_BLEND` / `FOG_COLOR_RGBA` (tuned so mid-alley signage stays readable; not reference-photo murk).
 - **Detail overlay**: Procedural brick pattern on dark surfaces (lum < 0.45).
 - **Texture brightness**: Multiplied by 1.8× before ambient is added.
 

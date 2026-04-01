@@ -1,77 +1,29 @@
 ---
-description: Oyabaun character generation — 3D Blender models via skin modifier + detail meshes
-globs: client/characters/**, tools/blender_make_oyabaun_character.py, client/src/render.rs
+description: Oyabaun world characters — skinned glTF (yakuza_shooter.glb); PixelLab only for HUD/VFX/props if needed
+globs: client/characters/**, client/src/render.rs, client/src/gltf_level.rs, client/src/lib.rs
 alwaysApply: false
 ---
 
-# Character generation pipeline (3D models — NOT sprites)
+# Character pipeline (in-world)
 
-## DEPRECATED: PixelLab sprite pipeline
+## Active: one skinned glTF for all NPCs and remote players
 
-The old PixelLab pixel-art billboard sprite pipeline is **fully deprecated**. Do NOT:
-- Use PixelLab MCP tools for character generation
-- Create atlas PNGs or sprite sheets
-- Use billboard vertex shaders or atlas UV selection
-- Reference `ATLAS_ROWS`, atlas columns, or direction indices in shaders
+- **Asset:** `client/characters/yakuza_shooter.glb` (Mixamo-rigged, embedded clips). Loaded in `create_oyabaun_app` / `Gpu::new`; **no separate rival GLB** in the default path (`character_rival_level` is `None` — boss and rival share the same `CharacterDraw`).
+- **Parsing & animation:** `client/src/gltf_level.rs` (skin weights, joints, clip sampling). **Rendering:** `client/src/render.rs` skinned pipeline + per-instance bone upload.
+- **Gameplay wiring:** `client/src/lib.rs` maps NPC state → clip indices (idle / walk / run / fire / die) and hit flash via `char_params.w` (`100+h` in `fs_char`).
+- **After changing the GLB:** `wasm-pack build --target web` from `client/`.
 
-## Current Pipeline: 3D Blender Models
+See **`.cursor/rules/3d-character-integration.mdc`** for clip names, gotchas (mesh_node_world, axis), and Blender source paths.
 
-Characters are proper 3D meshes built in Blender via Python scripting.
+## Billboards (not for NPCs)
 
-```
-Blender Python (skin modifier + detail meshes)
-    → single joined mesh per character
-    → export as GLB with export_yup=True
-    → client/characters/oyabaun_player.glb (boss types)
-    → client/characters/oyabaun_rival.glb (rival types)
-    → wasm-pack build embeds via include_bytes!
-    → SHADER_CHAR_TEX: standard model*pos transform + material tint colors
-```
+The **billboard pass** in `render.rs` is for **murals / reference backdrop** (`upload_reference_sprite`) and **blood splats** — not for characters.
 
-### Blender Modeling Technique
+## PixelLab / sprite atlases (optional, non-NPC)
 
-1. **Skin modifier**: Define skeleton as vertices + edges, apply Skin modifier with per-joint radii, subdivide level 2, decimate to ~30% for ~1000 face game mesh
-2. **Material assignment**: Iterate faces, assign material index by face center position (Z height → suit/skin/hair/shoes)
-3. **Detail meshes**: Separate objects for glasses, weapons, neon strips, tie, etc.
-4. **Join + export**: Join all into one mesh, export as GLB
+Legacy `*_atlas.rgba` boss/rival NPC atlases are **removed** from the render path. PixelLab or hand-drawn atlases may still be useful for **HUD weapons**, **muzzle/blood VFX**, or **prop** billboards (separate from NPC mesh). Export: `tools/export_character_atlas_to_rgba.py` if you add new sprite assets.
 
-### Key Conventions
+## Do not (for in-world humanoids)
 
-- Blender Z-up, front = -Y. glTF Y-up after export.
-- Feet at Z=0 in Blender → Y=0 in glTF
-- `character_model()` adds PI to yaw (Blender -Y front → game -Z front)
-- Materials: Principled BSDF base color only (no image textures). Emission for neon glow.
-- Vertex format: `WorldVertex { pos: [f32; 3], uv: [f32; 2] }` — 20 bytes
-
-### Shader (SHADER_CHAR_TEX in render.rs)
-
-- Vertex: `world_pos = model * vec4(v.pos, 1.0)` — standard 3D transform
-- Fragment: `textureSample(albedo, samp, uv) * mu.tint` — material tint color
-- Directional lighting + cyberpunk ambient + hit flash + distance fog
-- Depth write ON, solid alpha (no transparency)
-- No billboard, no atlas, no direction selection
-
-### Character Style Target
-
-Cyberpunk yakuza — stylized low-poly with:
-- Smooth organic body (skin modifier), ~1000-2000 verts
-- Visible suit details (collar, lapels, shoulder pads)
-- Facial features (nose, ears, jaw, sunglasses)
-- Weapons (pistol/katana)
-- Neon glow accents (emissive materials)
-
-### Build & Test
-
-```bash
-cd client && wasm-pack build --target web --no-typescript
-# Hard refresh browser after rebuild
-```
-
-### Current Characters
-
-| Character | GLB | Style |
-|-----------|-----|-------|
-| Boss | oyabaun_player.glb | Dark suit, sunglasses, pistol, cyan neon, slicked hair |
-| Rival | oyabaun_rival.glb | White suit, purple glasses, katana, purple neon, spiky hair, scar |
-
-See `docs/CURSOR_CHARACTER_IMPROVEMENT.md` for detailed improvement task list.
+- Do not reintroduce **NPC sprite billboards** tied to `char_sprite_bg` / atlas rows — use glTF + clips instead.
+- Do not add **client-side procedural** character meshes; author in Blender and ship `.glb`.

@@ -1,72 +1,45 @@
-# Blender Character Modeling Skill
+# Character Art Skill — PixelLab Pixel Art Sprites
 
-## Current Pipeline: 3D Skin Modifier Models
+## DEPRECATED: Blender 3D skin-modifier characters (2026-03-29)
 
-Characters are built in Blender using Python scripting with the **skin modifier** technique. The old PixelLab sprite/billboard pipeline is deprecated.
+The 3D procedural approach failed to match the neo-noir pixel art reference style. Characters are now **PixelLab pro-mode pixel art sprites** rendered as camera-facing billboard quads.
 
-### Pipeline
+## Current Pipeline
 
 ```
-tools/blender_build_oyabaun_characters_3d.py (OYABAUN_VARIANT=boss|rival|all)
-Skin modifier skeleton (joints + edges + radii)
-    → Subdivision level 2
-    → Decimate (default ~38% faces kept; OYABAUN_CHAR_DECIMATE)
-    → Assign materials by face center position
-    → Detail meshes (glasses, weapons, neon, tie, hair, lapels, …)
-    → Join → smart UV → export GLB export_yup=True
-    → client/characters/oyabaun_player.glb | oyabaun_rival.glb
+PixelLab: prefer `tools/pixellab_v2.py` (HTTP v2) — Cursor MCP often breaks JSON on `animate_character`
+    → create8 / animate walking (same Bearer as .cursor/mcp.json)
+    → download ZIP → extract
+    → ~/Desktop/oyabaun-characters/tools/build_game_atlas.py
+    → atlas PNG → oyabaun tools/export_character_atlas_to_rgba.py → .rgba
+    → client/characters/<name>_atlas.rgba → include_bytes!()
+    → billboard quads in draw_world() → SHADER_BILL
 ```
 
-### Conventions
+## Active PixelLab Characters (v3 pro)
 
-- Blender Z-up, character front faces -Y
-- Feet at Z=0
-- glTF export flips to Y-up (export_yup=True)
-- `character_model()` in lib.rs adds PI to yaw for the Blender→game facing conversion
-- Materials: Principled BSDF with base color (no textures). Emissive for neon glow.
+- **Boss** `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` — 112×112, walk anim, ✅ in-game (`boss_v3_atlas.rgba`) — **SMG regen** pending (web pro or fixed API)
+- **Rival** `dabe33dd-b9d5-481c-9413-402cd0002747` — 116×116, full 8-dir walk, `rival_v3_atlas.rgba` ✅
+- **SMG rival WIP** `dee01186-8482-431e-ada3-3a00f1101d01` — `create4` Uzi wakashu; finish 8 dirs + walk on PixelLab → replace rival atlas
+- **Player** `fe8d4102-8926-4267-ab1c-4600441cfcf4` — 104×104, rotations only
 
-### Current Characters
+## Character Art Repo
 
-**Boss** (oyabaun_player.glb):
-- Dark suit, broad shoulders, slicked hair
-- Sunglasses, red tie, pistol in right hand
-- Cyan neon accents (lapels, pocket, belt, cuffs)
-- ~1.5k+ verts joined, up to 13 draw materials (under engine budget)
+`~/Desktop/oyabaun-characters/` — reference images, prompts, atlas tools, export pipeline.
 
-**Rival** (oyabaun_rival.glb):
-- White/cream suit, lean athletic build, bleached spiky hair
-- Purple glasses, facial scar, katana in left hand
-- Purple neon accents (lapels, collar, belt, katana edge)
-- ~1.6k verts joined, 11 materials
+## Atlas Format
 
-### Shader
+Binary `.rgba`: `[u32 LE width][u32 LE height][RGBA pixels]`
+Grid: 8 cols (S/SW/W/NW/N/NE/E/SE) × N rows (row 0 = idle, rows 1+ = animation frames)
 
-`SHADER_CHAR_TEX` in `render.rs`:
-- Standard 3D model transform (NOT billboard)
-- Material tint from GLB material base color
-- Directional lighting + cyberpunk ambient
-- Hit flash (anim_frame > 100 encodes flash intensity)
-- Distance fog
-
-### Key Files
+## Key Files
 
 | File | Purpose |
 |------|---------|
-| `client/src/render.rs` | Character shader, pipeline, uniform struct |
-| `client/src/lib.rs` | character_model(), make_character(), NPC render loop |
-| `client/src/gltf_level.rs` | parse_character_glb() — loads GLB |
-| `client/src/npc.rs` | NPC AI, hitboxes, wave spawning |
-| `client/characters/*.glb` | Character model files |
+| `client/src/render.rs` | char_sprite_bg, billboard quad gen, SHADER_BILL |
+| `client/characters/boss_v3_atlas.rgba` | Boss sprite atlas (embedded) |
+| `~/Desktop/oyabaun-characters/` | Art production repo |
 
-### Tooling in repo
+## Key Constraint
 
-- **`tools/blender_build_oyabaun_characters_3d.py`** — canonical regenerator (skin + details + GLB).
-- `tools/blender_make_oyabaun_character.py` — stub; `OYABAUN_LEGACY_SPRITE=1` = old atlas quad only.
-- **`docs/CHARACTER_PIPELINE_HANDOFF.md`** — material tables, `example_images/`, maintenance log.
-
-### DEPRECATED — Do NOT Use
-
-- PixelLab MCP tools for character sprites
-- Billboard/atlas shaders in production
-- Stacked box “procedural” characters (regressed art; not the intended look)
-- Atlas UV selection, ATLAS_ROWS, direction indices (except legacy sprite experiment)
+Characters must be generated WITH weapons visible in sprites. Do not create floating weapon sprites.

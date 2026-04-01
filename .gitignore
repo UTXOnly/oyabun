@@ -8,3 +8,8 @@ relay/oyabaun-relay
 client/levels/tokyo_street.json
 # Local MCP config may contain API keys — copy from mcp.example.json
 .cursor/mcp.json
+tools/_audit_out/
+tools/_pixellab_tmp/
+**/__pycache__/
+*.blend1
+.venv-glb/

@@ -1,0 +1,8 @@
+Regenerate (PixelLab map-object, transparent PNG):
+
+  python3 tools/pixellab_v2.py map-object "…muzzle flash arcade…" client/vfx/muzzle_flash.png
+  python3 tools/pixellab_v2.py map-object "…blood splatter arcade…" client/vfx/blood_overlay.png
+
+shell_brass.png — `tools/gen_fps_assets.py` or map-object.
+
+Game: muzzle = additive HUD at barrel tip; blood = small world billboard on hit (bill pass); shells = HUD alpha.

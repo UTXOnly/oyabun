@@ -1,0 +1,30 @@
+Tokyo alley props (PixelLab map-object unless noted).
+
+Embedded in `client/src/arcade_level.rs` via `include_bytes!`.
+
+| File | Notes |
+|------|--------|
+| vending_machine.png | Shop gap vending |
+| trash_bags.png | Wall cluster + second offset pile |
+| beer_crates.png | Stacked base + `wall_prop_y` second tier |
+| neon_arrow.png | Entrance arrows |
+| noren_curtain.png | Doorway noren |
+| bicycle.png | `wall_prop` + `bike_lean_wing` |
+| lantern_paper.png | Japanese paper chōchin — wall + cross-alley lanterns |
+| r32_side.png | Parked Skyline side panel |
+| r32_front.png | R32 front bumper quad |
+| r32_rear.png | R32 rear bumper quad |
+
+**Parked car in arcade:** `python3 tools/build_arcade_r32_prop.py` reads the three `r32_*.png` files above, writes **`client/props/generated/arcade_r32_{1,2,3}_*.png`** and embeds them in **`client/props/arcade_r32_prop.glb`** (merged into the level). Same via `python3 tools/oyabaunctl.py build-arcade-r32-prop`.
+
+Regenerate (requires token in env or `.cursor/mcp.json`):
+
+- Prompt for **pixel art + thick black outline + opaque / hard edges**; avoid “photorealistic” or props read as photo stickers on boxes.
+- Alley props use **solid tinted shells** on top/sides in code (`SHELL_TRASH` / `SHELL_CRATE` / `SHELL_BIKE` + `IMG_PIPE`); only wall + street faces use the PNG.
+
+```
+python3 tools/pixellab_v2.py map-object --width 96 --height 128 "…chōchin…" client/level_textures/tokyo_props/lantern_paper.png
+python3 tools/pixellab_v2.py map-object --width 200 --height 88 "…R32 side…" client/level_textures/tokyo_props/r32_side.png
+```
+
+Then `wasm-pack build` from `client/`.
