@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-04-01 — Arcade 2.5D: recessed shop pockets; drop façade neon bars
+
+- **`client/src/arcade_level.rs`**: Each shop is a **shallow recess** (dark jambs + floor/ceiling slab) with the **shop PNG on the back wall** (~26 cm inset) so façades read as **3D openings** instead of one flat plane.
+- **Removed** full-width **horizontal pink/blue neon quads** that sat **on top of** shop textures (they dominated as flat cyan/magenta/lime panels). **Gap accents** are now **dim pipe-colored pilasters** instead of bright neon strips.
+- **Vertical kanji signs** use a slightly lower emissive tint so they don’t blow out next to pixel art.
+
 ## 2026-03-31 — Tokyo alley: pixel storefront panels on recess geometry (shop art pipeline)
 
 - **Issue**: Phase 1 `ShopFront_*_recess` volumes were in the `.blend`, but **`client/level_textures/tokyo_shops/shop_*.png` were missing** from the tree, so walls read as anonymous boxes instead of recognizable shops.
