@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-04-01 — M4A1: FPS HUD sprite from m4a13d OBJ; loadout + muzzle tuned
+
+- **Assets**: `tools/blender_m4a1_export_assets.py` + **`oyabaunctl export-m4a1-assets`** decimate `m4a13d/base.obj` → **`client/fpsweapons/m4a1.png`** (512²) and **`client/props/m4a1_prop.glb`** (low-poly prop).
+- **Client**: `index.html` uploads **m4a1.png** to **all four** weapon slots; **`loadout.rs`** names/ammo are M4A1 variants (30-round); **`render.rs`** muzzle flash UV uses one rifle sprite; **`npc.rs`** damage table adjusted for rifle slots; HUD shell eject offsets updated in **`lib.rs`**.
+- **Third person**: Skinned characters still use the **rifle baked into** `yakuza_shooter.glb`; swap to this M4 mesh by parenting `m4a1_prop.glb` in Blender (see `client/fpsweapons/EXPORT.txt`).
+
 ## 2026-04-01 — Arcade 2.5D: recessed shop pockets; drop façade neon bars
 
 - **`client/src/arcade_level.rs`**: Each shop is a **shallow recess** (dark jambs + floor/ceiling slab) with the **shop PNG on the back wall** (~26 cm inset) so façades read as **3D openings** instead of one flat plane.

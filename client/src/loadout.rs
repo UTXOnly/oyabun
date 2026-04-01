@@ -5,20 +5,20 @@ pub struct WeaponDef {
 
 pub const WEAPONS: [WeaponDef; 4] = [
     WeaponDef {
-        name: "M9",
-        max_clip: 12,
+        name: "M4A1",
+        max_clip: 30,
     },
     WeaponDef {
-        name: "Pump",
-        max_clip: 8,
+        name: "M4A1 CQC",
+        max_clip: 30,
     },
     WeaponDef {
-        name: "SMG",
-        max_clip: 32,
+        name: "M4A1 ACOG",
+        max_clip: 30,
     },
     WeaponDef {
-        name: "Plasma",
-        max_clip: 50,
+        name: "M4A1 GL",
+        max_clip: 30,
     },
 ];
 
@@ -38,8 +38,8 @@ pub struct Loadout {
 impl Loadout {
     pub fn new() -> Self {
         Self {
-            clips: [12, 8, 32, 50],
-            reserves: [100, 40, 200, 150],
+            clips: [30, 30, 30, 30],
+            reserves: [210, 210, 210, 120],
             current: 0,
             muzzle_flash: 0.0,
             recoil: 0.0,

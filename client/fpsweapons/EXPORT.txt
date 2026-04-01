@@ -1,15 +1,21 @@
-Baked weapon HUD sprites (512×512 RGBA PNG) come from:
-  ~/Downloads/fpsweapons/sprites/
+FPS HUD weapon quad (512×512 RGBA, transparent background)
 
-Mapping into this folder:
-  pistol.png   ← m9_pistol.png
-  shotgun.png  ← mossberg_500.png
-  smg.png      ← scar.png
-  plasma.png   ← maglite.png   (stand-in “exotic” slot; swap for another sprite if you prefer)
+Active art: **m4a1.png** — rendered from **`m4a13d/base.obj`** via Blender (decimated mesh).
 
-arms.png — first-person arms overlay (same source folder); drawn above the weapon quad in the HUD.
+Regenerate after changing the source model:
 
-Also in Downloads/sprites (not wired to slots yet): usp.png, m4_carbine.png, m9_bayonet.png —
-copy/rename over the four weapon files above to change loadout art.
+  python3 tools/oyabaunctl.py export-m4a1-assets
 
-Original FPSWeapons pack: CC BY-SA 3.0 — see LICENSE.txt.
+Or:
+
+  OYABAUN_M4_OBJ=/path/to/model.obj blender --background --python tools/blender_m4a1_export_assets.py
+
+`index.html` uploads **the same m4a1.png** into all **four** weapon bind groups (loadout variants share the sprite).
+
+**arms.png** — first-person gloves/arms overlay; drawn above the weapon quad.
+
+### Third-person (skinned NPCs / yakuza_shooter.glb)
+
+The rifle in third-person is **baked into the character glTF** (Mixamo mesh + `firing_rifle` / `rifle_run` clips). To show this exact **M4A1** mesh in NPC hands, parent the exported **`client/props/m4a1_prop.glb`** (or the OBJ in Blender) to the **hand bone** in Blender and re-export **`client/characters/yakuza_shooter.glb`** — the WASM client does not re-rig arbitrary OBJs at runtime.
+
+Legacy note: older `pistol.png` / `shotgun.png` / … mappings are removed; see git history if you need them.

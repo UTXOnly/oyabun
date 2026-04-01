@@ -65,19 +65,15 @@ fn push_hud_shell(shells: &mut Vec<HudShell>, s: HudShell) {
 
 /// Brass eject in HUD weapon space (matches `vs_hud` before clip).
 fn spawn_hud_shells_for_weapon(wi: usize, shells: &mut Vec<HudShell>) {
+    // M4A1-family brass (same sprite for all slots; slight variation by loadout).
     match wi {
-        0 => push_hud_shell(
-            shells,
-            HudShell::new(0.38, -0.64, 0.46, 0.52, 15.0),
-        ),
-        1 => {
-            push_hud_shell(shells, HudShell::new(0.36, -0.58, 0.40, 0.50, 11.0));
-            push_hud_shell(shells, HudShell::new(0.34, -0.62, 0.36, 0.46, -9.0));
+        0 => push_hud_shell(shells, HudShell::new(0.40, -0.62, 0.44, 0.48, 14.0)),
+        1 => push_hud_shell(shells, HudShell::new(0.38, -0.60, 0.42, 0.50, 12.0)),
+        2 => {
+            push_hud_shell(shells, HudShell::new(0.42, -0.64, 0.46, 0.46, 16.0));
+            push_hud_shell(shells, HudShell::new(0.36, -0.66, 0.40, 0.44, -11.0));
         }
-        2 => push_hud_shell(
-            shells,
-            HudShell::new(0.42, -0.66, 0.52, 0.42, 24.0),
-        ),
+        3 => push_hud_shell(shells, HudShell::new(0.39, -0.63, 0.41, 0.47, 13.0)),
         _ => {}
     }
 }

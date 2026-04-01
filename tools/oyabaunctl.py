@@ -276,6 +276,21 @@ def cmd_apply_tokyo_shop_textures(ns: argparse.Namespace) -> None:
     )
 
 
+def cmd_export_m4a1_assets(ns: argparse.Namespace) -> None:
+    """Decimate m4a13d/base.obj → client/fpsweapons/m4a1.png + client/props/m4a1_prop.glb (Blender)."""
+    script = ROOT / "tools" / "blender_m4a1_export_assets.py"
+    if not script.is_file():
+        sys.stderr.write(f"export-m4a1-assets: missing {script}\n")
+        sys.exit(1)
+    exe = _resolve_blender_executable(ns)
+    env = os.environ.copy()
+    if ns.obj:
+        env["OYABAUN_M4_OBJ"] = str(Path(ns.obj).expanduser().resolve())
+    print("export-m4a1-assets: Blender → m4a1.png + m4a1_prop.glb", flush=True)
+    subprocess.run([exe, "--background", "--python", str(script)], cwd=ROOT, env=env, check=True)
+    print("export-m4a1-assets: done (hard refresh browser to reload HUD texture)", flush=True)
+
+
 def cmd_gen_tokyo_shop_placeholders(ns: argparse.Namespace) -> None:
     """Run tools/gen_tokyo_shop_placeholder_pngs.py (Pillow)."""
     script = ROOT / "tools" / "gen_tokyo_shop_placeholder_pngs.py"
@@ -719,6 +734,18 @@ def main() -> None:
         help="run export-world with enhance+repack after (same as rebuild-level content-wise)",
     )
     sp.set_defaults(func=cmd_redesign_tokyo_phase1, export_after=False)
+
+    sp = sub.add_parser(
+        "export-m4a1-assets",
+        help="import m4a13d/base.obj, decimate, write client/fpsweapons/m4a1.png + client/props/m4a1_prop.glb",
+    )
+    sp.add_argument(
+        "--obj",
+        default=None,
+        help="override OBJ path (default: m4a13d/base.obj)",
+    )
+    sp.add_argument("--blender", default=None, help="Blender executable (default: $BLENDER or PATH)")
+    sp.set_defaults(func=cmd_export_m4a1_assets)
 
     sp = sub.add_parser(
         "gen-tokyo-shop-placeholders",

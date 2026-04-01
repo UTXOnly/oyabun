@@ -50,3 +50,7 @@ description: >-
 - After changing the GLB, run **`wasm-pack build --target web`** from `client/`.
 - The billboard pass in `render.rs` is for **murals** and **blood splats**, not NPCs.
 - Optional PixelLab / `.rgba` atlases are for **HUD/VFX/props** only if you add them — not the NPC body path.
+
+## FPS M4A1
+
+- HUD weapon quads load **`client/fpsweapons/m4a1.png`** for all four slots (`index.html`). Regenerate from **`m4a13d/base.obj`** with **`python3 tools/oyabaunctl.py export-m4a1-assets`** (writes `m4a1_prop.glb` too). Third-person rifle is still the mesh **inside** `yakuza_shooter.glb` until you parent the M4 in Blender and re-export the character.

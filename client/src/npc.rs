@@ -21,8 +21,8 @@ fn smooth_turn(current: f32, target: f32, max_delta: f32) -> f32 {
     }
 }
 
-/// Per-weapon damage table shared by all NPCs.
-const DAMAGE: [f32; 4] = [24.0, 42.0, 16.0, 30.0];
+/// Per-weapon damage table shared by all NPCs (M4A1-family loadout slots).
+const DAMAGE: [f32; 4] = [28.0, 28.0, 26.0, 32.0];
 
 /// NPC movement speeds.
 const NPC_WALK_SPEED: f32 = 1.8;

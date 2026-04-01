@@ -13,3 +13,5 @@ tools/_pixellab_tmp/
 **/__pycache__/
 *.blend1
 .venv-glb/
+# Huge high-poly weapon source; regenerate PNG/GLB with export-m4a1-assets
+m4a13d/*.obj
