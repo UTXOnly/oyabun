@@ -864,7 +864,8 @@ pub fn weapon_fps_world_model(game: &crate::game::GameState) -> Mat4 {
 /// Barrel is along **+Z** in the prop mesh (confirmed by vertex extent).
 /// Mixamo `RightHand` during `rifle_aiming_idle`: +Y ≈ aim forward, +X ≈ up.
 /// Rotate so prop +Z→hand +Y (aim), prop +Y→hand +X (up), prop +X→hand +Z,
-/// then pitch barrel down ~12° to compensate for the hand's upward tilt in the anim.
+/// then pitch barrel down ~14° to compensate for the hand's upward tilt in the anim.
+/// In hand space rotation_z(+angle) tilts +Y toward −X (barrel down).
 fn weapon_hand_to_prop_transform() -> Mat4 {
     let scale = Mat4::from_scale(Vec3::splat(0.38));
     let barrel_align = Mat4::from_cols(
@@ -873,8 +874,8 @@ fn weapon_hand_to_prop_transform() -> Mat4 {
         Vec4::new(0.0, 1.0, 0.0, 0.0), // prop +Z → hand +Y (aim)
         Vec4::new(0.0, 0.0, 0.0, 1.0),
     );
-    let pitch_down = Mat4::from_quat(Quat::from_rotation_z(-0.21));
-    Mat4::from_translation(Vec3::new(0.0, 0.02, 0.0)) * pitch_down * barrel_align * scale
+    let pitch_down = Mat4::from_quat(Quat::from_rotation_z(0.24));
+    Mat4::from_translation(Vec3::new(-0.05, 0.12, 0.0)) * pitch_down * barrel_align * scale
 }
 
 struct WeaponAttachPass<'a> {
