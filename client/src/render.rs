@@ -812,6 +812,8 @@ struct CharacterDraw {
     char_uniform_stride: u32,
     /// Optional second rigid pipeline (depth write off) for first-person view-model draw.
     fps_view_pipeline: Option<wgpu::RenderPipeline>,
+    /// Rigid pipeline with polygon depth bias so props parented to skinned bodies win depth over the torso.
+    world_attach_pipeline: Option<wgpu::RenderPipeline>,
     #[allow(dead_code)]
     _textures: Vec<wgpu::Texture>,
     #[allow(dead_code)]
@@ -832,27 +834,19 @@ impl CharacterDraw {
 }
 
 /// Local transform for `m4a1_prop.glb` in first-person view space (+X right, +Y up, −Z forward).
-/// Export mesh is Y-up with length along +Y; camera looks down −Z, so we rotate −90° about X first.
+/// The exported prop is long along **−Z** (muzzle toward −Z), same as camera forward after `inverse(view)` — do not apply an X-flip (that sent the barrel up the screen).
 pub fn weapon_fps_view_local_transform() -> Mat4 {
-    use std::f32::consts::FRAC_PI_2;
-    let scale = Mat4::from_scale(Vec3::splat(0.52));
-    let rot = Mat4::from_quat(
-        Quat::from_rotation_x(-FRAC_PI_2)
-            * Quat::from_rotation_y(-FRAC_PI_2 * 0.12)
-            * Quat::from_rotation_z(FRAC_PI_2 * 0.06),
+    let scale = Mat4::from_scale(Vec3::splat(0.5));
+    let tilt = Mat4::from_quat(
+        Quat::from_rotation_x(0.05) * Quat::from_rotation_y(-0.06) * Quat::from_rotation_z(0.02),
     );
-    Mat4::from_translation(Vec3::new(0.22, -0.20, -0.56)) * rot * scale
+    Mat4::from_translation(Vec3::new(0.2, -0.22, -0.52)) * tilt * scale
 }
 
+/// Maps prop mesh space (muzzle −Z) into Mixamo `RightHand` bone space (same −Z aim axis; no extra barrel-axis Euler).
 fn weapon_hand_to_prop_transform() -> Mat4 {
-    use std::f32::consts::FRAC_PI_2;
-    let scale = Mat4::from_scale(Vec3::splat(0.44));
-    let rot = Mat4::from_quat(
-        Quat::from_rotation_x(-FRAC_PI_2 * 0.9)
-            * Quat::from_rotation_y(-FRAC_PI_2 * 0.85)
-            * Quat::from_rotation_z(FRAC_PI_2 * 0.1),
-    );
-    Mat4::from_translation(Vec3::new(0.03, 0.09, 0.0)) * rot * scale
+    let scale = Mat4::from_scale(Vec3::splat(0.42));
+    Mat4::from_translation(Vec3::new(0.0, 0.06, 0.0)) * scale
 }
 
 struct WeaponAttachPass<'a> {
@@ -1022,10 +1016,15 @@ fn draw_character_instances_3d(
                         );
                         queue.write_buffer(&wa.weapon_cd.char_uniform, 0, bytes.as_slice());
                         if let CharacterGeometry::Rigid { pipeline, .. } = &wa.weapon_cd.geometry {
+                            let pipe = wa
+                                .weapon_cd
+                                .world_attach_pipeline
+                                .as_ref()
+                                .unwrap_or(pipeline);
                             draw_rigid_character_batch_with_pipeline(
                                 pass,
                                 wa.weapon_cd,
-                                pipeline,
+                                pipe,
                                 attached.len(),
                             );
                         }
@@ -2048,6 +2047,50 @@ impl Gpu {
             None
         };
 
+        let world_attach_pipeline = if with_fps_view_pipeline {
+            Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("char-tex-rigid-attach-bias"),
+                layout: Some(&char_pl),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_char"),
+                    buffers: &[CharacterVertex::desc()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_char"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth24Plus,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState {
+                        constant: -16,
+                        slope_scale: -3.0,
+                        clamp: 0.0,
+                    },
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            }))
+        } else {
+            None
+        };
+
         let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vb-char"),
             contents: bytemuck::cast_slice(&cpu.vertices),
@@ -2191,6 +2234,7 @@ impl Gpu {
             char_globals_bg,
             char_uniform_stride,
             fps_view_pipeline,
+            world_attach_pipeline,
             _textures: textures,
             _tint_buffers: tint_buffers,
         })
@@ -2540,6 +2584,7 @@ impl Gpu {
             char_globals_bg,
             char_uniform_stride,
             fps_view_pipeline: None,
+            world_attach_pipeline: None,
             _textures: textures,
             _tint_buffers: tint_buffers,
         })
