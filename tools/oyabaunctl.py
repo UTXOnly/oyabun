@@ -276,6 +276,20 @@ def cmd_apply_tokyo_shop_textures(ns: argparse.Namespace) -> None:
     )
 
 
+def cmd_gen_tokyo_shop_placeholders(ns: argparse.Namespace) -> None:
+    """Run tools/gen_tokyo_shop_placeholder_pngs.py (Pillow)."""
+    script = ROOT / "tools" / "gen_tokyo_shop_placeholder_pngs.py"
+    if not script.is_file():
+        sys.stderr.write(f"gen-tokyo-shop-placeholders: missing {script}\n")
+        sys.exit(1)
+    print("gen-tokyo-shop-placeholders: writing client/level_textures/tokyo_shops/*.png", flush=True)
+    subprocess.run([sys.executable, str(script)], cwd=ROOT, check=True)
+    print(
+        "gen-tokyo-shop-placeholders: done (then apply-tokyo-shop-textures, export-world --force-all)",
+        flush=True,
+    )
+
+
 def cmd_redesign_tokyo_phase1(ns: argparse.Namespace) -> None:
     """Run tools/blender_redesign_tokyo_alley_phase1.py (shop recess + awnings + blade signs)."""
     blend = Path(ns.blend).expanduser().resolve() if ns.blend else _default_tokyo_blend()
@@ -705,6 +719,12 @@ def main() -> None:
         help="run export-world with enhance+repack after (same as rebuild-level content-wise)",
     )
     sp.set_defaults(func=cmd_redesign_tokyo_phase1, export_after=False)
+
+    sp = sub.add_parser(
+        "gen-tokyo-shop-placeholders",
+        help="write chunky pixel-art placeholder shop_*.png (Pillow); replace later with PixelLab per EXPORT.txt",
+    )
+    sp.set_defaults(func=cmd_gen_tokyo_shop_placeholders)
 
     sp = sub.add_parser(
         "apply-tokyo-shop-textures",

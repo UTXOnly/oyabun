@@ -1,5 +1,9 @@
 PixelLab map-object batch (side-view alley storefronts, 320×384, transparent PNG).
 
+Quick local placeholders (chunky pixel, replace with PixelLab when ready):
+
+  python3 tools/oyabaunctl.py gen-tokyo-shop-placeholders
+
 Files:
   shop_ramen.png, shop_pachinko.png, shop_konbini.png, shop_shuttered.png
   shop_izakaya.png, shop_arcade.png, shop_snackbar.png, shop_tattoo.png

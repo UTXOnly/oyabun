@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-03-31 — Tokyo alley: pixel storefront panels on recess geometry (shop art pipeline)
+
+- **Issue**: Phase 1 `ShopFront_*_recess` volumes were in the `.blend`, but **`client/level_textures/tokyo_shops/shop_*.png` were missing** from the tree, so walls read as anonymous boxes instead of recognizable shops.
+- **Placeholders**: `tools/gen_tokyo_shop_placeholder_pngs.py` writes eight **320×384** chunky pixel-art-style PNGs (ramen, pachinko, konbini, shuttered, izakaya, arcade, snackbar, tattoo). **`oyabaunctl gen-tokyo-shop-placeholders`** wraps it. Replace with **PixelLab map-object** exports when you want final art (`EXPORT.txt`).
+- **Shipped**: Ran **`apply-tokyo-shop-textures`** (28 `ShopFront_*_ShopTex` panels), **`export-world --force-all`**, refreshed **`tokyo_alley.glb`** / **`tokyo_street.json`**, **`wasm-pack build`**. Geometry stays the existing redesign (recesses, awnings, blades); **readability** now comes from **side-view façade textures** on the back wall of each recess (nearest sampling in Blender → game).
+
+## 2026-03-31 — Characters: skinned glTF only (NPC sprite billboards removed)
+
+- **Client**: Boss, rival, and remote players use **`yakuza_shooter.glb`** only. Removed embedded **`boss_v3_atlas` / `rival_v3_atlas`** and all **NPC-facing sprite quads** from the billboard pass. **Murals** and **blood splats** still use `SHADER_BILL`.
+- **Boot**: `character_rival_level` is **`None`**; rival instances share the primary `CharacterDraw`. Hit flash on 3D uses **`char_params.w`** (`100+h`) in `fs_char`.
+
 ## 2026-03-29 — Arcade parked vehicle: merge real glTF mesh (drop R32 PNG quads)
 
 - **Different method**: Pixel art on quads cannot read as a solid car; the arcade slot now **`include_bytes!` merges** `client/props/arcade_parked_car_blockout.glb` after procedural geometry via **`gltf_level::append_glb_transform`** (rebases image indices, applies `Mat4` placement).

@@ -17,7 +17,7 @@ You have access to the **Blender MCP server**. Use it to inspect, modify, and re
 | **Phase 1 — Shop depth** | **Done** | 84 objects: recessed doorways, awnings, blade signs per building segment |
 | **Phase 2 — Shop identities** | **Done** | 120 objects: 8 shop types (ramen, pachinko, yakuza, konbini, tattoo, izakaya, shuttered, arcade) + bars, pharmacy, bookshop, noodle |
 | **Phase 3 — Ground / overhead** | **Done** | 145 objects: drain channels, manholes, puddles, debris, cables, AC units, pipes, fire escape |
-| Phase 4 — Signage refinement | TODO | Replace flat quads with shaped neon tubes, katakana textures, backlit boxes |
+| Phase 4 — Signage refinement | **Partial** | Kanji/sign plates in blend; shop **façade art** now via `ShopFront_*_ShopTex` + `tokyo_shops/*.png` (placeholders in repo — swap for PixelLab). Shaped neon tubes / more backlit boxes still TODO |
 | Phase 5 — Lighting polish | **Partial** | Shader has cyberpunk ambient + neon spill + posterize + fog. Emissive materials placed. Could add more contrast zones. |
 | **Phase 6 — Export / test** | **Done** | GLB: 3.6 MB, 28.7k tris, 92 textures. In-game verified. |
 
@@ -46,7 +46,9 @@ This is NOT photorealism. Think **Streets of Rage**, **Yakuza (PS2 era)**, **Fin
 
 ### 1. Shop Fronts (HIGHEST PRIORITY)
 
-**PixelLab texture pack (repo):** `client/level_textures/tokyo_shops/` — eight **side-view** 320×384 PNG storefronts. **Pipeline:** `apply-tokyo-shop-textures` → `export-world --enhance`. If awnings ever used trim/brick materials, run **`fix-tokyo-shopfront-materials`** then **`export-world --force-all`** to repack procedural albedos (see `blender_enhance_tokyo_alley.py`). Details in `client/level_textures/tokyo_shops/EXPORT.txt`.
+**Pixel art façade pack (repo):** `client/level_textures/tokyo_shops/` — eight **side-view** 320×384 PNG storefronts. **Bootstrap placeholders:** `python3 tools/oyabaunctl.py gen-tokyo-shop-placeholders` (Pillow). **Pipeline:** `apply-tokyo-shop-textures` → `export-world --force-all` (or `--enhance` after material fixes). If awnings pick up wrong materials, run **`fix-tokyo-shopfront-materials`** then **`export-world --force-all`**. Details in `client/level_textures/tokyo_shops/EXPORT.txt`.
+
+**“Shapes only” vs “real shops”:** Recess + awning **geometry** (phase 1) gives depth; **recognizable storefronts** need these PNGs (or better PixelLab art) on the recess **back wall** panels — the game samples them **nearest** like the rest of the level. Restoring an older `.blend` is optional if you prefer less modular geo; the current file is the intended base **once textures are applied**.
 
 The alley walls need to become actual **storefronts** — not just flat surfaces with sign textures. Each shop should have:
 
