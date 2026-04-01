@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3, Vec4};
 use serde::Serialize;
 
 use crate::mesh::Aabb;
@@ -833,20 +833,41 @@ impl CharacterDraw {
     }
 }
 
-/// Local transform for `m4a1_prop.glb` in first-person view space (+X right, +Y up, −Z forward).
-/// The exported prop is long along **−Z** (muzzle toward −Z), same as camera forward after `inverse(view)` — do not apply an X-flip (that sent the barrel up the screen).
-pub fn weapon_fps_view_local_transform() -> Mat4 {
-    let scale = Mat4::from_scale(Vec3::splat(0.5));
-    let tilt = Mat4::from_quat(
-        Quat::from_rotation_x(0.05) * Quat::from_rotation_y(-0.06) * Quat::from_rotation_z(0.02),
+/// World matrix for the FPS M4: **do not** use `inverse(view) * local` — glam `look_at_rh` + GPU row/column
+/// conventions mis-aligned the bore (barrel shot up the screen). Build an explicit camera basis instead.
+/// Prop mesh bore is along **−Z**; we map +Z column to **−forward** so **−Z → +forward** (down the sight).
+pub fn weapon_fps_world_model(game: &crate::game::GameState) -> Mat4 {
+    let eye = game.eye_pos();
+    let forward = game.view_forward();
+    let mut right = forward.cross(Vec3::Y);
+    if right.length_squared() < 1e-8 {
+        right = Vec3::new(1.0, 0.0, 0.0);
+    } else {
+        right = right.normalize();
+    }
+    let up = right.cross(forward).normalize();
+    let rot = Mat4::from_cols(
+        right.extend(0.0),
+        up.extend(0.0),
+        (-forward).extend(0.0),
+        Vec4::new(0.0, 0.0, 0.0, 1.0),
     );
-    Mat4::from_translation(Vec3::new(0.2, -0.22, -0.52)) * tilt * scale
+    let scale = Mat4::from_scale(Vec3::splat(0.46));
+    // Offsets in camera-local axes (right / up / forward into the world).
+    let local = Mat4::from_translation(Vec3::new(0.12, -0.14, -0.44));
+    let tilt = Mat4::from_quat(
+        Quat::from_rotation_x(0.04) * Quat::from_rotation_y(-0.03) * Quat::from_rotation_z(0.02),
+    );
+    Mat4::from_translation(eye) * rot * local * tilt * scale
 }
 
-/// Maps prop mesh space (muzzle −Z) into Mixamo `RightHand` bone space (same −Z aim axis; no extra barrel-axis Euler).
+/// Prop **−Z** = muzzle. Mixamo `RightHand` local **+Y** is roughly along the palm / forearm exit; rotate +90° X
+/// maps mesh −Z into +Y so the rifle lays along the grip axis, then nudge toward the palm.
 fn weapon_hand_to_prop_transform() -> Mat4 {
+    use std::f32::consts::FRAC_PI_2;
     let scale = Mat4::from_scale(Vec3::splat(0.42));
-    Mat4::from_translation(Vec3::new(0.0, 0.06, 0.0)) * scale
+    let align = Mat4::from_quat(Quat::from_rotation_x(FRAC_PI_2));
+    Mat4::from_translation(Vec3::new(0.0, 0.1, 0.02)) * align * scale
 }
 
 struct WeaponAttachPass<'a> {
@@ -2078,9 +2099,9 @@ impl Gpu {
                     depth_compare: wgpu::CompareFunction::Less,
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState {
-                        constant: -16,
-                        slope_scale: -3.0,
-                        clamp: 0.0,
+                        constant: -40,
+                        slope_scale: -6.0,
+                        clamp: -1.0,
                     },
                 }),
                 multisample: wgpu::MultisampleState::default(),

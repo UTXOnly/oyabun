@@ -20,7 +20,7 @@ use input::InputState;
 use loadout::{Loadout, WEAPONS};
 use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
 use net::NetController;
-use render::{weapon_fps_view_local_transform, WeaponHudParams};
+use render::{weapon_fps_world_model, WeaponHudParams};
 pub use render::{BloodSplat, CharacterInstance, CharacterSkin, Gpu, HudShell, Vertex};
 
 use serde_json::json;
@@ -792,8 +792,7 @@ impl OyabaunApp {
             // (those were billboard sprites; 3D models clip into the camera)
         }
         let fps_weapon_model = if self.gpu.weapon_prop_loaded() {
-            let inv = self.game.view_matrix().inverse();
-            Some(inv * weapon_fps_view_local_transform())
+            Some(weapon_fps_world_model(&self.game))
         } else {
             None
         };
