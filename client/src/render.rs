@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 use serde::Serialize;
@@ -873,8 +875,9 @@ enum CharacterGeometry {
         pipeline: wgpu::RenderPipeline,
         vb: wgpu::Buffer,
         ib: wgpu::Buffer,
-        _bone_buffer: wgpu::Buffer,
+        bone_buffer: wgpu::Buffer,
         bone_bind_group: wgpu::BindGroup,
+        skinned_cpu: Arc<crate::gltf_level::SkinnedCharacterMeshCpu>,
     },
 }
 
@@ -896,6 +899,87 @@ struct CharacterDraw {
 impl CharacterDraw {
     fn is_skinned(&self) -> bool {
         matches!(self.geometry, CharacterGeometry::Skinned { .. })
+    }
+
+    fn skinned_cpu_ref(&self) -> Option<&Arc<crate::gltf_level::SkinnedCharacterMeshCpu>> {
+        match &self.geometry {
+            CharacterGeometry::Skinned { skinned_cpu, .. } => Some(skinned_cpu),
+            _ => None,
+        }
+    }
+}
+
+fn draw_character_instances_3d(
+    queue: &wgpu::Queue,
+    pass: &mut wgpu::RenderPass<'_>,
+    list: &[&CharacterInstance],
+    cd: &CharacterDraw,
+    skinned_locals_scratch: &mut Vec<Mat4>,
+    skinned_bone_flat: &mut [f32],
+) {
+    use crate::gltf_level::{compute_skinned_joint_palette, CHARACTER_MAX_JOINTS};
+    let stride = cd.char_uniform_stride;
+    match &cd.geometry {
+        CharacterGeometry::Rigid { pipeline, vb, ib } => {
+            pass.set_pipeline(pipeline);
+            pass.set_vertex_buffer(0, vb.slice(..));
+            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+            for i in 0..list.len() {
+                pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                for b in &cd.batches {
+                    pass.set_bind_group(1, &b.bind_group, &[]);
+                    let end = b.first_index.saturating_add(b.index_count);
+                    pass.draw_indexed(b.first_index..end, 0, 0..1);
+                }
+            }
+        }
+        CharacterGeometry::Skinned {
+            pipeline,
+            vb,
+            ib,
+            bone_buffer,
+            bone_bind_group,
+            skinned_cpu,
+        } => {
+            let node_n = skinned_cpu.node_parent.len();
+            if skinned_locals_scratch.len() < node_n {
+                skinned_locals_scratch.resize(node_n, Mat4::IDENTITY);
+            }
+            pass.set_pipeline(pipeline);
+            pass.set_vertex_buffer(0, vb.slice(..));
+            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+            pass.set_bind_group(2, bone_bind_group, &[]);
+            let mut palette = [Mat4::IDENTITY; CHARACTER_MAX_JOINTS];
+            for i in 0..list.len() {
+                let inst = *list[i];
+                compute_skinned_joint_palette(
+                    skinned_cpu.as_ref(),
+                    inst.skinned_clip as usize,
+                    inst.skinned_anim_time,
+                    &mut skinned_locals_scratch[..node_n],
+                    &mut palette,
+                );
+                for mi in 0..CHARACTER_MAX_JOINTS {
+                    let cols = palette[mi].to_cols_array_2d();
+                    for ci in 0..4 {
+                        for ri in 0..4 {
+                            skinned_bone_flat[mi * 16 + ci * 4 + ri] = cols[ci][ri];
+                        }
+                    }
+                }
+                queue.write_buffer(
+                    bone_buffer,
+                    0,
+                    bytemuck::cast_slice(&skinned_bone_flat[..CHARACTER_MAX_JOINTS * 16]),
+                );
+                pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                for b in &cd.batches {
+                    pass.set_bind_group(1, &b.bind_group, &[]);
+                    let end = b.first_index.saturating_add(b.index_count);
+                    pass.draw_indexed(b.first_index..end, 0, 0..1);
+                }
+            }
+        }
     }
 }
 
@@ -952,6 +1036,7 @@ pub enum CharacterSkin {
     Remote,
 }
 
+#[derive(Clone, Copy)]
 pub struct CharacterInstance {
     pub model: Mat4,
     pub mesh_yaw: f32,
@@ -960,6 +1045,10 @@ pub struct CharacterInstance {
     pub anim_frame: f32,
     /// Sprite billboard RGBA multiplier (injury, hit flash, corpse); `[1,1,1,1]` for remotes / default.
     pub bill_tint: [f32; 4],
+    /// Skinned glTF: clip index in `SkinnedCharacterMeshCpu::clips` (ignored for billboards / rigid).
+    pub skinned_clip: u32,
+    /// Skinned glTF: local time within clip (seconds).
+    pub skinned_anim_time: f32,
 }
 
 pub struct Gpu {
@@ -1023,6 +1112,9 @@ pub struct Gpu {
     diag_last_surface_error: String,
     diag_frames_submitted: u64,
     diag_frames_skipped_swapchain: u64,
+    skinned_locals_scratch: Vec<Mat4>,
+    skinned_bone_flat: Vec<f32>,
+    pub skinned_anim_ids: Option<crate::gltf_level::SkinnedAnimClipIds>,
 }
 
 impl Gpu {
@@ -1577,7 +1669,8 @@ impl Gpu {
                             warn_str(&format!("oyabaun: {label} (skinned) has no drawable geometry"));
                             return None;
                         }
-                        match Self::raster_skinned_character_gltf(&device, &queue, format, c) {
+                        let arc = Arc::new(c);
+                        match Self::raster_skinned_character_gltf(&device, &queue, format, arc) {
                             Ok(cd) => Some(cd),
                             Err(e) => {
                                 #[cfg(target_arch = "wasm32")]
@@ -1599,6 +1692,18 @@ impl Gpu {
 
         let character_rival =
             character_rival_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_rival.glb"));
+
+        let mut skinned_locals_scratch = Vec::new();
+        let skinned_anim_ids = character.as_ref().and_then(|cd| {
+            cd.skinned_cpu_ref().map(|arc| {
+                skinned_locals_scratch.resize(arc.node_parent.len(), Mat4::IDENTITY);
+                crate::gltf_level::resolve_skinned_clip_indices(&arc.clips)
+            })
+        });
+        let skinned_bone_flat = vec![
+            0.0_f32;
+            crate::gltf_level::CHARACTER_MAX_JOINTS * 16
+        ];
 
         const BOSS_ATLAS_RGBA: &[u8] = include_bytes!("../characters/boss_v3_atlas.rgba");
         const RIVAL_ATLAS_RGBA: &[u8] = include_bytes!("../characters/rival_v3_atlas.rgba");
@@ -1677,7 +1782,18 @@ impl Gpu {
             diag_last_surface_error: String::new(),
             diag_frames_submitted: 0,
             diag_frames_skipped_swapchain: 0,
+            skinned_locals_scratch,
+            skinned_bone_flat,
+            skinned_anim_ids,
         })
+    }
+
+    pub fn skinned_character_active(&self) -> bool {
+        self.character.as_ref().is_some_and(CharacterDraw::is_skinned)
+    }
+
+    pub fn skinned_anim_ids(&self) -> Option<&crate::gltf_level::SkinnedAnimClipIds> {
+        self.skinned_anim_ids.as_ref()
     }
 
     pub fn render_diag(&self) -> GpuRenderDiag {
@@ -1999,9 +2115,11 @@ impl Gpu {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-        cpu: crate::gltf_level::SkinnedCharacterMeshCpu,
+        arc: Arc<crate::gltf_level::SkinnedCharacterMeshCpu>,
     ) -> Result<CharacterDraw, wasm_bindgen::JsValue> {
-        use crate::gltf_level::{SkinnedCharacterVertex, CHARACTER_MAX_JOINTS};
+        use crate::gltf_level::{compute_skinned_joint_palette, SkinnedCharacterVertex, CHARACTER_MAX_JOINTS};
+
+        let cpu = arc.as_ref();
 
         let char_struct_size = std::mem::size_of::<CharUniforms>();
         let align = device.limits().min_uniform_buffer_offset_alignment as usize;
@@ -2153,8 +2271,18 @@ impl Gpu {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let clip_ids = crate::gltf_level::resolve_skinned_clip_indices(&cpu.clips);
+        let mut loc = vec![Mat4::IDENTITY; cpu.node_parent.len()];
+        let mut pal = [Mat4::IDENTITY; CHARACTER_MAX_JOINTS];
+        compute_skinned_joint_palette(
+            cpu,
+            clip_ids.idle as usize,
+            0.0,
+            &mut loc,
+            &mut pal,
+        );
         let mut bone_f32 = vec![0.0_f32; CHARACTER_MAX_JOINTS * 16];
-        for (mi, mat) in cpu.rest_joint_palette.iter().enumerate() {
+        for (mi, mat) in pal.iter().enumerate() {
             let cols = mat.to_cols_array_2d();
             for ci in 0..4 {
                 for ri in 0..4 {
@@ -2315,8 +2443,9 @@ impl Gpu {
                 pipeline,
                 vb,
                 ib,
-                _bone_buffer: bone_buffer,
+                bone_buffer,
                 bone_bind_group,
+                skinned_cpu: arc,
             },
             mesh_node_world,
             batches,
@@ -3366,30 +3495,30 @@ impl Gpu {
         let split_char_passes =
             char_share_buffer && !boss_like.is_empty() && !rivals.is_empty();
 
-        let write_boss_uniforms = || {
-            if let Some(cd) = self.character.as_ref() {
+        let write_boss_uniforms = |gpu: &Gpu| {
+            if let Some(cd) = gpu.character.as_ref() {
                 if !boss_like.is_empty() {
                     let bytes = fill_char_uniforms(&boss_like, cd);
-                    self.queue.write_buffer(&cd.char_uniform, 0, bytes.as_slice());
+                    gpu.queue.write_buffer(&cd.char_uniform, 0, bytes.as_slice());
                 }
             }
         };
-        let write_rival_uniforms = || {
+        let write_rival_uniforms = |gpu: &Gpu| {
             if !rivals.is_empty() {
-                if let Some(cd) = self.character_rival.as_ref().or(self.character.as_ref()) {
+                if let Some(cd) = gpu.character_rival.as_ref().or(gpu.character.as_ref()) {
                     let bytes = fill_char_uniforms(&rivals, cd);
-                    self.queue.write_buffer(&cd.char_uniform, 0, bytes.as_slice());
+                    gpu.queue.write_buffer(&cd.char_uniform, 0, bytes.as_slice());
                 }
             }
         };
 
         if !split_char_passes {
-            write_boss_uniforms();
-            write_rival_uniforms();
+            write_boss_uniforms(&*self);
+            write_rival_uniforms(&*self);
         }
 
-        let draw_world = |pass: &mut wgpu::RenderPass<'_>| {
-            match &self.world {
+        let draw_world = |pass: &mut wgpu::RenderPass<'_>, gpu: &Gpu| {
+            match &gpu.world {
                 WorldRaster::Flat {
                     pipeline,
                     vb,
@@ -3397,7 +3526,7 @@ impl Gpu {
                     index_count,
                 } => {
                     pass.set_pipeline(pipeline);
-                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_bind_group(0, &gpu.bind_group, &[]);
                     pass.set_vertex_buffer(0, vb.slice(..));
                     pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..*index_count, 0, 0..1);
@@ -3413,7 +3542,7 @@ impl Gpu {
                     pass.set_vertex_buffer(0, vb.slice(..));
                     pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                     for b in batches {
-                        pass.set_bind_group(0, &self.bind_group, &[]);
+                        pass.set_bind_group(0, &gpu.bind_group, &[]);
                         pass.set_bind_group(1, &b.bind_group, &[]);
                         let end = b.first_index.saturating_add(b.index_count);
                         pass.draw_indexed(b.first_index..end, 0, 0..1);
@@ -3422,114 +3551,62 @@ impl Gpu {
             }
         };
 
-        let draw_boss_batch = |pass: &mut wgpu::RenderPass<'_>| {
-            let draw_boss_3d = self.char_sprite_bg.is_none()
-                || self.character.as_ref().is_some_and(CharacterDraw::is_skinned);
+        let draw_boss_batch = |pass: &mut wgpu::RenderPass<'_>, gpu: &mut Gpu| {
+            let draw_boss_3d = gpu.char_sprite_bg.is_none()
+                || gpu.character.as_ref().is_some_and(CharacterDraw::is_skinned);
             if draw_boss_3d {
-                if let Some(ref cd) = self.character {
+                if let Some(cd) = gpu.character.as_ref() {
                     if !boss_like.is_empty() {
-                        let stride = cd.char_uniform_stride;
-                        match &cd.geometry {
-                            CharacterGeometry::Rigid { pipeline, vb, ib } => {
-                                pass.set_pipeline(pipeline);
-                                pass.set_vertex_buffer(0, vb.slice(..));
-                                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                                for i in 0..boss_like.len() {
-                                    pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
-                                    for b in &cd.batches {
-                                        pass.set_bind_group(1, &b.bind_group, &[]);
-                                        let end = b.first_index.saturating_add(b.index_count);
-                                        pass.draw_indexed(b.first_index..end, 0, 0..1);
-                                    }
-                                }
-                            }
-                            CharacterGeometry::Skinned {
-                                pipeline,
-                                vb,
-                                ib,
-                                bone_bind_group,
-                                ..
-                            } => {
-                                pass.set_pipeline(pipeline);
-                                pass.set_vertex_buffer(0, vb.slice(..));
-                                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                                pass.set_bind_group(2, bone_bind_group, &[]);
-                                for i in 0..boss_like.len() {
-                                    pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
-                                    for b in &cd.batches {
-                                        pass.set_bind_group(1, &b.bind_group, &[]);
-                                        let end = b.first_index.saturating_add(b.index_count);
-                                        pass.draw_indexed(b.first_index..end, 0, 0..1);
-                                    }
-                                }
-                            }
-                        }
+                        draw_character_instances_3d(
+                            &gpu.queue,
+                            pass,
+                            &boss_like,
+                            cd,
+                            &mut gpu.skinned_locals_scratch,
+                            &mut gpu.skinned_bone_flat,
+                        );
                     }
                 }
             }
         };
 
-        let draw_rival_batch = |pass: &mut wgpu::RenderPass<'_>| {
-            if self.char_sprite_bg.is_none() && self.char_sprite_bg_rival.is_none() {
+        let draw_rival_batch = |pass: &mut wgpu::RenderPass<'_>, gpu: &mut Gpu| {
+            if gpu.char_sprite_bg.is_none() && gpu.char_sprite_bg_rival.is_none() {
                 if !rivals.is_empty() {
-                    if let Some(cd) = self.character_rival.as_ref().or(self.character.as_ref()) {
-                        let stride = cd.char_uniform_stride;
-                        match &cd.geometry {
-                            CharacterGeometry::Rigid { pipeline, vb, ib } => {
-                                pass.set_pipeline(pipeline);
-                                pass.set_vertex_buffer(0, vb.slice(..));
-                                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                                for i in 0..rivals.len() {
-                                    pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
-                                    for b in &cd.batches {
-                                        pass.set_bind_group(1, &b.bind_group, &[]);
-                                        let end = b.first_index.saturating_add(b.index_count);
-                                        pass.draw_indexed(b.first_index..end, 0, 0..1);
-                                    }
-                                }
-                            }
-                            CharacterGeometry::Skinned {
-                                pipeline,
-                                vb,
-                                ib,
-                                bone_bind_group,
-                                ..
-                            } => {
-                                pass.set_pipeline(pipeline);
-                                pass.set_vertex_buffer(0, vb.slice(..));
-                                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                                pass.set_bind_group(2, bone_bind_group, &[]);
-                                for i in 0..rivals.len() {
-                                    pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
-                                    for b in &cd.batches {
-                                        pass.set_bind_group(1, &b.bind_group, &[]);
-                                        let end = b.first_index.saturating_add(b.index_count);
-                                        pass.draw_indexed(b.first_index..end, 0, 0..1);
-                                    }
-                                }
-                            }
-                        }
+                    if let Some(cd) = gpu
+                        .character_rival
+                        .as_ref()
+                        .or(gpu.character.as_ref())
+                    {
+                        draw_character_instances_3d(
+                            &gpu.queue,
+                            pass,
+                            &rivals,
+                            cd,
+                            &mut gpu.skinned_locals_scratch,
+                            &mut gpu.skinned_bone_flat,
+                        );
                     }
                 }
             }
         };
 
-        let draw_billboard = |pass: &mut wgpu::RenderPass<'_>| {
+        let draw_billboard = |gpu: &Gpu, pass: &mut wgpu::RenderPass<'_>| {
             if bill_cpu.is_empty() || bill_idx_count == 0 {
                 return;
             }
             let vb_bytes = bill_cpu.len() as u64 * std::mem::size_of::<BillVertex>() as u64;
             let ib_bytes = bill_idx_count as u64 * 4;
-            pass.set_pipeline(&self.bill_pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_vertex_buffer(0, self.bill_vb.slice(0..vb_bytes));
-            pass.set_index_buffer(self.bill_ib.slice(0..ib_bytes), wgpu::IndexFormat::Uint32);
-            if mural_idx_count > 0 && self.sprite_ready {
-                pass.set_bind_group(1, &self.bill_bind_group, &[]);
+            pass.set_pipeline(&gpu.bill_pipeline);
+            pass.set_bind_group(0, &gpu.bind_group, &[]);
+            pass.set_vertex_buffer(0, gpu.bill_vb.slice(0..vb_bytes));
+            pass.set_index_buffer(gpu.bill_ib.slice(0..ib_bytes), wgpu::IndexFormat::Uint32);
+            if mural_idx_count > 0 && gpu.sprite_ready {
+                pass.set_bind_group(1, &gpu.bill_bind_group, &[]);
                 pass.draw_indexed(0..mural_idx_count, 0, 0..1);
             }
             if char_boss_idx_count > 0 {
-                if let Some(ref bg) = self.char_sprite_bg {
+                if let Some(ref bg) = gpu.char_sprite_bg {
                     pass.set_bind_group(1, bg, &[]);
                     pass.draw_indexed(
                         char_boss_idx_start..char_boss_idx_start + char_boss_idx_count,
@@ -3539,7 +3616,7 @@ impl Gpu {
                 }
             }
             if char_rival_idx_count > 0 {
-                if let Some(ref bg) = self.char_sprite_bg_rival {
+                if let Some(ref bg) = gpu.char_sprite_bg_rival {
                     pass.set_bind_group(1, bg, &[]);
                     pass.draw_indexed(
                         char_rival_idx_start..char_rival_idx_start + char_rival_idx_count,
@@ -3549,11 +3626,11 @@ impl Gpu {
                 }
             }
             if splat_idx_count > 0 {
-                if let Some(ref bg) = self.vfx_blood_bg {
-                    pass.set_pipeline(&self.bill_blood_pipeline);
+                if let Some(ref bg) = gpu.vfx_blood_bg {
+                    pass.set_pipeline(&gpu.bill_blood_pipeline);
                     pass.set_bind_group(1, bg, &[]);
                     pass.draw_indexed(splat_idx_start..splat_idx_start + splat_idx_count, 0, 0..1);
-                    pass.set_pipeline(&self.bill_pipeline);
+                    pass.set_pipeline(&gpu.bill_pipeline);
                 }
             }
         };
@@ -3563,7 +3640,7 @@ impl Gpu {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
 
         if split_char_passes {
-            write_boss_uniforms();
+            write_boss_uniforms(&*self);
             {
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("world"),
@@ -3591,10 +3668,10 @@ impl Gpu {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                draw_world(&mut pass);
-                draw_boss_batch(&mut pass);
+                draw_world(&mut pass, &*self);
+                draw_boss_batch(&mut pass, self);
             }
-            write_rival_uniforms();
+            write_rival_uniforms(&*self);
             {
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("world_chars2"),
@@ -3617,8 +3694,8 @@ impl Gpu {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                draw_rival_batch(&mut pass);
-                draw_billboard(&mut pass);
+                draw_rival_batch(&mut pass, self);
+                draw_billboard(&*self, &mut pass);
             }
         } else {
             {
@@ -3648,10 +3725,10 @@ impl Gpu {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                draw_world(&mut pass);
-                draw_boss_batch(&mut pass);
-                draw_rival_batch(&mut pass);
-                draw_billboard(&mut pass);
+                draw_world(&mut pass, &*self);
+                draw_boss_batch(&mut pass, self);
+                draw_rival_batch(&mut pass, self);
+                draw_billboard(&*self, &mut pass);
             }
         }
 

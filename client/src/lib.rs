@@ -41,6 +41,8 @@ fn make_character(foot: Vec3, facing_yaw: f32, scale: f32, skin: CharacterSkin) 
         skin,
         anim_frame: 0.0,
         bill_tint: [1.0, 1.0, 1.0, 1.0],
+        skinned_clip: 0,
+        skinned_anim_time: 0.0,
     }
 }
 
@@ -827,6 +829,28 @@ impl OyabaunApp {
                 let rows = self.gpu.char_sprite_rows_for_skin(skin);
                 ch.anim_frame = npc_billboard_anim_frame(self.game_time, npc, rows);
                 ch.bill_tint = npc_sprite_billboard_tint(npc);
+                if self.gpu.skinned_character_active()
+                    && matches!(skin, CharacterSkin::Boss | CharacterSkin::Remote)
+                {
+                    if let Some(ids) = self.gpu.skinned_anim_ids() {
+                        let (clip, t) = if npc.state == npc::NpcState::Dead {
+                            (
+                                ids.die,
+                                npc.death_timer * ids.die_duration,
+                            )
+                        } else if npc.shooting_at_player() {
+                            (ids.fire, npc.shoot_anim_t)
+                        } else if npc.state == npc::NpcState::Chase && npc.speed > 2.2 {
+                            (ids.run, self.game_time)
+                        } else if npc.speed > 0.12 {
+                            (ids.walk, self.game_time)
+                        } else {
+                            (ids.idle, self.game_time)
+                        };
+                        ch.skinned_clip = clip;
+                        ch.skinned_anim_time = t;
+                    }
+                }
                 characters.push(ch);
             }
             if self.net.joined {
@@ -851,6 +875,12 @@ impl OyabaunApp {
                     );
                     // Remote players are only visible when moving, so walk anim
                     ch.anim_frame = walk_anim_frame(self.game_time, 1.0);
+                    if self.gpu.skinned_character_active() {
+                        if let Some(ids) = self.gpu.skinned_anim_ids() {
+                            ch.skinned_clip = ids.run;
+                            ch.skinned_anim_time = self.game_time;
+                        }
+                    }
                     characters.push(ch);
                 }
             }
