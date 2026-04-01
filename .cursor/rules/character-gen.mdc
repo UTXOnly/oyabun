@@ -1,93 +1,29 @@
 ---
-description: Oyabaun character generation — PixelLab pixel art sprites as billboard quads
-globs: client/characters/**, client/src/render.rs, client/src/lib.rs
+description: Oyabaun world characters — skinned glTF (yakuza_shooter.glb); PixelLab only for HUD/VFX/props if needed
+globs: client/characters/**, client/src/render.rs, client/src/gltf_level.rs, client/src/lib.rs
 alwaysApply: false
 ---
 
-# Character pipeline: PixelLab pixel art sprites (NOT 3D Blender models)
+# Character pipeline (in-world)
 
-## DEPRECATED: 3D Blender skin-modifier pipeline
+## Active: one skinned glTF for all NPCs and remote players
 
-The 3D procedural character approach is **fully deprecated** (2026-03-29). Do NOT:
-- Use `tools/blender_build_oyabaun_characters_3d.py`
-- Use `tools/character_style_audit.py` or `blender_character_capture.py`
-- Create or modify GLB character files
-- Use SHADER_CHAR_TEX for character rendering (it's bypassed)
+- **Asset:** `client/characters/yakuza_shooter.glb` (Mixamo-rigged, embedded clips). Loaded in `create_oyabaun_app` / `Gpu::new`; **no separate rival GLB** in the default path (`character_rival_level` is `None` — boss and rival share the same `CharacterDraw`).
+- **Parsing & animation:** `client/src/gltf_level.rs` (skin weights, joints, clip sampling). **Rendering:** `client/src/render.rs` skinned pipeline + per-instance bone upload.
+- **Gameplay wiring:** `client/src/lib.rs` maps NPC state → clip indices (idle / walk / run / fire / die) and hit flash via `char_params.w` (`100+h` in `fs_char`).
+- **After changing the GLB:** `wasm-pack build --target web` from `client/`.
 
-## Current Pipeline: PixelLab Pro Mode → Sprite Atlas → Billboard
+See **`.cursor/rules/3d-character-integration.mdc`** for clip names, gotchas (mesh_node_world, axis), and Blender source paths.
 
-```
-PixelLab MCP (pro mode, canvas typically 104–128px, 8 dirs)
-    → animate (walk/attack/idle templates)
-    → download ZIP → extract
-    → build_game_atlas.py → atlas PNG (8 cols × N rows, square cells)
-    → tools/export_character_atlas_to_rgba.py (or PIL one-liner) → .rgba
-    → client/characters/<name>_atlas.rgba
-    → include_bytes!() in render.rs
-    → camera-facing billboard quads in draw_world()
-    → SHADER_BILL: alpha discard, nearest sampling
-```
+## Billboards (not for NPCs)
 
-### Art direction (Oyabaun)
+The **billboard pass** in `render.rs` is for **murals / reference backdrop** (`upload_reference_sprite`) and **blood splats** — not for characters.
 
-- **Tone**: Adult neo-Tokyo **yakuza / gangster** crime — not cartoon teens, not ninja fantasy.
-- **Weapons**: Prefer **visible SMGs** (Uzi, MP5/MP5K, compact submachine gun) in the sprite; pistols OK; bake into the character — no separate weapon billboards. `create8` may fail (`bone_scaling`) — use **web pro 8-dir** or `pixellab_v2.py create4` + expand on site.
-- **Combat motion**: Regenerate ZIPs with **`running-6-frames`** (or `running-8-frames`) plus a shoot template (**`lead-jab`**, **`cross-punch`**, or custom “firing SMG”) for 8 dirs; stack with `tools/pixellab_zip_to_atlas.py --extra …` so rows 7–12 = run, 13–18 = shoot (see `lib.rs` / `npc.rs`).
-- **FP / world VFX (pixel art)**: `muzzle_flash.png` — HUD additive quad at barrel (nearest). `blood_overlay.png` — **small world billboard** at ray-hit point on the NPC (not fullscreen); regenerate with `tools/pixellab_v2.py map-object`. Load via `uploadVfxMuzzleSprite` / `uploadVfxBloodSprite`.
-- **Feet / ground**: Atlas cells often have transparent padding under the feet; `CHAR_BILLBOARD_FEET_DROP` in `render.rs` nudges the quad down so soles meet terrain. Re-tune if a new atlas pivots differently.
+## PixelLab / sprite atlases (optional, non-NPC)
 
-### PixelLab Characters (v3 pro mode, active)
+Legacy `*_atlas.rgba` boss/rival NPC atlases are **removed** from the render path. PixelLab or hand-drawn atlases may still be useful for **HUD weapons**, **muzzle/blood VFX**, or **prop** billboards (separate from NPC mesh). Export: `tools/export_character_atlas_to_rgba.py` if you add new sprite assets.
 
-| Character | ID | Canvas | Status |
-|-----------|----|--------|--------|
-| Boss | `d5ceb30a-0a4b-49c4-8ccb-988898cb8135` | 112×112 | ✅ Walk anim, atlas in-game |
-| Rival | `dabe33dd-b9d5-481c-9413-402cd0002747` | 116×116 | `rival_v3_atlas.rgba` in repo (`pixellab_zip_to_atlas.py` from ZIP) |
-| Player | `fe8d4102-8926-4267-ab1c-4600441cfcf4` | 104×104 | Rotations only — same v2 script when job slots free |
+## Do not (for in-world humanoids)
 
-**Cursor MCP bug**: `animate_character` / sometimes `create` may never create jobs — the client emits invalid JSON for string parameters. Use **`tools/pixellab_v2.py`** (HTTP v2, same Bearer as `.cursor/mcp.json`) per `docs/CURSOR_CHARACTER_IMPROVEMENT.md`. **8 concurrent jobs max** — a full 8-dir walk fills the queue.
-
-### Atlas Format
-
-- Binary: `[u32 LE width][u32 LE height][RGBA pixels...]`
-- Grid: 8 columns (S, SW, W, NW, N, NE, E, SE) × N rows
-- Row 0: idle, rows 1–6: walk; rows 7–12 / 13–18: optional run / shoot when built with `--extra` (see `pixellab_zip_to_atlas.py`)
-- Cell size varies per character (boss: 112×112)
-
-### Rendering (render.rs)
-
-- `char_sprite_bg`: Optional bind group for atlas texture
-- Billboard quads built per-character in `draw_world()`:
-  - Quad at foot pos, camera-facing (XZ rotation only, Y stays up)
-  - Column = direction from `atan2(cam_pos - foot)` relative to `mesh_yaw`
-  - Row = `anim_frame` (0=idle, 1-6=walk)
-- When `char_sprite_bg.is_some()`, 3D GLB rendering is skipped
-- `SHADER_BILL`: samples texture, discards alpha < 0.35
-
-### Character Art Repo
-
-`~/Desktop/oyabaun-characters/` — dedicated repo for sprite production:
-- `reference/` — style targets + extracted palettes
-- `prompts/` — PixelLab generation prompts
-- `tools/build_game_atlas.py` — ZIP extract → atlas
-- `tools/export_to_game.py` — copy to oyabaun
-
-### Build & Test
-
-```bash
-cd client && wasm-pack build --target web --no-typescript
-python3 -m http.server 8080 --directory client
-# Hard refresh browser
-```
-
-### Key Constraint: Weapons must be baked into sprites
-
-Characters should be generated WITH their weapons visible (pistol, katana). Do NOT create floating weapon billboards — they look wrong. Regenerate characters with weapon descriptions in the PixelLab prompt.
-
-### Full TODO list
-
-See `docs/CURSOR_CHARACTER_IMPROVEMENT.md` for prioritized task list including:
-- Characters with weapons baked in
-- Shooting/attack animations
-- Per-character atlas wiring (rival, player)
-- Hit flash support
-- Additional animation templates
+- Do not reintroduce **NPC sprite billboards** tied to `char_sprite_bg` / atlas rows — use glTF + clips instead.
+- Do not add **client-side procedural** character meshes; author in Blender and ship `.glb`.

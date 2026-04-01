@@ -44,9 +44,9 @@ description: >-
 - Protocol changes: update `docs/PROTOCOL.md` and `protocol/schemas/` together.
 - Keep cheat resistance assumptions documented in `docs/ARCHITECTURE.md` when adding features.
 
-## Characters (sprite billboards)
+## Characters (skinned glTF)
 
-- In-world characters are **PixelLab pro** pixel art → atlas `.rgba` → billboards in `client/src/render.rs` (see `.cursor/rules/character-gen.mdc`).
-- After changing `client/characters/*_atlas.rgba` or billboard code, run `wasm-pack build` from `client/`.
-- Quick export: `python3 tools/export_character_atlas_to_rgba.py path/to/atlas.png -o client/characters/name_atlas.rgba`.
-- If Cursor’s PixelLab MCP never shows new jobs / `animate_character` fails: use **`python3 tools/pixellab_v2.py`** (REST v2, same token as MCP) — see `docs/CURSOR_CHARACTER_IMPROVEMENT.md`.
+- In-world **boss, rival, and remote players** render as **one skinned mesh**: `client/characters/yakuza_shooter.glb` (parse in `gltf_level.rs`, draw in `render.rs`, clip selection in `lib.rs`). See `.cursor/rules/3d-character-integration.mdc` and `.cursor/rules/character-gen.mdc`.
+- After changing the GLB, run **`wasm-pack build --target web`** from `client/`.
+- The billboard pass in `render.rs` is for **murals** and **blood splats**, not NPCs.
+- Optional PixelLab / `.rgba` atlases are for **HUD/VFX/props** only if you add them — not the NPC body path.

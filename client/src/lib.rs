@@ -40,82 +40,17 @@ fn make_character(foot: Vec3, facing_yaw: f32, scale: f32, skin: CharacterSkin) 
         mesh_yaw: facing_yaw,
         skin,
         anim_frame: 0.0,
-        bill_tint: [1.0, 1.0, 1.0, 1.0],
         skinned_clip: 0,
         skinned_anim_time: 0.0,
     }
 }
 
-fn npc_sprite_billboard_tint(npc: &npc::Npc) -> [f32; 4] {
-    let mut r = 1.0_f32;
-    let mut g = 1.0;
-    let mut b = 1.0;
-    let mut a = 1.0_f32;
-    if npc.alive() {
-        let inj = 1.0 - npc.hp_frac();
-        r += inj * 0.48;
-        g -= inj * 0.26;
-        b -= inj * 0.22;
-    }
-    if npc.hit_flash > 0.0 {
-        let h = npc.hit_flash.min(1.0);
-        r += h * 0.62;
-        g += h * 0.12;
-        b += h * 0.08;
-    }
-    if npc.state == npc::NpcState::Dead {
-        let t = npc.death_timer;
-        r = r * (0.4 + (1.0 - t) * 0.35) + t * 0.22;
-        g = g * (0.22 + (1.0 - t) * 0.32);
-        b = b * (0.24 + (1.0 - t) * 0.28);
-        a = 0.94 - t * 0.18;
-    }
-    [
-        r.clamp(0.12, 2.2),
-        g.clamp(0.12, 2.2),
-        b.clamp(0.12, 2.2),
-        a.clamp(0.25, 1.0),
-    ]
-}
-
-/// Compute walk animation frame (1.0–6.0) from time, or 0.0 for idle.
-/// `speed` is the character's XZ movement speed; below threshold → idle.
-const WALK_FRAME_COUNT: f32 = 6.0;
-const WALK_FPS: f32 = 8.0;
-const WALK_SPEED_THRESHOLD: f32 = 0.3;
-
-fn walk_anim_frame(time: f32, speed: f32) -> f32 {
-    if speed < WALK_SPEED_THRESHOLD {
-        return 0.0; // idle
-    }
-    // Cycle through frames 1-6 based on time, scale rate by speed
-    let rate = WALK_FPS * (speed / 3.0).max(0.6);
-    let frame = (time * rate) % WALK_FRAME_COUNT;
-    frame.floor() + 1.0 // rows 1-6 in the atlas
-}
-
-const RUN_FRAME_COUNT: f32 = 6.0;
-const RUN_FPS: f32 = 11.0;
-const RUN_SPEED_THRESHOLD: f32 = 2.25;
-const SHOOT_FPS: f32 = 4.5;
-
-fn run_anim_frame(time: f32, speed: f32) -> f32 {
-    let rate = RUN_FPS * (speed / 3.2).max(0.75);
-    let frame = (time * rate) % RUN_FRAME_COUNT;
-    7.0 + frame.floor()
-}
-
-/// `(first_shoot_row, frame_count)` from atlas height. Compact: rows 7+ are shoot after 6 walk rows.
-/// Full 19+ row atlas: run rows 7–12, shoot rows 13–18 (6 frames).
-fn shoot_cycle(atlas_rows: u32) -> Option<(f32, f32)> {
-    if atlas_rows >= 19 {
-        return Some((13.0, 6.0));
-    }
-    let n_shoot = atlas_rows.saturating_sub(7);
-    if n_shoot >= 6 {
-        Some((7.0, n_shoot as f32))
+/// Encode hit flash for `fs_char` via `char_params.w` (`100.0 + amount`, amount ∈ [0,1]).
+fn char_hit_anim_frame(hit_flash: f32) -> f32 {
+    if hit_flash <= 0.0 {
+        0.0
     } else {
-        None
+        100.0 + hit_flash.min(1.0)
     }
 }
 
@@ -147,28 +82,11 @@ fn spawn_hud_shells_for_weapon(wi: usize, shells: &mut Vec<HudShell>) {
     }
 }
 
-fn npc_billboard_anim_frame(time: f32, npc: &npc::Npc, atlas_rows: u32) -> f32 {
-    // Hit flash must not use the 3D-only `anim_row >= 100` path: billboard UVs treat that as row 0,
-    // so every bullet snapped the sprite to idle and killed the shoot cycle. Use `bill_tint` for hit red.
-    if !npc.alive() {
-        return 0.0;
-    }
-    let shoot = shoot_cycle(atlas_rows);
-    let extended_run = atlas_rows >= 19;
-    if npc.shooting_at_player() {
-        if let Some((base, n_frames)) = shoot {
-            let frame = (npc.shoot_anim_t * SHOOT_FPS) % n_frames;
-            return base + frame.floor();
-        }
-        return 0.0;
-    }
-    if npc.speed >= RUN_SPEED_THRESHOLD && extended_run {
-        return run_anim_frame(time, npc.speed);
-    }
-    walk_anim_frame(time, npc.speed)
-}
-
 /// Vertical walk bob (sinusoidal bounce) to prevent floating/sliding look.
+const WALK_SPEED_THRESHOLD: f32 = 0.3;
+const WALK_FPS: f32 = 8.0;
+const WALK_FRAME_COUNT: f32 = 6.0;
+
 fn walk_bob_y(time: f32, speed: f32) -> f32 {
     if speed < WALK_SPEED_THRESHOLD {
         return 0.0;
@@ -809,11 +727,7 @@ impl OyabaunApp {
                     continue;
                 }
                 let f = npc.foot;
-                let bob_y = if self.gpu.char_sprite_billboard_active() {
-                    0.0
-                } else {
-                    walk_bob_y(self.game_time, npc.speed)
-                };
+                let bob_y = walk_bob_y(self.game_time, npc.speed);
                 let foot_y = self.game.feet_draw_y(f.x, f.z) + bob_y;
                 let facing_yaw = npc.yaw; // NPC's actual facing direction for 3D rotation
                 let skin = match npc.def.skin {
@@ -826,12 +740,8 @@ impl OyabaunApp {
                     0.78 * npc.scale(),
                     skin,
                 );
-                let rows = self.gpu.char_sprite_rows_for_skin(skin);
-                ch.anim_frame = npc_billboard_anim_frame(self.game_time, npc, rows);
-                ch.bill_tint = npc_sprite_billboard_tint(npc);
-                if self.gpu.skinned_character_active()
-                    && matches!(skin, CharacterSkin::Boss | CharacterSkin::Remote)
-                {
+                ch.anim_frame = char_hit_anim_frame(npc.hit_flash);
+                if self.gpu.skinned_character_active() {
                     if let Some(ids) = self.gpu.skinned_anim_ids() {
                         let (clip, t) = if npc.state == npc::NpcState::Dead {
                             (
@@ -873,8 +783,6 @@ impl OyabaunApp {
                         sc,
                         CharacterSkin::Remote,
                     );
-                    // Remote players are only visible when moving, so walk anim
-                    ch.anim_frame = walk_anim_frame(self.game_time, 1.0);
                     if self.gpu.skinned_character_active() {
                         if let Some(ids) = self.gpu.skinned_anim_ids() {
                             ch.skinned_clip = ids.run;
@@ -933,33 +841,13 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         const EMB_CHAR: &[u8] = include_bytes!("../characters/yakuza_shooter.glb");
         gltf_level::parse_character_glb(EMB_CHAR).ok()
     };
-    #[cfg(target_arch = "wasm32")]
-    let character_rival_cpu = {
-        const EMB_RIVAL: &[u8] = include_bytes!("../characters/oyabaun_rival.glb");
-        let mut c = gltf_level::parse_character_glb(EMB_RIVAL).ok();
-        let url = format!(
-            "./characters/oyabaun_rival.glb?v={}",
-            js_sys::Date::now() as u64
-        );
-        if let Some(bytes) = fetch_bytes(&url).await {
-            if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
-                c = Some(x);
-            }
-        }
-        c
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let character_rival_cpu = {
-        const EMB_RIVAL: &[u8] = include_bytes!("../characters/oyabaun_rival.glb");
-        gltf_level::parse_character_glb(EMB_RIVAL).ok()
-    };
     let gpu = Gpu::new(
         canvas,
         &boot.arena.vertices,
         &boot.arena.indices,
         gi.gltf,
         character_cpu,
-        character_rival_cpu,
+        None,
     )
     .await?;
     let game = GameState::new(
