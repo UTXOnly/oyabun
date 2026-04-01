@@ -14,6 +14,7 @@ Override input:
 from __future__ import annotations
 
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -58,9 +59,26 @@ def main() -> None:
     nt = mat.node_tree
     pr = nt.nodes.get("Principled BSDF")
     if pr:
-        pr.inputs["Base Color"].default_value = (0.22, 0.24, 0.26, 1.0)
-        pr.inputs["Roughness"].default_value = 0.45
-        pr.inputs["Metallic"].default_value = 0.55
+        pr.inputs["Roughness"].default_value = 0.42
+        pr.inputs["Metallic"].default_value = 0.62
+    # Embedded sRGB albedo — glTF has no procedural nodes; flat gray reads "untextured" in-game.
+    rng = random.Random(42)
+    tw, th = 160, 160
+    px = []
+    for _ in range(tw * th):
+        g = 0.11 + rng.random() * 0.14
+        r = min(1.0, g * (1.0 + rng.random() * 0.08))
+        b = max(0.04, g * (0.85 + rng.random() * 0.12))
+        px.extend([r, g, b, 1.0])
+    tex_img = bpy.data.images.new("M4_Albedo", width=tw, height=th, alpha=False)
+    tex_img.colorspace_settings.name = "sRGB"
+    tex_img.pixels = px
+    tex_img.pack()
+    if pr:
+        tex_node = nt.nodes.new(type="ShaderNodeTexImage")
+        tex_node.image = tex_img
+        tex_node.location = (-320, 220)
+        nt.links.new(tex_node.outputs["Color"], pr.inputs["Base Color"])
     if ob.data.materials:
         ob.data.materials[0] = mat
     else:

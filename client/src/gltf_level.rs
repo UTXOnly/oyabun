@@ -860,15 +860,14 @@ fn parse_skinned_character_glb(
         ));
     }
 
+    // Mixamo: `RightHandIndex*` sorts before `RightHand` in many skins — must not use substring "righthand".
     let mut weapon_attach_joint: Option<u32> = None;
     for (ji, &jnode) in joint_node_indices.iter().enumerate() {
         let Some(node) = document.nodes().nth(jnode) else {
             continue;
         };
         let name = node.name().unwrap_or("");
-        let compact: String = name.chars().filter(|c| c.is_alphanumeric()).collect();
-        let lower = compact.to_ascii_lowercase();
-        if lower.contains("righthand") {
+        if name.ends_with("RightHand") && !name.contains("RightHandIndex") {
             weapon_attach_joint = Some(ji as u32);
             break;
         }

@@ -465,7 +465,8 @@ struct HudUniform {
     reload: f32,
     aspect: f32,
     anim_t: f32,
-    _pad: f32,
+    /// 1.0 when drawing HUD arms over the 3D view-model (larger / lifted quad).
+    fps_arms_overlay: f32,
 }
 
 #[repr(C)]
@@ -497,7 +498,7 @@ impl HudVertex {
 }
 
 const SHADER_HUD: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, _p2: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, fps_arms: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var wtex: texture_2d<f32>;
 @group(1) @binding(1) var wsamp: sampler;
@@ -530,6 +531,21 @@ fn vs_hud(v: HIn) -> HOut {
   return o;
 }
 
+@vertex
+fn vs_hud_arms(v: HIn) -> HOut {
+  let inv_aspect = 1.0 / max(hu.aspect, 0.5);
+  var p = v.pos;
+  p.x = p.x * inv_aspect + 0.12 * inv_aspect;
+  if (hu.fps_arms > 0.5) {
+    p.x = p.x * 1.1;
+    p.y = p.y * 1.12 + 0.16;
+  }
+  var o: HOut;
+  o.clip = vec4<f32>(p + hud_motion_offset(), 0.0, 1.0);
+  o.uv = v.uv;
+  return o;
+}
+
 @fragment
 fn fs_hud(i: HOut) -> @location(0) vec4<f32> {
   let uv_tex = vec2<f32>(i.uv.x, 1.0 - i.uv.y);
@@ -551,7 +567,7 @@ fn fs_hud_arms(i: HOut) -> @location(0) vec4<f32> {
 "#;
 
 const SHADER_HUD_VFX: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, _p2: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, fps_arms: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var vtex: texture_2d<f32>;
 @group(1) @binding(1) var vsamp: sampler;
@@ -613,7 +629,7 @@ fn fs_muzzle(i: HOut) -> @location(0) vec4<f32> {
 "#;
 
 const SHADER_HUD_SHELL: &str = r#"
-struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, _p2: f32, }
+struct Hu { weapon: u32, flash: f32, bob: f32, recoil: f32, reload: f32, aspect: f32, anim_t: f32, fps_arms: f32, }
 @group(0) @binding(0) var<uniform> hu: Hu;
 @group(1) @binding(0) var stex: texture_2d<f32>;
 @group(1) @binding(1) var ssamp: sampler;
@@ -816,22 +832,27 @@ impl CharacterDraw {
 }
 
 /// Local transform for `m4a1_prop.glb` in first-person view space (+X right, +Y up, −Z forward).
+/// Export mesh is Y-up with length along +Y; camera looks down −Z, so we rotate −90° about X first.
 pub fn weapon_fps_view_local_transform() -> Mat4 {
     use std::f32::consts::FRAC_PI_2;
-    let scale = Mat4::from_scale(Vec3::splat(0.58));
+    let scale = Mat4::from_scale(Vec3::splat(0.52));
     let rot = Mat4::from_quat(
-        Quat::from_rotation_y(FRAC_PI_2 * 0.1) * Quat::from_rotation_x(-FRAC_PI_2 * 0.06),
+        Quat::from_rotation_x(-FRAC_PI_2)
+            * Quat::from_rotation_y(-FRAC_PI_2 * 0.12)
+            * Quat::from_rotation_z(FRAC_PI_2 * 0.06),
     );
-    Mat4::from_translation(Vec3::new(0.26, -0.22, -0.62)) * rot * scale
+    Mat4::from_translation(Vec3::new(0.22, -0.20, -0.56)) * rot * scale
 }
 
 fn weapon_hand_to_prop_transform() -> Mat4 {
     use std::f32::consts::FRAC_PI_2;
     let scale = Mat4::from_scale(Vec3::splat(0.44));
     let rot = Mat4::from_quat(
-        Quat::from_rotation_y(-FRAC_PI_2) * Quat::from_rotation_x(FRAC_PI_2 * 0.3),
+        Quat::from_rotation_x(-FRAC_PI_2 * 0.9)
+            * Quat::from_rotation_y(-FRAC_PI_2 * 0.85)
+            * Quat::from_rotation_z(FRAC_PI_2 * 0.1),
     );
-    Mat4::from_translation(Vec3::new(0.0, 0.07, 0.04)) * rot * scale
+    Mat4::from_translation(Vec3::new(0.03, 0.09, 0.0)) * rot * scale
 }
 
 struct WeaponAttachPass<'a> {
@@ -1515,7 +1536,7 @@ impl Gpu {
             layout: Some(&hud_pl),
             vertex: wgpu::VertexState {
                 module: &shader_hud,
-                entry_point: Some("vs_hud"),
+                entry_point: Some("vs_hud_arms"),
                 buffers: &[HudVertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
@@ -3734,7 +3755,11 @@ impl Gpu {
                 reload: weapon_hud.reload.clamp(0.0, 2.0),
                 aspect: screen_aspect,
                 anim_t: weapon_hud.anim_t,
-                _pad: 0.0,
+                fps_arms_overlay: if weapon_hud.fps_weapon_model.is_some() {
+                    1.0
+                } else {
+                    0.0
+                },
             };
             self.queue
                 .write_buffer(&self.hud_uniform, 0, bytemuck::bytes_of(&hu));
