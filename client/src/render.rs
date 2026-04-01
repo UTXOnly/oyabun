@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use serde::Serialize;
 
 use crate::mesh::Aabb;
@@ -794,6 +794,8 @@ struct CharacterDraw {
     char_globals_bg: wgpu::BindGroup,
     /// Byte stride per instance; multiple of `min_uniform_buffer_offset_alignment`.
     char_uniform_stride: u32,
+    /// Optional second rigid pipeline (depth write off) for first-person view-model draw.
+    fps_view_pipeline: Option<wgpu::RenderPipeline>,
     #[allow(dead_code)]
     _textures: Vec<wgpu::Texture>,
     #[allow(dead_code)]
@@ -813,6 +815,86 @@ impl CharacterDraw {
     }
 }
 
+/// Local transform for `m4a1_prop.glb` in first-person view space (+X right, +Y up, −Z forward).
+pub fn weapon_fps_view_local_transform() -> Mat4 {
+    use std::f32::consts::FRAC_PI_2;
+    let scale = Mat4::from_scale(Vec3::splat(0.58));
+    let rot = Mat4::from_quat(
+        Quat::from_rotation_y(FRAC_PI_2 * 0.1) * Quat::from_rotation_x(-FRAC_PI_2 * 0.06),
+    );
+    Mat4::from_translation(Vec3::new(0.26, -0.22, -0.62)) * rot * scale
+}
+
+fn weapon_hand_to_prop_transform() -> Mat4 {
+    use std::f32::consts::FRAC_PI_2;
+    let scale = Mat4::from_scale(Vec3::splat(0.44));
+    let rot = Mat4::from_quat(
+        Quat::from_rotation_y(-FRAC_PI_2) * Quat::from_rotation_x(FRAC_PI_2 * 0.3),
+    );
+    Mat4::from_translation(Vec3::new(0.0, 0.07, 0.04)) * rot * scale
+}
+
+struct WeaponAttachPass<'a> {
+    weapon_cd: &'a CharacterDraw,
+    hand_to_prop: Mat4,
+}
+
+fn fill_char_uniform_bytes_for_world_models(
+    world_models: &[Mat4],
+    mesh_node_world: Mat4,
+    cd: &CharacterDraw,
+    view_proj: Mat4,
+    cam_pos: Vec3,
+) -> Vec<u8> {
+    let n = world_models.len();
+    let stride = cd.char_uniform_stride as usize;
+    let mut raw = vec![0u8; stride * n];
+    for (i, &wm) in world_models.iter().enumerate() {
+        let inst_model = wm * mesh_node_world;
+        let m = inst_model.to_cols_array_2d();
+        let char_x = m[3][0];
+        let char_z = m[3][2];
+        let u = CharUniforms {
+            view_proj: view_proj.to_cols_array_2d(),
+            model: m,
+            cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
+            fog_color: FOG_COLOR_RGBA,
+            fog_params: [FOG_DENSITY, FOG_MAX_BLEND, 0.0, 0.0],
+            char_params: [0.0, char_x, char_z, 0.0],
+            _p1: [0.0; 4],
+            _p2: [0.0; 4],
+            _p3: [0.0; 4],
+            _p4: [0.0; 4],
+        };
+        let dst = &mut raw[i * stride..i * stride + std::mem::size_of::<CharUniforms>()];
+        dst.copy_from_slice(bytemuck::bytes_of(&u));
+    }
+    raw
+}
+
+fn draw_rigid_character_batch_with_pipeline(
+    pass: &mut wgpu::RenderPass<'_>,
+    cd: &CharacterDraw,
+    pipeline: &wgpu::RenderPipeline,
+    count: usize,
+) {
+    let stride = cd.char_uniform_stride;
+    let CharacterGeometry::Rigid { vb, ib, .. } = &cd.geometry else {
+        return;
+    };
+    pass.set_pipeline(pipeline);
+    pass.set_vertex_buffer(0, vb.slice(..));
+    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+    for i in 0..count {
+        pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+        for b in &cd.batches {
+            pass.set_bind_group(1, &b.bind_group, &[]);
+            let end = b.first_index.saturating_add(b.index_count);
+            pass.draw_indexed(b.first_index..end, 0, 0..1);
+        }
+    }
+}
+
 fn draw_character_instances_3d(
     queue: &wgpu::Queue,
     pass: &mut wgpu::RenderPass<'_>,
@@ -820,6 +902,10 @@ fn draw_character_instances_3d(
     cd: &CharacterDraw,
     skinned_locals_scratch: &mut Vec<Mat4>,
     skinned_bone_flat: &mut [f32],
+    skinned_node_world_scratch: &mut Vec<Mat4>,
+    weapon_attach: Option<WeaponAttachPass<'_>>,
+    view_proj: Mat4,
+    cam_pos: Vec3,
 ) {
     use crate::gltf_level::{compute_skinned_joint_palette, CHARACTER_MAX_JOINTS};
     let stride = cd.char_uniform_stride;
@@ -849,6 +935,13 @@ fn draw_character_instances_3d(
             if skinned_locals_scratch.len() < node_n {
                 skinned_locals_scratch.resize(node_n, Mat4::IDENTITY);
             }
+            if skinned_node_world_scratch.len() < node_n {
+                skinned_node_world_scratch.resize(node_n, Mat4::IDENTITY);
+            }
+            let joint_i = skinned_cpu.weapon_attach_joint.map(|j| j as usize);
+            let do_attach = weapon_attach.is_some() && joint_i.is_some();
+            let mut attached: Vec<Mat4> = Vec::new();
+
             pass.set_pipeline(pipeline);
             pass.set_vertex_buffer(0, vb.slice(..));
             pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
@@ -861,6 +954,7 @@ fn draw_character_instances_3d(
                     inst.skinned_clip as usize,
                     inst.skinned_anim_time,
                     &mut skinned_locals_scratch[..node_n],
+                    &mut skinned_node_world_scratch[..node_n],
                     &mut palette,
                 );
                 for mi in 0..CHARACTER_MAX_JOINTS {
@@ -882,6 +976,40 @@ fn draw_character_instances_3d(
                     let end = b.first_index.saturating_add(b.index_count);
                     pass.draw_indexed(b.first_index..end, 0, 0..1);
                 }
+
+                if do_attach {
+                    if let (Some(wa), Some(ji)) = (&weapon_attach, joint_i) {
+                        let jnode = skinned_cpu.joint_node_indices[ji];
+                        if jnode < node_n {
+                            let hand = skinned_node_world_scratch[jnode];
+                            let wm = inst.model * hand * wa.hand_to_prop;
+                            attached.push(wm);
+                        }
+                    }
+                }
+            }
+
+            if do_attach {
+                if let Some(wa) = weapon_attach {
+                    if !attached.is_empty() {
+                        let bytes = fill_char_uniform_bytes_for_world_models(
+                            &attached,
+                            wa.weapon_cd.mesh_node_world,
+                            wa.weapon_cd,
+                            view_proj,
+                            cam_pos,
+                        );
+                        queue.write_buffer(&wa.weapon_cd.char_uniform, 0, bytes.as_slice());
+                        if let CharacterGeometry::Rigid { pipeline, .. } = &wa.weapon_cd.geometry {
+                            draw_rigid_character_batch_with_pipeline(
+                                pass,
+                                wa.weapon_cd,
+                                pipeline,
+                                attached.len(),
+                            );
+                        }
+                    }
+                }
             }
         }
     }
@@ -895,6 +1023,8 @@ pub struct WeaponHudParams {
     pub reload: f32,
     /// Game time (seconds) for muzzle flicker / cheap animated VFX.
     pub anim_t: f32,
+    /// When set and `weapon_prop` is loaded, draws 3D view-model instead of the HUD weapon sprite.
+    pub fps_weapon_model: Option<Mat4>,
 }
 
 /// World-space blood splat (camera-facing billboard; `yaw` rotates in XZ, `scale` sizes the quad).
@@ -1001,11 +1131,14 @@ pub struct Gpu {
     pub vfx_shell_ready: bool,
     character: Option<CharacterDraw>,
     character_rival: Option<CharacterDraw>,
+    /// Rigid `m4a1_prop.glb` for FPS view + hand attach on skinned NPCs.
+    weapon_prop: Option<CharacterDraw>,
     diag_last_surface_ok: bool,
     diag_last_surface_error: String,
     diag_frames_submitted: u64,
     diag_frames_skipped_swapchain: u64,
     skinned_locals_scratch: Vec<Mat4>,
+    skinned_node_world_scratch: Vec<Mat4>,
     skinned_bone_flat: Vec<f32>,
     pub skinned_anim_ids: Option<crate::gltf_level::SkinnedAnimClipIds>,
 }
@@ -1018,6 +1151,7 @@ impl Gpu {
         gltf_level: Option<crate::gltf_level::GltfLevelCpu>,
         character_level: Option<crate::gltf_level::CharacterGltfCpu>,
         character_rival_level: Option<crate::gltf_level::CharacterGltfCpu>,
+        weapon_prop_level: Option<crate::gltf_level::CharacterGltfCpu>,
     ) -> Result<Self, wasm_bindgen::JsValue> {
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
@@ -1545,7 +1679,7 @@ impl Gpu {
                             warn_str(&format!("oyabaun: {label} has no drawable geometry"));
                             return None;
                         }
-                        match Self::raster_character_gltf(&device, &queue, format, c) {
+                        match Self::raster_character_gltf(&device, &queue, format, c, false) {
                             Ok(cd) => Some(cd),
                             Err(e) => {
                                 #[cfg(target_arch = "wasm32")]
@@ -1585,6 +1719,19 @@ impl Gpu {
 
         let character_rival =
             character_rival_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_rival.glb"));
+
+        let weapon_prop = weapon_prop_level.and_then(|cpu| match cpu {
+            crate::gltf_level::CharacterGltfCpu::Rigid(c) => {
+                if c.vertices.is_empty() || c.indices.is_empty() || c.batches.is_empty() {
+                    #[cfg(target_arch = "wasm32")]
+                    warn_str("oyabaun: m4a1_prop.glb has no drawable geometry");
+                    None
+                } else {
+                    Self::raster_character_gltf(&device, &queue, format, c, true).ok()
+                }
+            }
+            _ => None,
+        });
 
         let mut skinned_locals_scratch = Vec::new();
         let skinned_anim_ids = character.as_ref().and_then(|cd| {
@@ -1647,14 +1794,20 @@ impl Gpu {
             vfx_shell_ready: false,
             character,
             character_rival,
+            weapon_prop,
             diag_last_surface_ok: true,
             diag_last_surface_error: String::new(),
             diag_frames_submitted: 0,
             diag_frames_skipped_swapchain: 0,
             skinned_locals_scratch,
+            skinned_node_world_scratch: Vec::new(),
             skinned_bone_flat,
             skinned_anim_ids,
         })
+    }
+
+    pub fn weapon_prop_loaded(&self) -> bool {
+        self.weapon_prop.is_some()
     }
 
     pub fn skinned_character_active(&self) -> bool {
@@ -1701,6 +1854,7 @@ impl Gpu {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         cpu: crate::gltf_level::CharacterMeshCpu,
+        with_fps_view_pipeline: bool,
     ) -> Result<CharacterDraw, wasm_bindgen::JsValue> {
         use crate::gltf_level::CharacterVertex;
 
@@ -1832,6 +1986,46 @@ impl Gpu {
             multiview: None,
             cache: None,
         });
+
+        let fps_view_pipeline = if with_fps_view_pipeline {
+            Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("char-tex-rigid-fps"),
+                layout: Some(&char_pl),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_char"),
+                    buffers: &[CharacterVertex::desc()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_char"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth24Plus,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            }))
+        } else {
+            None
+        };
 
         let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vb-char"),
@@ -1975,6 +2169,7 @@ impl Gpu {
             char_uniform,
             char_globals_bg,
             char_uniform_stride,
+            fps_view_pipeline,
             _textures: textures,
             _tint_buffers: tint_buffers,
         })
@@ -2142,12 +2337,14 @@ impl Gpu {
         });
         let clip_ids = crate::gltf_level::resolve_skinned_clip_indices(&cpu.clips);
         let mut loc = vec![Mat4::IDENTITY; cpu.node_parent.len()];
+        let mut nw = vec![Mat4::IDENTITY; cpu.node_parent.len()];
         let mut pal = [Mat4::IDENTITY; CHARACTER_MAX_JOINTS];
         compute_skinned_joint_palette(
             cpu,
             clip_ids.idle as usize,
             0.0,
             &mut loc,
+            &mut nw,
             &mut pal,
         );
         let mut bone_f32 = vec![0.0_f32; CHARACTER_MAX_JOINTS * 16];
@@ -2321,6 +2518,7 @@ impl Gpu {
             char_uniform,
             char_globals_bg,
             char_uniform_stride,
+            fps_view_pipeline: None,
             _textures: textures,
             _tint_buffers: tint_buffers,
         })
@@ -3326,6 +3524,16 @@ impl Gpu {
         let draw_boss_batch = |pass: &mut wgpu::RenderPass<'_>, gpu: &mut Gpu| {
             if let Some(cd) = gpu.character.as_ref() {
                 if !boss_like.is_empty() {
+                    let attach = gpu.weapon_prop.as_ref().and_then(|wpn| {
+                        if cd.is_skinned() {
+                            Some(WeaponAttachPass {
+                                weapon_cd: wpn,
+                                hand_to_prop: weapon_hand_to_prop_transform(),
+                            })
+                        } else {
+                            None
+                        }
+                    });
                     draw_character_instances_3d(
                         &gpu.queue,
                         pass,
@@ -3333,6 +3541,10 @@ impl Gpu {
                         cd,
                         &mut gpu.skinned_locals_scratch,
                         &mut gpu.skinned_bone_flat,
+                        &mut gpu.skinned_node_world_scratch,
+                        attach,
+                        view_proj,
+                        cam_pos,
                     );
                 }
             }
@@ -3345,6 +3557,16 @@ impl Gpu {
                     .as_ref()
                     .or(gpu.character.as_ref())
                 {
+                    let attach = gpu.weapon_prop.as_ref().and_then(|wpn| {
+                        if cd.is_skinned() {
+                            Some(WeaponAttachPass {
+                                weapon_cd: wpn,
+                                hand_to_prop: weapon_hand_to_prop_transform(),
+                            })
+                        } else {
+                            None
+                        }
+                    });
                     draw_character_instances_3d(
                         &gpu.queue,
                         pass,
@@ -3352,7 +3574,29 @@ impl Gpu {
                         cd,
                         &mut gpu.skinned_locals_scratch,
                         &mut gpu.skinned_bone_flat,
+                        &mut gpu.skinned_node_world_scratch,
+                        attach,
+                        view_proj,
+                        cam_pos,
                     );
+                }
+            }
+        };
+
+        let draw_fps_weapon_3d = |pass: &mut wgpu::RenderPass<'_>, gpu: &Gpu| {
+            if let Some(model) = weapon_hud.fps_weapon_model {
+                if let Some(wpn) = gpu.weapon_prop.as_ref() {
+                    if let Some(pipe) = wpn.fps_view_pipeline.as_ref() {
+                        let bytes = fill_char_uniform_bytes_for_world_models(
+                            &[model],
+                            wpn.mesh_node_world,
+                            wpn,
+                            view_proj,
+                            cam_pos,
+                        );
+                        gpu.queue.write_buffer(&wpn.char_uniform, 0, bytes.as_slice());
+                        draw_rigid_character_batch_with_pipeline(pass, wpn, pipe, 1);
+                    }
                 }
             }
         };
@@ -3441,6 +3685,7 @@ impl Gpu {
                     occlusion_query_set: None,
                 });
                 draw_rival_batch(&mut pass, self);
+                draw_fps_weapon_3d(&mut pass, &*self);
                 draw_billboard(&*self, &mut pass);
             }
         } else {
@@ -3474,6 +3719,7 @@ impl Gpu {
                 draw_world(&mut pass, &*self);
                 draw_boss_batch(&mut pass, self);
                 draw_rival_batch(&mut pass, self);
+                draw_fps_weapon_3d(&mut pass, &*self);
                 draw_billboard(&*self, &mut pass);
             }
         }
@@ -3522,12 +3768,14 @@ impl Gpu {
             pass.set_pipeline(&self.hud_pipeline);
             pass.set_bind_group(0, &self.hud_bind_group, &[]);
             let wi = (weapon_hud.weapon_id as usize).min(3);
-            if let Some(bg) = self.weapon_bind_groups.get(wi) {
-                pass.set_bind_group(1, bg, &[]);
+            if weapon_hud.fps_weapon_model.is_none() {
+                if let Some(bg) = self.weapon_bind_groups.get(wi) {
+                    pass.set_bind_group(1, bg, &[]);
+                }
+                pass.set_vertex_buffer(0, self.hud_vb.slice(..));
+                pass.set_index_buffer(self.hud_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..6, 0, 0..1);
             }
-            pass.set_vertex_buffer(0, self.hud_vb.slice(..));
-            pass.set_index_buffer(self.hud_ib.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..6, 0, 0..1);
             if self.arms_ready {
                 pass.set_pipeline(&self.hud_arms_pipeline);
                 pass.set_bind_group(0, &self.hud_bind_group, &[]);

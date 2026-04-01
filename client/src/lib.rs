@@ -20,7 +20,7 @@ use input::InputState;
 use loadout::{Loadout, WEAPONS};
 use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
 use net::NetController;
-use render::WeaponHudParams;
+use render::{weapon_fps_view_local_transform, WeaponHudParams};
 pub use render::{BloodSplat, CharacterInstance, CharacterSkin, Gpu, HudShell, Vertex};
 
 use serde_json::json;
@@ -791,6 +791,12 @@ impl OyabaunApp {
             // Offline: no demo characters or self-body in first person
             // (those were billboard sprites; 3D models clip into the camera)
         }
+        let fps_weapon_model = if self.gpu.weapon_prop_loaded() {
+            let inv = self.game.view_matrix().inverse();
+            Some(inv * weapon_fps_view_local_transform())
+        } else {
+            None
+        };
         let weapon_hud = WeaponHudParams {
             weapon_id: self.loadout.current_idx() as u32,
             bob: self.last_ms as f32 * 0.0028,
@@ -798,6 +804,7 @@ impl OyabaunApp {
             recoil: self.loadout.recoil,
             reload: self.loadout.reload_anim,
             anim_t: self.game_time,
+            fps_weapon_model,
         };
         self.gpu.draw_world(
             vp,
@@ -837,6 +844,23 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         const EMB_CHAR: &[u8] = include_bytes!("../characters/yakuza_shooter.glb");
         gltf_level::parse_character_glb(EMB_CHAR).ok()
     };
+    #[cfg(target_arch = "wasm32")]
+    let weapon_cpu = {
+        const EMB_W: &[u8] = include_bytes!("../props/m4a1_prop.glb");
+        let mut w = gltf_level::parse_character_glb(EMB_W).ok();
+        let url = format!("./props/m4a1_prop.glb?v={}", js_sys::Date::now() as u64);
+        if let Some(bytes) = fetch_bytes(&url).await {
+            if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
+                w = Some(x);
+            }
+        }
+        w
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let weapon_cpu = {
+        const EMB_W: &[u8] = include_bytes!("../props/m4a1_prop.glb");
+        gltf_level::parse_character_glb(EMB_W).ok()
+    };
     let gpu = Gpu::new(
         canvas,
         &boot.arena.vertices,
@@ -844,6 +868,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         gi.gltf,
         character_cpu,
         None,
+        weapon_cpu,
     )
     .await?;
     let game = GameState::new(
