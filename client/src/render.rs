@@ -239,16 +239,49 @@ struct MatU { tint: vec4<f32>, }
 @group(1) @binding(2) var<uniform> mu: MatU;
 
 struct Vin { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) norm: vec3<f32>, }
+struct SkinnedVin {
+  @location(0) pos: vec3<f32>,
+  @location(1) uv: vec2<f32>,
+  @location(2) norm: vec3<f32>,
+  @location(3) joints: vec4<u32>,
+  @location(4) weights: vec4<f32>,
+}
 struct Vout {
   @builtin(position) clip: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) world_pos: vec3<f32>,
   @location(2) world_n: vec3<f32>,
 };
+@group(2) @binding(0) var<storage, read> bone_matrices: array<mat4x4<f32>, 64u>;
 @vertex
 fn vs_char(v: Vin) -> Vout {
   let world_pos = (cu.model * vec4<f32>(v.pos, 1.0)).xyz;
   let raw_n = (cu.model * vec4<f32>(v.norm, 0.0)).xyz;
+  let nl2 = dot(raw_n, raw_n);
+  let world_n = select(normalize(raw_n), vec3<f32>(0.0, 1.0, 0.0), nl2 < 1e-8);
+  var o: Vout;
+  o.world_pos = world_pos;
+  o.clip = cu.view_proj * vec4<f32>(world_pos, 1.0);
+  o.uv = v.uv;
+  o.world_n = world_n;
+  return o;
+}
+@vertex
+fn vs_char_skinned(v: SkinnedVin) -> Vout {
+  let p = vec4<f32>(v.pos, 1.0);
+  let skinned_p =
+    bone_matrices[v.joints.x] * p * v.weights.x +
+    bone_matrices[v.joints.y] * p * v.weights.y +
+    bone_matrices[v.joints.z] * p * v.weights.z +
+    bone_matrices[v.joints.w] * p * v.weights.w;
+  let n = vec4<f32>(v.norm, 0.0);
+  let skinned_n =
+    bone_matrices[v.joints.x] * n * v.weights.x +
+    bone_matrices[v.joints.y] * n * v.weights.y +
+    bone_matrices[v.joints.z] * n * v.weights.z +
+    bone_matrices[v.joints.w] * n * v.weights.w;
+  let world_pos = (cu.model * vec4<f32>(skinned_p.xyz, 1.0)).xyz;
+  let raw_n = (cu.model * vec4<f32>(skinned_n.xyz, 0.0)).xyz;
   let nl2 = dot(raw_n, raw_n);
   let world_n = select(normalize(raw_n), vec3<f32>(0.0, 1.0, 0.0), nl2 < 1e-8);
   var o: Vout;
@@ -830,10 +863,25 @@ struct CharUniforms {
     _p4: [f32; 4],
 }
 
+enum CharacterGeometry {
+    Rigid {
+        pipeline: wgpu::RenderPipeline,
+        vb: wgpu::Buffer,
+        ib: wgpu::Buffer,
+    },
+    Skinned {
+        pipeline: wgpu::RenderPipeline,
+        vb: wgpu::Buffer,
+        ib: wgpu::Buffer,
+        _bone_buffer: wgpu::Buffer,
+        bone_bind_group: wgpu::BindGroup,
+    },
+}
+
 struct CharacterDraw {
-    pipeline: wgpu::RenderPipeline,
-    vb: wgpu::Buffer,
-    ib: wgpu::Buffer,
+    geometry: CharacterGeometry,
+    /// For skinned glTF: per-file mesh node world matrix (composed with instance model each draw).
+    mesh_node_world: Mat4,
     batches: Vec<WorldBatchGpu>,
     char_uniform: wgpu::Buffer,
     char_globals_bg: wgpu::BindGroup,
@@ -843,6 +891,12 @@ struct CharacterDraw {
     _textures: Vec<wgpu::Texture>,
     #[allow(dead_code)]
     _tint_buffers: Vec<wgpu::Buffer>,
+}
+
+impl CharacterDraw {
+    fn is_skinned(&self) -> bool {
+        matches!(self.geometry, CharacterGeometry::Skinned { .. })
+    }
 }
 
 pub struct WeaponHudParams {
@@ -977,8 +1031,8 @@ impl Gpu {
         flat_vertices: &[Vertex],
         flat_indices: &[u32],
         gltf_level: Option<crate::gltf_level::GltfLevelCpu>,
-        character_level: Option<crate::gltf_level::CharacterMeshCpu>,
-        character_rival_level: Option<crate::gltf_level::CharacterMeshCpu>,
+        character_level: Option<crate::gltf_level::CharacterGltfCpu>,
+        character_rival_level: Option<crate::gltf_level::CharacterGltfCpu>,
     ) -> Result<Self, wasm_bindgen::JsValue> {
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
@@ -1498,29 +1552,50 @@ impl Gpu {
         });
 
         let try_raster_char =
-            |cpu: crate::gltf_level::CharacterMeshCpu, label: &str| -> Option<CharacterDraw> {
-                if cpu.vertices.is_empty() || cpu.indices.is_empty() || cpu.batches.is_empty() {
-                    #[cfg(target_arch = "wasm32")]
-                    warn_str(&format!("oyabaun: {label} has no drawable geometry"));
-                    return None;
-                }
-                match Self::raster_character_gltf(&device, &queue, format, cpu) {
-                    Ok(cd) => Some(cd),
-                    Err(e) => {
-                        #[cfg(target_arch = "wasm32")]
-                        warn_str(&format!(
-                            "oyabaun: {label} GPU init failed ({e:?}) — rebuild client/characters/*.glb"
-                        ));
-                        None
+            |cpu: crate::gltf_level::CharacterGltfCpu, label: &str| -> Option<CharacterDraw> {
+                match cpu {
+                    crate::gltf_level::CharacterGltfCpu::Rigid(c) => {
+                        if c.vertices.is_empty() || c.indices.is_empty() || c.batches.is_empty() {
+                            #[cfg(target_arch = "wasm32")]
+                            warn_str(&format!("oyabaun: {label} has no drawable geometry"));
+                            return None;
+                        }
+                        match Self::raster_character_gltf(&device, &queue, format, c) {
+                            Ok(cd) => Some(cd),
+                            Err(e) => {
+                                #[cfg(target_arch = "wasm32")]
+                                warn_str(&format!(
+                                    "oyabaun: {label} GPU init failed ({e:?}) — rebuild client/characters/*.glb"
+                                ));
+                                None
+                            }
+                        }
+                    }
+                    crate::gltf_level::CharacterGltfCpu::Skinned(c) => {
+                        if c.vertices.is_empty() || c.indices.is_empty() || c.batches.is_empty() {
+                            #[cfg(target_arch = "wasm32")]
+                            warn_str(&format!("oyabaun: {label} (skinned) has no drawable geometry"));
+                            return None;
+                        }
+                        match Self::raster_skinned_character_gltf(&device, &queue, format, c) {
+                            Ok(cd) => Some(cd),
+                            Err(e) => {
+                                #[cfg(target_arch = "wasm32")]
+                                warn_str(&format!(
+                                    "oyabaun: {label} skinned GPU init failed ({e:?}) — check client/characters/*.glb"
+                                ));
+                                None
+                            }
+                        }
                     }
                 }
             };
 
         #[cfg(target_arch = "wasm32")]
         if character_level.is_none() {
-            warn_str("oyabaun: no oyabaun_player.glb parsed — see docs/CHARACTER_PIPELINE_HANDOFF.md; wasm-pack build after fixing GLB");
+            warn_str("oyabaun: no yakuza_shooter.glb / character parsed — wasm-pack build after adding client/characters/*.glb");
         }
-        let character = character_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_player.glb"));
+        let character = character_level.and_then(|cpu| try_raster_char(cpu, "yakuza_shooter.glb"));
 
         let character_rival =
             character_rival_level.and_then(|cpu| try_raster_char(cpu, "oyabaun_rival.glb"));
@@ -1738,7 +1813,7 @@ impl Gpu {
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("char-tex"),
+            label: Some("char-tex-rigid"),
             layout: Some(&char_pl),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -1909,9 +1984,341 @@ impl Gpu {
         }
 
         Ok(CharacterDraw {
-            pipeline,
-            vb,
-            ib,
+            geometry: CharacterGeometry::Rigid { pipeline, vb, ib },
+            mesh_node_world: Mat4::IDENTITY,
+            batches,
+            char_uniform,
+            char_globals_bg,
+            char_uniform_stride,
+            _textures: textures,
+            _tint_buffers: tint_buffers,
+        })
+    }
+
+    fn raster_skinned_character_gltf(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        cpu: crate::gltf_level::SkinnedCharacterMeshCpu,
+    ) -> Result<CharacterDraw, wasm_bindgen::JsValue> {
+        use crate::gltf_level::{SkinnedCharacterVertex, CHARACTER_MAX_JOINTS};
+
+        let char_struct_size = std::mem::size_of::<CharUniforms>();
+        let align = device.limits().min_uniform_buffer_offset_alignment as usize;
+        let char_uniform_stride =
+            ((char_struct_size + align - 1) / align * align) as u32;
+        debug_assert!(char_struct_size as u32 <= char_uniform_stride);
+
+        let char_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("char-globals-skinned"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: std::num::NonZeroU64::new(char_struct_size as u64),
+                },
+                count: None,
+            }],
+        });
+
+        let char_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("char-u-skinned"),
+            size: u64::from(char_uniform_stride) * MAX_CHARACTER_INSTANCES as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let char_globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("char-globals-bg-skinned"),
+            layout: &char_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &char_uniform,
+                    offset: 0,
+                    size: std::num::NonZeroU64::new(char_struct_size as u64),
+                }),
+            }],
+        });
+
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("char-nearest-skinned"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("char-mat-skinned"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: std::num::NonZeroU64::new(16),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bone_sz = (CHARACTER_MAX_JOINTS * std::mem::size_of::<Mat4>()) as u64;
+        let bone_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("char-bones"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: std::num::NonZeroU64::new(bone_sz),
+                },
+                count: None,
+            }],
+        });
+
+        let char_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-char-skinned"),
+            bind_group_layouts: &[&char_layout, &material_layout, &bone_layout],
+            push_constant_ranges: &[],
+        });
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("char-skinned"),
+            source: wgpu::ShaderSource::Wgsl(SHADER_CHAR_TEX.into()),
+        });
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("char-tex-skinned"),
+            layout: Some(&char_pl),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_char_skinned"),
+                buffers: &[SkinnedCharacterVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_char"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let bone_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("char-bones-buf"),
+            size: bone_sz,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut bone_f32 = vec![0.0_f32; CHARACTER_MAX_JOINTS * 16];
+        for (mi, mat) in cpu.rest_joint_palette.iter().enumerate() {
+            let cols = mat.to_cols_array_2d();
+            for ci in 0..4 {
+                for ri in 0..4 {
+                    bone_f32[mi * 16 + ci * 4 + ri] = cols[ci][ri];
+                }
+            }
+        }
+        queue.write_buffer(&bone_buffer, 0, bytemuck::cast_slice(&bone_f32));
+
+        let bone_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("char-bones-bg"),
+            layout: &bone_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: bone_buffer.as_entire_binding(),
+            }],
+        });
+
+        let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vb-char-skinned"),
+            contents: bytemuck::cast_slice(&cpu.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ib-char-skinned"),
+            contents: bytemuck::cast_slice(&cpu.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let mut textures: Vec<wgpu::Texture> = Vec::new();
+        let mut views: Vec<wgpu::TextureView> = Vec::new();
+        for (wi, (w, h, rgba)) in cpu.images_rgba8.iter().enumerate() {
+            let width = (*w).max(1);
+            let height = (*h).max(1);
+            if width > 4096 || height > 4096 {
+                return Err(wasm_bindgen::JsValue::from_str(&format!(
+                    "character glTF image {} exceeds 4096 (got {}×{})",
+                    wi, width, height
+                )));
+            }
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!("char-skinned-img-{wi}")),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                rgba.as_slice(),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * width),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            views.push(tex.create_view(&wgpu::TextureViewDescriptor::default()));
+            textures.push(tex);
+        }
+
+        let white_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("char-skinned-white"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &white_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255, 255, 255],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let white_view = white_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        textures.push(white_tex);
+
+        let mut batches = Vec::with_capacity(cpu.batches.len());
+        let mut tint_buffers = Vec::with_capacity(cpu.batches.len());
+        for b in &cpu.batches {
+            let view_ref: &wgpu::TextureView = if b.image_index < views.len() {
+                &views[b.image_index]
+            } else {
+                &white_view
+            };
+            let tint = MatTintUniform { tint: b.tint };
+            let tint_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("char-skinned-tint"),
+                contents: bytemuck::bytes_of(&tint),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("char-skinned-mat-bg"),
+                layout: &material_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view_ref),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&nearest_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: tint_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            tint_buffers.push(tint_buf);
+            batches.push(WorldBatchGpu {
+                first_index: b.first_index,
+                index_count: b.index_count,
+                bind_group,
+            });
+        }
+
+        let mesh_node_world = cpu.mesh_node_world;
+
+        Ok(CharacterDraw {
+            geometry: CharacterGeometry::Skinned {
+                pipeline,
+                vb,
+                ib,
+                _bone_buffer: bone_buffer,
+                bone_bind_group,
+            },
+            mesh_node_world,
             batches,
             char_uniform,
             char_globals_bg,
@@ -2687,7 +3094,9 @@ impl Gpu {
 
     /// Sprite atlas billboards use walk frames for leg motion; skip vertical bob (it looked like a South Park bounce).
     pub fn char_sprite_billboard_active(&self) -> bool {
-        self.char_sprite_bg.is_some() || self.char_sprite_bg_rival.is_some()
+        let boss_sprites = self.char_sprite_bg.is_some()
+            && !self.character.as_ref().is_some_and(CharacterDraw::is_skinned);
+        boss_sprites || self.char_sprite_bg_rival.is_some()
     }
 
     pub fn char_sprite_rows_for_skin(&self, skin: CharacterSkin) -> u32 {
@@ -2831,7 +3240,9 @@ impl Gpu {
             };
 
         let char_boss_quad_vert_start = bill_cpu.len();
-        if self.char_sprite_bg.is_some() {
+        let boss_sprite_quads = self.char_sprite_bg.is_some()
+            && !self.character.as_ref().is_some_and(CharacterDraw::is_skinned);
+        if boss_sprite_quads {
             let rows_b = self.char_sprite_atlas_rows.max(1) as f32;
             for ci in &capped {
                 let use_boss_atlas = matches!(ci.skin, CharacterSkin::Boss | CharacterSkin::Remote)
@@ -2929,7 +3340,8 @@ impl Gpu {
             let stride = cd.char_uniform_stride as usize;
             let mut raw = vec![0u8; stride * n];
             for (i, inst) in list.iter().enumerate() {
-                let m = inst.model.to_cols_array_2d();
+                let inst_model = inst.model * cd.mesh_node_world;
+                let m = inst_model.to_cols_array_2d();
                 let char_x = m[3][0];
                 let char_z = m[3][2];
                 let u = CharUniforms {
@@ -3011,19 +3423,45 @@ impl Gpu {
         };
 
         let draw_boss_batch = |pass: &mut wgpu::RenderPass<'_>| {
-            if self.char_sprite_bg.is_none() {
+            let draw_boss_3d = self.char_sprite_bg.is_none()
+                || self.character.as_ref().is_some_and(CharacterDraw::is_skinned);
+            if draw_boss_3d {
                 if let Some(ref cd) = self.character {
                     if !boss_like.is_empty() {
-                        pass.set_pipeline(&cd.pipeline);
-                        pass.set_vertex_buffer(0, cd.vb.slice(..));
-                        pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
                         let stride = cd.char_uniform_stride;
-                        for i in 0..boss_like.len() {
-                            pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
-                            for b in &cd.batches {
-                                pass.set_bind_group(1, &b.bind_group, &[]);
-                                let end = b.first_index.saturating_add(b.index_count);
-                                pass.draw_indexed(b.first_index..end, 0, 0..1);
+                        match &cd.geometry {
+                            CharacterGeometry::Rigid { pipeline, vb, ib } => {
+                                pass.set_pipeline(pipeline);
+                                pass.set_vertex_buffer(0, vb.slice(..));
+                                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                                for i in 0..boss_like.len() {
+                                    pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                                    for b in &cd.batches {
+                                        pass.set_bind_group(1, &b.bind_group, &[]);
+                                        let end = b.first_index.saturating_add(b.index_count);
+                                        pass.draw_indexed(b.first_index..end, 0, 0..1);
+                                    }
+                                }
+                            }
+                            CharacterGeometry::Skinned {
+                                pipeline,
+                                vb,
+                                ib,
+                                bone_bind_group,
+                                ..
+                            } => {
+                                pass.set_pipeline(pipeline);
+                                pass.set_vertex_buffer(0, vb.slice(..));
+                                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                                pass.set_bind_group(2, bone_bind_group, &[]);
+                                for i in 0..boss_like.len() {
+                                    pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                                    for b in &cd.batches {
+                                        pass.set_bind_group(1, &b.bind_group, &[]);
+                                        let end = b.first_index.saturating_add(b.index_count);
+                                        pass.draw_indexed(b.first_index..end, 0, 0..1);
+                                    }
+                                }
                             }
                         }
                     }
@@ -3035,16 +3473,40 @@ impl Gpu {
             if self.char_sprite_bg.is_none() && self.char_sprite_bg_rival.is_none() {
                 if !rivals.is_empty() {
                     if let Some(cd) = self.character_rival.as_ref().or(self.character.as_ref()) {
-                        pass.set_pipeline(&cd.pipeline);
-                        pass.set_vertex_buffer(0, cd.vb.slice(..));
-                        pass.set_index_buffer(cd.ib.slice(..), wgpu::IndexFormat::Uint32);
                         let stride = cd.char_uniform_stride;
-                        for i in 0..rivals.len() {
-                            pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
-                            for b in &cd.batches {
-                                pass.set_bind_group(1, &b.bind_group, &[]);
-                                let end = b.first_index.saturating_add(b.index_count);
-                                pass.draw_indexed(b.first_index..end, 0, 0..1);
+                        match &cd.geometry {
+                            CharacterGeometry::Rigid { pipeline, vb, ib } => {
+                                pass.set_pipeline(pipeline);
+                                pass.set_vertex_buffer(0, vb.slice(..));
+                                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                                for i in 0..rivals.len() {
+                                    pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                                    for b in &cd.batches {
+                                        pass.set_bind_group(1, &b.bind_group, &[]);
+                                        let end = b.first_index.saturating_add(b.index_count);
+                                        pass.draw_indexed(b.first_index..end, 0, 0..1);
+                                    }
+                                }
+                            }
+                            CharacterGeometry::Skinned {
+                                pipeline,
+                                vb,
+                                ib,
+                                bone_bind_group,
+                                ..
+                            } => {
+                                pass.set_pipeline(pipeline);
+                                pass.set_vertex_buffer(0, vb.slice(..));
+                                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                                pass.set_bind_group(2, bone_bind_group, &[]);
+                                for i in 0..rivals.len() {
+                                    pass.set_bind_group(0, &cd.char_globals_bg, &[stride * i as u32]);
+                                    for b in &cd.batches {
+                                        pass.set_bind_group(1, &b.bind_group, &[]);
+                                        let end = b.first_index.saturating_add(b.index_count);
+                                        pass.draw_indexed(b.first_index..end, 0, 0..1);
+                                    }
+                                }
                             }
                         }
                     }

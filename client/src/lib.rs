@@ -888,9 +888,9 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
     let solids = boot.arena.solids.clone();
     #[cfg(target_arch = "wasm32")]
     let character_cpu = {
-        const EMB_CHAR: &[u8] = include_bytes!("../characters/oyabaun_player.glb");
+        const EMB_CHAR: &[u8] = include_bytes!("../characters/yakuza_shooter.glb");
         let mut c = gltf_level::parse_character_glb(EMB_CHAR).ok();
-        let char_url = format!("./characters/oyabaun_player.glb?v={}", js_sys::Date::now() as u64);
+        let char_url = format!("./characters/yakuza_shooter.glb?v={}", js_sys::Date::now() as u64);
         if let Some(bytes) = fetch_bytes(&char_url).await {
             if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
                 c = Some(x);
@@ -900,7 +900,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
     };
     #[cfg(not(target_arch = "wasm32"))]
     let character_cpu = {
-        const EMB_CHAR: &[u8] = include_bytes!("../characters/oyabaun_player.glb");
+        const EMB_CHAR: &[u8] = include_bytes!("../characters/yakuza_shooter.glb");
         gltf_level::parse_character_glb(EMB_CHAR).ok()
     };
     #[cfg(target_arch = "wasm32")]

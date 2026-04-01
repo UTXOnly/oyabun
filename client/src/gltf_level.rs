@@ -79,6 +79,73 @@ pub struct CharacterMeshCpu {
     pub images_rgba8: Vec<(u32, u32, Vec<u8>)>,
 }
 
+/// Max joints for skinned character shader storage (`array<mat4x4<f32>, N>` must match).
+pub const CHARACTER_MAX_JOINTS: usize = 64;
+
+/// Skinned character vertex (linear blend skinning in `render.rs`).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SkinnedCharacterVertex {
+    pub pos: [f32; 3],
+    pub uv: [f32; 2],
+    pub nrm: [f32; 3],
+    pub joints: [u32; 4],
+    pub weights: [f32; 4],
+}
+
+impl SkinnedCharacterVertex {
+    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SkinnedCharacterVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 12,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: 20,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 32,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Uint32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 48,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        }
+    }
+}
+
+/// Mixamo-style skinned body: joint palette = `global_joint * inverse_bind` per joint (glTF convention).
+pub struct SkinnedCharacterMeshCpu {
+    pub vertices: Vec<SkinnedCharacterVertex>,
+    pub indices: Vec<u32>,
+    pub batches: Vec<GltfBatchCpu>,
+    pub images_rgba8: Vec<(u32, u32, Vec<u8>)>,
+    /// `globalTransform(joint) * inverseBindMatrix` at rest pose, length `CHARACTER_MAX_JOINTS` (padded).
+    pub rest_joint_palette: Vec<Mat4>,
+    /// Node world matrix for the mesh+skin node (multiplied into per-instance model in the renderer).
+    pub mesh_node_world: Mat4,
+}
+
+pub enum CharacterGltfCpu {
+    Rigid(CharacterMeshCpu),
+    Skinned(SkinnedCharacterMeshCpu),
+}
+
 fn vertex_normals_local(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
     let mut acc = vec![Vec3::ZERO; positions.len()];
     for tri in indices.chunks_exact(3) {
@@ -334,11 +401,279 @@ pub fn append_glb_transform(
 }
 
 /// Minimal glTF (single mesh or small prop) for **playable / NPC 3D bodies**.
-/// Vertices are baked in file space; the renderer applies per-entity `model` from relay pose.
-pub fn parse_character_glb(bytes: &[u8]) -> Result<CharacterMeshCpu, String> {
+/// Rigid meshes bake node transforms into vertices; skinned meshes (Mixamo, etc.) return [`CharacterGltfCpu::Skinned`].
+pub fn parse_character_glb(bytes: &[u8]) -> Result<CharacterGltfCpu, String> {
     let (document, buffers, images) =
         gltf::import_slice(bytes).map_err(|e| format!("character gltf import: {e}"))?;
 
+    if glb_has_skinned_primitive(&document, &buffers) {
+        parse_skinned_character_glb(&document, &buffers, images)
+    } else {
+        parse_rigid_character_glb(&document, &buffers, images).map(CharacterGltfCpu::Rigid)
+    }
+}
+
+fn glb_has_skinned_primitive(document: &gltf::Document, buffers: &[gltf::buffer::Data]) -> bool {
+    for mesh in document.meshes() {
+        for prim in mesh.primitives() {
+            let r = prim.reader(|b| Some(&buffers[b.index()]));
+            if r.read_joints(0).is_some() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn mat4_from_gltf_accessor(cols: [[f32; 4]; 4]) -> Mat4 {
+    Mat4::from_cols_array_2d(&cols)
+}
+
+fn dfs_node_world(
+    node: gltf::Node<'_>,
+    parent_world: Mat4,
+    node_world: &mut [Mat4],
+) {
+    let local = mat_from_transform(node.transform());
+    let w = parent_world * local;
+    node_world[node.index()] = w;
+    for child in node.children() {
+        dfs_node_world(child, w, node_world);
+    }
+}
+
+fn find_skinned_mesh_node<'a>(
+    node: gltf::Node<'a>,
+    out: &mut Option<(gltf::Node<'a>, gltf::Skin<'a>)>,
+) {
+    if out.is_some() {
+        return;
+    }
+    if let Some(_mesh) = node.mesh() {
+        if let Some(skin) = node.skin() {
+            *out = Some((node, skin));
+            return;
+        }
+    }
+    for child in node.children() {
+        find_skinned_mesh_node(child, out);
+    }
+}
+
+fn parse_skinned_character_glb(
+    document: &gltf::Document,
+    buffers: &[gltf::buffer::Data],
+    images: Vec<gltf::image::Data>,
+) -> Result<CharacterGltfCpu, String> {
+    let scene = document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+        .ok_or_else(|| "character glTF has no scenes".to_string())?;
+
+    let n_nodes = document.nodes().len();
+    let mut node_world = vec![Mat4::IDENTITY; n_nodes];
+    for root in scene.nodes() {
+        dfs_node_world(root, Mat4::IDENTITY, &mut node_world);
+    }
+
+    let mut found = None;
+    for root in scene.nodes() {
+        find_skinned_mesh_node(root, &mut found);
+    }
+    let (mesh_node, skin) = found.ok_or_else(|| "character glTF has no skinned mesh node".to_string())?;
+
+    let mesh_node_idx = mesh_node.index();
+    let mesh_node_world = node_world[mesh_node_idx];
+
+    let skin_reader = skin.reader(|b| Some(&buffers[b.index()]));
+    let ibm: Vec<Mat4> = skin_reader
+        .read_inverse_bind_matrices()
+        .ok_or_else(|| "skinned character: missing inverse bind matrices".to_string())?
+        .map(mat4_from_gltf_accessor)
+        .collect();
+    let joint_nodes: Vec<usize> = skin.joints().map(|j| j.index()).collect();
+    if ibm.len() != joint_nodes.len() {
+        return Err(format!(
+            "skinned character: IBM count {} != joint count {}",
+            ibm.len(),
+            joint_nodes.len()
+        ));
+    }
+    if joint_nodes.len() > CHARACTER_MAX_JOINTS {
+        return Err(format!(
+            "skinned character: {} joints exceed max {}",
+            joint_nodes.len(),
+            CHARACTER_MAX_JOINTS
+        ));
+    }
+
+    let mut rest_joint_palette = vec![Mat4::IDENTITY; CHARACTER_MAX_JOINTS];
+    for (i, &jnode) in joint_nodes.iter().enumerate() {
+        let gw = node_world[jnode];
+        rest_joint_palette[i] = gw * ibm[i];
+    }
+
+    let mesh = mesh_node
+        .mesh()
+        .ok_or_else(|| "skinned mesh node has no mesh".to_string())?;
+
+    let mut vertices: Vec<SkinnedCharacterVertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut batches: Vec<GltfBatchCpu> = Vec::new();
+
+    let mut images_rgba8: Vec<(u32, u32, Vec<u8>)> = Vec::with_capacity(images.len());
+    for img in &images {
+        let rgba = image_data_to_rgba(img)?;
+        images_rgba8.push((img.width, img.height, rgba));
+    }
+
+    for prim in mesh.primitives() {
+        let mat = prim.material();
+        let pbr = mat.pbr_metallic_roughness();
+        let raw_tint: [f32; 4] = pbr.base_color_factor();
+        let emissive = mat.emissive_factor();
+        let (image_index, uv_set) = pbr
+            .base_color_texture()
+            .map(|info| (info.texture().source().index(), info.tex_coord()))
+            .unwrap_or((usize::MAX, 0u32));
+        let tint = if image_index == usize::MAX {
+            let base_lum = raw_tint[0] + raw_tint[1] + raw_tint[2];
+            let emit_lum = emissive[0] + emissive[1] + emissive[2];
+            if base_lum < 0.01 && emit_lum > 0.01 {
+                [emissive[0], emissive[1], emissive[2], raw_tint[3]]
+            } else {
+                let r = (raw_tint[0] + emissive[0]).min(1.0);
+                let g = (raw_tint[1] + emissive[1]).min(1.0);
+                let b = (raw_tint[2] + emissive[2]).min(1.0);
+                [r, g, b, raw_tint[3]]
+            }
+        } else {
+            let r = (raw_tint[0] + emissive[0]).min(1.0);
+            let g = (raw_tint[1] + emissive[1]).min(1.0);
+            let b = (raw_tint[2] + emissive[2]).min(1.0);
+            [r, g, b, raw_tint[3]]
+        };
+
+        let r_pos = prim.reader(|b| Some(&buffers[b.index()]));
+        let Some(iter_pos) = r_pos.read_positions() else {
+            continue;
+        };
+        let positions: Vec<Vec3> = iter_pos.map(Vec3::from_array).collect();
+        if positions.is_empty() {
+            continue;
+        }
+
+        let r_joints = prim.reader(|b| Some(&buffers[b.index()]));
+        let joints_flat: Vec<[u32; 4]> = r_joints
+            .read_joints(0)
+            .ok_or_else(|| "skinned character primitive missing JOINTS_0".to_string())?
+            .into_u16()
+            .map(|[a, b, c, d]| [a as u32, b as u32, c as u32, d as u32])
+            .collect();
+        if joints_flat.len() != positions.len() {
+            return Err("skinned character: JOINTS_0 length mismatch".into());
+        }
+
+        let r_w = prim.reader(|b| Some(&buffers[b.index()]));
+        let weights_flat: Vec<[f32; 4]> = r_w
+            .read_weights(0)
+            .ok_or_else(|| "skinned character primitive missing WEIGHTS_0".to_string())?
+            .into_f32()
+            .collect();
+        if weights_flat.len() != positions.len() {
+            return Err("skinned character: WEIGHTS_0 length mismatch".into());
+        }
+
+        let r_uv = prim.reader(|b| Some(&buffers[b.index()]));
+        let uv0: Vec<[f32; 2]> = match r_uv
+            .read_tex_coords(uv_set)
+            .map(|tc| tc.into_f32().collect::<Vec<[f32; 2]>>())
+        {
+            Some(collected) if collected.len() == positions.len() => collected,
+            Some(collected) => positions
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    collected.get(i).copied().unwrap_or_else(|| {
+                        world_space_fallback_uv(mesh_node_world.transform_point3(*p))
+                    })
+                })
+                .collect(),
+            None if image_index != usize::MAX => positions
+                .iter()
+                .map(|p| world_space_fallback_uv(mesh_node_world.transform_point3(*p)))
+                .collect(),
+            None => vec![[0.0, 0.0]; positions.len()],
+        };
+
+        let r_idx = prim.reader(|b| Some(&buffers[b.index()]));
+        let prim_indices: Vec<u32> = if let Some(idr) = r_idx.read_indices() {
+            idr.into_u32().collect()
+        } else {
+            (0..positions.len() as u32).collect()
+        };
+
+        let r_nrm = prim.reader(|b| Some(&buffers[b.index()]));
+        let normals_local: Vec<Vec3> = match r_nrm.read_normals() {
+            Some(iter) => {
+                let mut v: Vec<Vec3> = iter.map(Vec3::from_array).collect();
+                if v.len() != positions.len() {
+                    v = vertex_normals_local(&positions, &prim_indices);
+                }
+                v
+            }
+            None => vertex_normals_local(&positions, &prim_indices),
+        };
+
+        let base = vertices.len() as u32;
+        for i in 0..positions.len() {
+            let p = positions[i];
+            let uv = uv0.get(i).copied().unwrap_or([0.0, 0.0]);
+            let nl = normals_local.get(i).copied().unwrap_or(Vec3::Z);
+            let j = joints_flat[i];
+            let wv = weights_flat[i];
+            vertices.push(SkinnedCharacterVertex {
+                pos: p.to_array(),
+                uv,
+                nrm: nl.to_array(),
+                joints: j,
+                weights: wv,
+            });
+        }
+
+        let first_index = indices.len() as u32;
+        for idx in &prim_indices {
+            indices.push(base + idx);
+        }
+        let index_count = prim_indices.len() as u32;
+
+        batches.push(GltfBatchCpu {
+            first_index,
+            index_count,
+            image_index,
+            tint,
+        });
+    }
+
+    if vertices.is_empty() {
+        return Err("skinned character glTF has no drawable geometry".into());
+    }
+
+    Ok(CharacterGltfCpu::Skinned(SkinnedCharacterMeshCpu {
+        vertices,
+        indices,
+        batches,
+        images_rgba8,
+        rest_joint_palette,
+        mesh_node_world,
+    }))
+}
+
+fn parse_rigid_character_glb(
+    document: &gltf::Document,
+    buffers: &[gltf::buffer::Data],
+    images: Vec<gltf::image::Data>,
+) -> Result<CharacterMeshCpu, String> {
     let scene = document
         .default_scene()
         .or_else(|| document.scenes().next())
@@ -358,7 +693,7 @@ pub fn parse_character_glb(bytes: &[u8]) -> Result<CharacterMeshCpu, String> {
         visit_character_node(
             root,
             Mat4::IDENTITY,
-            &buffers,
+            buffers,
             &mut vertices,
             &mut indices,
             &mut batches,
