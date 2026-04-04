@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-04-01 — M4A1: FPS HUD sprite from m4a13d OBJ; loadout + muzzle tuned
+
+- **Assets**: `tools/blender_m4a1_export_assets.py` + **`oyabaunctl export-m4a1-assets`** decimate `m4a13d/base.obj` → **`client/fpsweapons/m4a1.png`** (512²) and **`client/props/m4a1_prop.glb`** (low-poly prop).
+- **Client**: `index.html` uploads **m4a1.png** to **all four** weapon slots; **`loadout.rs`** names/ammo are M4A1 variants (30-round); **`render.rs`** muzzle flash UV uses one rifle sprite; **`npc.rs`** damage table adjusted for rifle slots; HUD shell eject offsets updated in **`lib.rs`**.
+- **Third person**: Skinned characters still use the **rifle baked into** `yakuza_shooter.glb`; swap to this M4 mesh by parenting `m4a1_prop.glb` in Blender (see `client/fpsweapons/EXPORT.txt`).
+
+## 2026-04-01 — Arcade 2.5D: recessed shop pockets; drop façade neon bars
+
+- **`client/src/arcade_level.rs`**: Each shop is a **shallow recess** (dark jambs + floor/ceiling slab) with the **shop PNG on the back wall** (~26 cm inset) so façades read as **3D openings** instead of one flat plane.
+- **Removed** full-width **horizontal pink/blue neon quads** that sat **on top of** shop textures (they dominated as flat cyan/magenta/lime panels). **Gap accents** are now **dim pipe-colored pilasters** instead of bright neon strips.
+- **Vertical kanji signs** use a slightly lower emissive tint so they don’t blow out next to pixel art.
+
+## 2026-03-31 — Tokyo alley: pixel storefront panels on recess geometry (shop art pipeline)
+
+- **Issue**: Phase 1 `ShopFront_*_recess` volumes were in the `.blend`, but **`client/level_textures/tokyo_shops/shop_*.png` were missing** from the tree, so walls read as anonymous boxes instead of recognizable shops.
+- **Placeholders**: `tools/gen_tokyo_shop_placeholder_pngs.py` writes eight **320×384** chunky pixel-art-style PNGs (ramen, pachinko, konbini, shuttered, izakaya, arcade, snackbar, tattoo). **`oyabaunctl gen-tokyo-shop-placeholders`** wraps it. Replace with **PixelLab map-object** exports when you want final art (`EXPORT.txt`).
+- **Shipped**: Ran **`apply-tokyo-shop-textures`** (28 `ShopFront_*_ShopTex` panels), **`export-world --force-all`**, refreshed **`tokyo_alley.glb`** / **`tokyo_street.json`**, **`wasm-pack build`**. Geometry stays the existing redesign (recesses, awnings, blades); **readability** now comes from **side-view façade textures** on the back wall of each recess (nearest sampling in Blender → game).
+
+## 2026-03-31 — Characters: skinned glTF only (NPC sprite billboards removed)
+
+- **Client**: Boss, rival, and remote players use **`yakuza_shooter.glb`** only. Removed embedded **`boss_v3_atlas` / `rival_v3_atlas`** and all **NPC-facing sprite quads** from the billboard pass. **Murals** and **blood splats** still use `SHADER_BILL`.
+- **Boot**: `character_rival_level` is **`None`**; rival instances share the primary `CharacterDraw`. Hit flash on 3D uses **`char_params.w`** (`100+h`) in `fs_char`.
+
 ## 2026-03-29 — Arcade parked vehicle: merge real glTF mesh (drop R32 PNG quads)
 
 - **Different method**: Pixel art on quads cannot read as a solid car; the arcade slot now **`include_bytes!` merges** `client/props/arcade_parked_car_blockout.glb` after procedural geometry via **`gltf_level::append_glb_transform`** (rebases image indices, applies `Mat4` placement).

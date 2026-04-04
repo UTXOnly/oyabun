@@ -237,13 +237,16 @@ impl GameState {
         Vec3::new(sy * cp, sp, -cy * cp).normalize()
     }
 
-    pub fn view_proj(&self, aspect: f32) -> Mat4 {
+    pub fn view_matrix(&self) -> Mat4 {
         let forward = self.view_forward();
         let eye = self.eye_pos();
-        let view = Mat4::look_at_rh(eye, eye + forward, Vec3::Y);
+        Mat4::look_at_rh(eye, eye + forward, Vec3::Y)
+    }
+
+    pub fn view_proj(&self, aspect: f32) -> Mat4 {
         let far = 220.0_f32;
         let proj = Mat4::perspective_rh(70_f32.to_radians(), aspect, 0.08, far);
-        proj * view
+        proj * self.view_matrix()
     }
 }
 

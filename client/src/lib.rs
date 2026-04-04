@@ -20,7 +20,7 @@ use input::InputState;
 use loadout::{Loadout, WEAPONS};
 use mesh::{arena_from_level_json, build_arena, mural_z_plane, vertex_bounds, LevelBoot};
 use net::NetController;
-use render::WeaponHudParams;
+use render::{weapon_fps_world_model, WeaponHudParams};
 pub use render::{BloodSplat, CharacterInstance, CharacterSkin, Gpu, HudShell, Vertex};
 
 use serde_json::json;
@@ -65,19 +65,15 @@ fn push_hud_shell(shells: &mut Vec<HudShell>, s: HudShell) {
 
 /// Brass eject in HUD weapon space (matches `vs_hud` before clip).
 fn spawn_hud_shells_for_weapon(wi: usize, shells: &mut Vec<HudShell>) {
+    // M4A1-family brass (same sprite for all slots; slight variation by loadout).
     match wi {
-        0 => push_hud_shell(
-            shells,
-            HudShell::new(0.38, -0.64, 0.46, 0.52, 15.0),
-        ),
-        1 => {
-            push_hud_shell(shells, HudShell::new(0.36, -0.58, 0.40, 0.50, 11.0));
-            push_hud_shell(shells, HudShell::new(0.34, -0.62, 0.36, 0.46, -9.0));
+        0 => push_hud_shell(shells, HudShell::new(0.40, -0.62, 0.44, 0.48, 14.0)),
+        1 => push_hud_shell(shells, HudShell::new(0.38, -0.60, 0.42, 0.50, 12.0)),
+        2 => {
+            push_hud_shell(shells, HudShell::new(0.42, -0.64, 0.46, 0.46, 16.0));
+            push_hud_shell(shells, HudShell::new(0.36, -0.66, 0.40, 0.44, -11.0));
         }
-        2 => push_hud_shell(
-            shells,
-            HudShell::new(0.42, -0.66, 0.52, 0.42, 24.0),
-        ),
+        3 => push_hud_shell(shells, HudShell::new(0.39, -0.63, 0.41, 0.47, 13.0)),
         _ => {}
     }
 }
@@ -795,6 +791,11 @@ impl OyabaunApp {
             // Offline: no demo characters or self-body in first person
             // (those were billboard sprites; 3D models clip into the camera)
         }
+        let fps_weapon_model = if self.gpu.weapon_prop_loaded() {
+            Some(weapon_fps_world_model(&self.game))
+        } else {
+            None
+        };
         let weapon_hud = WeaponHudParams {
             weapon_id: self.loadout.current_idx() as u32,
             bob: self.last_ms as f32 * 0.0028,
@@ -802,6 +803,7 @@ impl OyabaunApp {
             recoil: self.loadout.recoil,
             reload: self.loadout.reload_anim,
             anim_t: self.game_time,
+            fps_weapon_model,
         };
         self.gpu.draw_world(
             vp,
@@ -841,6 +843,23 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         const EMB_CHAR: &[u8] = include_bytes!("../characters/yakuza_shooter.glb");
         gltf_level::parse_character_glb(EMB_CHAR).ok()
     };
+    #[cfg(target_arch = "wasm32")]
+    let weapon_cpu = {
+        const EMB_W: &[u8] = include_bytes!("../props/m4a1_prop.glb");
+        let mut w = gltf_level::parse_character_glb(EMB_W).ok();
+        let url = format!("./props/m4a1_prop.glb?v={}", js_sys::Date::now() as u64);
+        if let Some(bytes) = fetch_bytes(&url).await {
+            if let Ok(x) = gltf_level::parse_character_glb(&bytes) {
+                w = Some(x);
+            }
+        }
+        w
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let weapon_cpu = {
+        const EMB_W: &[u8] = include_bytes!("../props/m4a1_prop.glb");
+        gltf_level::parse_character_glb(EMB_W).ok()
+    };
     let gpu = Gpu::new(
         canvas,
         &boot.arena.vertices,
@@ -848,6 +867,7 @@ pub async fn create_oyabaun_app(canvas: HtmlCanvasElement) -> Result<OyabaunApp,
         gi.gltf,
         character_cpu,
         None,
+        weapon_cpu,
     )
     .await?;
     let game = GameState::new(

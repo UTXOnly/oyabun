@@ -167,6 +167,8 @@ pub struct SkinnedCharacterMeshCpu {
     pub mesh_node_world: Mat4,
     pub inverse_bind: Vec<Mat4>,
     pub joint_node_indices: Vec<usize>,
+    /// Joint palette index for rigid weapon attach (`node_world * offset`, no inverse bind). E.g. Mixamo `RightHand`.
+    pub weapon_attach_joint: Option<u32>,
     pub node_parent: Vec<Option<usize>>,
     pub node_local_rest: Vec<Mat4>,
     /// Scene graph DFS order (parent before children) for propagating animated locals.
@@ -364,16 +366,18 @@ fn sample_quat_channel(
     }
 }
 
-/// Fills `out_palette` with joint matrices for GPU (column-major f32 × 64 joints padded).
+/// Fills `node_world_out` with animated scene node globals and `out_palette` for skinning.
+/// `node_world_out` must have length ≥ node count; used for weapon attach (joint node transform, no inverse bind).
 pub fn compute_skinned_joint_palette(
     skin: &SkinnedCharacterMeshCpu,
     clip_index: usize,
     time: f32,
     locals_scratch: &mut [Mat4],
+    node_world_out: &mut [Mat4],
     out_palette: &mut [Mat4; CHARACTER_MAX_JOINTS],
 ) {
     let n = skin.node_parent.len();
-    if locals_scratch.len() < n || skin.node_local_rest.len() < n {
+    if locals_scratch.len() < n || skin.node_local_rest.len() < n || node_world_out.len() < n {
         return;
     }
 
@@ -432,17 +436,16 @@ pub fn compute_skinned_joint_palette(
         locals_scratch[ni] = Mat4::from_scale_rotation_translation(sf, rf, tf);
     }
 
-    let mut node_world = vec![Mat4::IDENTITY; n];
     for &ni in &skin.node_depth_order {
         if ni >= n {
             continue;
         }
         let w = if let Some(pi) = skin.node_parent[ni] {
-            node_world[pi] * locals_scratch[ni]
+            node_world_out[pi] * locals_scratch[ni]
         } else {
             locals_scratch[ni]
         };
-        node_world[ni] = w;
+        node_world_out[ni] = w;
     }
 
     for i in 0..CHARACTER_MAX_JOINTS {
@@ -452,7 +455,7 @@ pub fn compute_skinned_joint_palette(
         if ji >= CHARACTER_MAX_JOINTS || jnode >= n {
             break;
         }
-        out_palette[ji] = node_world[jnode] * skin.inverse_bind[ji];
+        out_palette[ji] = node_world_out[jnode] * skin.inverse_bind[ji];
     }
 }
 
@@ -857,6 +860,33 @@ fn parse_skinned_character_glb(
         ));
     }
 
+    // Mixamo: `RightHandIndex*` sorts before `RightHand` in many skins — must not use substring "righthand".
+    let mut weapon_attach_joint: Option<u32> = None;
+    for (ji, &jnode) in joint_node_indices.iter().enumerate() {
+        let Some(node) = document.nodes().nth(jnode) else {
+            continue;
+        };
+        let name = node.name().unwrap_or("");
+        if name.ends_with("RightHand") && !name.contains("RightHandIndex") {
+            weapon_attach_joint = Some(ji as u32);
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                &format!("[gltf] weapon_attach_joint found: ji={} jnode={} name={}", ji, jnode, name),
+            ));
+            break;
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    if weapon_attach_joint.is_none() {
+        let joint_names: Vec<String> = joint_node_indices.iter().enumerate().map(|(ji, &jn)| {
+            let n = document.nodes().nth(jn).and_then(|nd| nd.name().map(|s| s.to_string())).unwrap_or_default();
+            format!("{}:{}", ji, n)
+        }).collect();
+        web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(
+            &format!("[gltf] weapon_attach_joint NOT FOUND. joints=[{}]", joint_names.join(", ")),
+        ));
+    }
+
     let mut rest_joint_palette = vec![Mat4::IDENTITY; CHARACTER_MAX_JOINTS];
     for (i, &jnode) in joint_node_indices.iter().enumerate() {
         let gw = node_world[jnode];
@@ -1025,6 +1055,7 @@ fn parse_skinned_character_glb(
         mesh_node_world: Mat4::IDENTITY,
         inverse_bind: ibm,
         joint_node_indices,
+        weapon_attach_joint,
         node_parent,
         node_local_rest,
         node_depth_order,

@@ -75,6 +75,8 @@ const SHOP_GAP: f32 = 0.35;
 const SHOP_STEP: f32 = SHOP_W + SHOP_GAP;
 const SHOPS_PER_SIDE: usize = 6; // 6 shops each side = longer alley
 const Z_START: f32 = 4.0;
+/// Façade inset into building (meters); shop PNG sits on back wall of pocket — reads as real doorway.
+const FACADE_RECESS: f32 = 0.26;
 
 // ---------------------------------------------------------------------------
 // Image indices
@@ -97,7 +99,9 @@ const IMG_WARM_ACCENT: usize = 16;
 const IMG_SOLID_WARM: usize = 17;
 const IMG_PIPE: usize = 18;
 const IMG_WINDOW: usize = 19;
+#[allow(dead_code)]
 const IMG_NEON_PINK: usize = 20;
+#[allow(dead_code)]
 const IMG_NEON_BLUE: usize = 21;
 const IMG_WET_STREET: usize = 22;
 const IMG_TRASH: usize = 23;
@@ -276,7 +280,7 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         (IMG_SIGN_KARAOKE, 4, false, 0.54, 2.2, SHOP_H + UPPER_H * 1.8 + 0.1, -0.35),
         (IMG_SIGN_YAKINIKU, 5, true, 0.58, 1.95, SHOP_H + UPPER_H * 1.5 + 0.25, 0.45),
     ];
-    let sign_tint = [2.0_f32, 1.85, 1.65, 1.0];
+    let sign_tint = [1.45_f32, 1.35, 1.2, 1.0];
     for &(tex, shop_idx, left_side, span_z, sign_h, sign_y, z_off) in &signs {
         add_vertical_neon_pair(&mut b, tex, shop_idx, left_side, span_z, sign_h, sign_y, z_off, sign_tint);
     }
@@ -469,35 +473,7 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // NEON ACCENT STRIPS (horizontal color bars on building faces)
-    // ══════════════════════════════════════════════════════════════════
-    for i in [0, 2, 4] {
-        let z0 = Z_START - SHOP_GAP - (i as f32) * SHOP_STEP;
-        let z1 = z0 - SHOP_W;
-        let ny = SHOP_H + 0.1;
-        let nh = 0.08;
-        // Left pink neon strip
-        b.quad(
-            [Vec3::new(-STREET_HW + 0.02, ny, z0 - 0.3), Vec3::new(-STREET_HW + 0.02, ny, z1 + 0.3),
-             Vec3::new(-STREET_HW + 0.02, ny + nh, z1 + 0.3), Vec3::new(-STREET_HW + 0.02, ny + nh, z0 - 0.3)],
-            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            IMG_NEON_PINK, [3.0, 2.0, 2.0, 1.0],
-        );
-    }
-    for i in [1, 3, 5] {
-        let z0 = Z_START - SHOP_GAP - (i as f32) * SHOP_STEP;
-        let z1 = z0 - SHOP_W;
-        let ny = SHOP_H + 0.1;
-        let nh = 0.08;
-        // Right blue neon strip
-        b.quad(
-            [Vec3::new(STREET_HW - 0.02, ny, z1 + 0.3), Vec3::new(STREET_HW - 0.02, ny, z0 - 0.3),
-             Vec3::new(STREET_HW - 0.02, ny + nh, z0 - 0.3), Vec3::new(STREET_HW - 0.02, ny + nh, z1 + 0.3)],
-            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            IMG_NEON_BLUE, [2.0, 2.0, 3.0, 1.0],
-        );
-    }
+    // (Removed full-width IMG_NEON_PINK/BLUE bars — they sat on shop PNGs and read as flat shapes.)
 
     // ══════════════════════════════════════════════════════════════════
     // CURB / STEP (raised sidewalk edge along buildings)
@@ -852,32 +828,27 @@ pub fn build_arcade_level() -> Result<GltfLevelCpu, String> {
         );
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // ADDITIONAL NEON ACCENTS (vertical strips in gaps between shops)
-    // ══════════════════════════════════════════════════════════════════
+    // Gap “neon” replaced with dim vertical trim (pipe) so gaps don’t compete with shop textures.
     for i in 0..(SHOPS_PER_SIDE - 1) {
         let z_gap = Z_START - SHOP_GAP - (i as f32) * SHOP_STEP - SHOP_W;
-        let ny = 0.3;
-        let nh = SHOP_H - 0.5;
-        let nw = 0.06;
-        let color = if i % 2 == 0 { IMG_NEON_PINK } else { IMG_NEON_BLUE };
-        let tint = if i % 2 == 0 { [2.5, 1.5, 2.0, 0.8] } else { [1.5, 1.5, 2.5, 0.8] };
-
-        // Left side gap neon strip
+        let ny = 0.25;
+        let nh = SHOP_H - 0.45;
+        let nw = 0.05;
         let lx = -STREET_HW + 0.02;
         b.quad(
             [Vec3::new(lx, ny, z_gap + nw), Vec3::new(lx, ny, z_gap - nw),
              Vec3::new(lx, ny + nh, z_gap - nw), Vec3::new(lx, ny + nh, z_gap + nw)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            color, tint,
+            IMG_PIPE,
+            [0.45, 0.42, 0.48, 1.0],
         );
-        // Right side gap neon strip
         let rx = STREET_HW - 0.02;
         b.quad(
             [Vec3::new(rx, ny, z_gap - nw), Vec3::new(rx, ny, z_gap + nw),
              Vec3::new(rx, ny + nh, z_gap + nw), Vec3::new(rx, ny + nh, z_gap - nw)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            color, tint,
+            IMG_PIPE,
+            [0.42, 0.4, 0.46, 1.0],
         );
     }
 
@@ -1123,37 +1094,102 @@ fn build_shop_block(
     face_positive_x: bool,
 ) {
     let (face_x, back_x) = if face_positive_x { (x1, x0) } else { (x0, x1) };
+    let street_x = face_x;
+    let inner_x = if face_positive_x {
+        street_x - FACADE_RECESS
+    } else {
+        street_x + FACADE_RECESS
+    };
+    let y_floor = 0.04_f32;
 
-    // Shop front (textured)
+    // Recess pocket (dark sides + floor + ceiling) — shop art on back wall
     if face_positive_x {
         b.quad(
-            [Vec3::new(face_x, 0.0, z0), Vec3::new(face_x, 0.0, z1),
-             Vec3::new(face_x, shop_h, z1), Vec3::new(face_x, shop_h, z0)],
+            [Vec3::new(inner_x, y_floor, z0), Vec3::new(inner_x, y_floor, z1),
+             Vec3::new(inner_x, shop_h, z1), Vec3::new(inner_x, shop_h, z0)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            shop_tex, [1.0, 1.0, 1.0, 1.0],
+            shop_tex,
+            [0.92, 0.92, 0.95, 1.0],
+        );
+        b.quad(
+            [Vec3::new(street_x, y_floor, z0), Vec3::new(inner_x, y_floor, z0),
+             Vec3::new(inner_x, y_floor, z1), Vec3::new(street_x, y_floor, z1)],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            IMG_VERY_DARK,
+            [0.75, 0.75, 0.78, 1.0],
+        );
+        b.quad(
+            [Vec3::new(inner_x, shop_h, z0), Vec3::new(inner_x, shop_h, z1),
+             Vec3::new(street_x, shop_h, z1), Vec3::new(street_x, shop_h, z0)],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            IMG_DARK_WALL,
+            [0.85, 0.85, 0.88, 1.0],
+        );
+        b.quad(
+            [Vec3::new(street_x, y_floor, z0), Vec3::new(street_x, shop_h, z0),
+             Vec3::new(inner_x, shop_h, z0), Vec3::new(inner_x, y_floor, z0)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_DARK_WALL,
+            [0.9, 0.9, 0.92, 1.0],
+        );
+        b.quad(
+            [Vec3::new(inner_x, y_floor, z1), Vec3::new(inner_x, shop_h, z1),
+             Vec3::new(street_x, shop_h, z1), Vec3::new(street_x, y_floor, z1)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_DARK_WALL,
+            [0.88, 0.88, 0.91, 1.0],
         );
     } else {
         b.quad(
-            [Vec3::new(face_x, 0.0, z1), Vec3::new(face_x, 0.0, z0),
-             Vec3::new(face_x, shop_h, z0), Vec3::new(face_x, shop_h, z1)],
+            [Vec3::new(inner_x, y_floor, z1), Vec3::new(inner_x, y_floor, z0),
+             Vec3::new(inner_x, shop_h, z0), Vec3::new(inner_x, shop_h, z1)],
             [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-            shop_tex, [1.0, 1.0, 1.0, 1.0],
+            shop_tex,
+            [0.92, 0.92, 0.95, 1.0],
+        );
+        b.quad(
+            [Vec3::new(street_x, y_floor, z1), Vec3::new(street_x, y_floor, z0),
+             Vec3::new(inner_x, y_floor, z0), Vec3::new(inner_x, y_floor, z1)],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            IMG_VERY_DARK,
+            [0.75, 0.75, 0.78, 1.0],
+        );
+        b.quad(
+            [Vec3::new(inner_x, shop_h, z1), Vec3::new(street_x, shop_h, z1),
+             Vec3::new(street_x, shop_h, z0), Vec3::new(inner_x, shop_h, z0)],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            IMG_DARK_WALL,
+            [0.85, 0.85, 0.88, 1.0],
+        );
+        b.quad(
+            [Vec3::new(street_x, y_floor, z1), Vec3::new(inner_x, y_floor, z1),
+             Vec3::new(inner_x, shop_h, z1), Vec3::new(street_x, shop_h, z1)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_DARK_WALL,
+            [0.9, 0.9, 0.92, 1.0],
+        );
+        b.quad(
+            [Vec3::new(inner_x, y_floor, z0), Vec3::new(street_x, y_floor, z0),
+             Vec3::new(street_x, shop_h, z0), Vec3::new(inner_x, shop_h, z0)],
+            [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            IMG_DARK_WALL,
+            [0.88, 0.88, 0.91, 1.0],
         );
     }
 
-    // Upper dark wall above shop
+    // Upper dark wall above shop (flush at street plane)
     if total_h > shop_h + 0.1 {
         if face_positive_x {
             b.quad(
-                [Vec3::new(face_x, shop_h, z0), Vec3::new(face_x, shop_h, z1),
-                 Vec3::new(face_x, total_h, z1), Vec3::new(face_x, total_h, z0)],
+                [Vec3::new(street_x, shop_h, z0), Vec3::new(street_x, shop_h, z1),
+                 Vec3::new(street_x, total_h, z1), Vec3::new(street_x, total_h, z0)],
                 [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 IMG_DARK_WALL, [1.0, 1.0, 1.0, 1.0],
             );
         } else {
             b.quad(
-                [Vec3::new(face_x, shop_h, z1), Vec3::new(face_x, shop_h, z0),
-                 Vec3::new(face_x, total_h, z0), Vec3::new(face_x, total_h, z1)],
+                [Vec3::new(street_x, shop_h, z1), Vec3::new(street_x, shop_h, z0),
+                 Vec3::new(street_x, total_h, z0), Vec3::new(street_x, total_h, z1)],
                 [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 IMG_DARK_WALL, [1.0, 1.0, 1.0, 1.0],
             );

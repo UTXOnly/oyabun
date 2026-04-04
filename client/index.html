@@ -271,19 +271,19 @@
       }
 
       async function loadWeaponSprites(app) {
-        const files = ["pistol.png", "shotgun.png", "smg.png", "plasma.png"];
-        for (let i = 0; i < files.length; i++) {
+        const v = Date.now();
+        for (let i = 0; i < 4; i++) {
           try {
             const img = document.createElement("img");
             img.crossOrigin = "anonymous";
-            img.src = "./fpsweapons/" + files[i] + "?v=" + Date.now();
+            img.src = "./fpsweapons/m4a1.png?v=" + v;
             await new Promise((res, rej) => {
               img.onload = res;
               img.onerror = rej;
             });
             app.uploadWeaponSprite(i, img);
           } catch (e) {
-            console.warn("fpsweapons/" + files[i], e);
+            console.warn("fpsweapons/m4a1.png slot", i, e);
           }
         }
       }
