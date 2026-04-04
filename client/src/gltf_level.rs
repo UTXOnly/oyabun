@@ -869,8 +869,22 @@ fn parse_skinned_character_glb(
         let name = node.name().unwrap_or("");
         if name.ends_with("RightHand") && !name.contains("RightHandIndex") {
             weapon_attach_joint = Some(ji as u32);
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                &format!("[gltf] weapon_attach_joint found: ji={} jnode={} name={}", ji, jnode, name),
+            ));
             break;
         }
+    }
+    #[cfg(target_arch = "wasm32")]
+    if weapon_attach_joint.is_none() {
+        let joint_names: Vec<String> = joint_node_indices.iter().enumerate().map(|(ji, &jn)| {
+            let n = document.nodes().nth(jn).and_then(|nd| nd.name().map(|s| s.to_string())).unwrap_or_default();
+            format!("{}:{}", ji, n)
+        }).collect();
+        web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(
+            &format!("[gltf] weapon_attach_joint NOT FOUND. joints=[{}]", joint_names.join(", ")),
+        ));
     }
 
     let mut rest_joint_palette = vec![Mat4::IDENTITY; CHARACTER_MAX_JOINTS];
